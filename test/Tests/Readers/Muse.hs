@@ -133,6 +133,38 @@ tests =
         "**foo *bar* baz**" =?>
         para (strong (text "foo " <> emph (text "bar") <> text " baz"))
 
+      , "Opening asterisk can't be preceded by another one" =:
+        "**foo*" =?>
+        para "**foo*"
+
+      , "Asterisk between words does not terminate emphasis" =:
+        "*foo*bar*" =?>
+        para (emph "foo*bar")
+
+      , "Two asterisks between words do not terminate emphasis" =:
+        "*foo**bar*" =?>
+        para (emph "foo**bar")
+
+      , "Three asterisks between words do not terminate emphasis" =:
+        "*foo***bar*" =?>
+        para (emph "foo***bar")
+
+      , "Two asterisks between words do not terminate strong" =:
+        "**foo**bar**" =?>
+        para (strong "foo**bar")
+
+      , "Three asterisks between words do not terminate strong" =:
+        "**foo***bar**" =?>
+        para (strong "foo***bar")
+
+      , "Three asterisks between words do not terminate strong emphasis" =:
+        "***foo***bar***" =?>
+        para (strong . emph $ "foo***bar")
+
+      , "Six asterisks between words do not terminate strong emphasis" =:
+        "***foo******bar***" =?>
+        para (strong . emph $ "foo******bar")
+
       , test emacsMuse "Underline"
         ("_Underline_" =?> para (underlineSpan "Underline"))
 
@@ -236,6 +268,9 @@ tests =
       , "Class tag" =: "<class name=\"foo\">bar</class>" =?> para (spanWith ("", ["foo"], []) "bar")
       , "Class tag without name" =: "<class>foobar</class>" =?> para (spanWith ("", [], []) "foobar")
 
+      , "RTL" =: "<<<foo bar>>>" =?> para (spanWith ("", [], [("dir", "rtl")]) "foo bar")
+      , "LTR" =: ">>>foo bar<<<" =?> para (spanWith ("", [], [("dir", "ltr")]) "foo bar")
+
       -- <em> tag should match with the last </em> tag, not verbatim one
       , "Nested \"</em>\" inside em tag" =: "<em>foo<verbatim></em></verbatim>bar</em>" =?> para (emph "foo</em>bar")
 
@@ -291,7 +326,7 @@ tests =
           para (link "https://amusewiki.org/" "" (text "foo[1"))
         , "Image inside link" =:
           "[[https://amusewiki.org/][Image [[image.png][with it's own description]] inside link description]]" =?>
-          para (link "https://amusewiki.org/" "" (text "Image " <> (image "image.png" "" (text "with it's own description")) <> text " inside link description"))
+          para (link "https://amusewiki.org/" "" (text "Image " <> image "image.png" "" (text "with it's own description") <> text " inside link description"))
         , "Link inside image description" =:
           "[[image.jpg][Image from [[https://amusewiki.org/]]]]" =?>
           para (image "image.jpg" "" (text "Image from " <> link "https://amusewiki.org/" "" (str "https://amusewiki.org/")))

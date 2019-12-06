@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.OOXML
    Copyright   : Copyright (C) 2012-2019 John MacFarlane
@@ -11,6 +12,7 @@
 Functions common to OOXML writers (Docx and Powerpoint)
 -}
 module Text.Pandoc.Writers.OOXML ( mknode
+                                 , mktnode
                                  , nodename
                                  , toLazy
                                  , renderXml
@@ -25,10 +27,13 @@ module Text.Pandoc.Writers.OOXML ( mknode
 import Prelude
 import Codec.Archive.Zip
 import Control.Monad.Reader
+import Control.Monad.Except (throwError)
+import Text.Pandoc.Error
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.Maybe (mapMaybe)
+import qualified Data.Text as T
 import Text.Pandoc.Class (PandocMonad)
 import qualified Text.Pandoc.UTF8 as UTF8
 import Text.XML.Light as XML
@@ -36,6 +41,9 @@ import Text.XML.Light as XML
 mknode :: Node t => String -> [(String,String)] -> t -> Element
 mknode s attrs =
   add_attrs (map (\(k,v) -> Attr (nodename k) v) attrs) .  node (nodename s)
+
+mktnode :: String -> [(String,String)] -> T.Text -> Element
+mktnode s attrs = mknode s attrs . T.unpack
 
 nodename :: String -> QName
 nodename s = QName{ qName = name, qURI = Nothing, qPrefix = prefix }
@@ -50,13 +58,15 @@ renderXml :: Element -> BL.ByteString
 renderXml elt = BL8.pack "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" <>
   UTF8.fromStringLazy (showElement elt)
 
-parseXml :: (PandocMonad m) => Archive -> Archive -> String -> m Element
+parseXml :: PandocMonad m => Archive -> Archive -> String -> m Element
 parseXml refArchive distArchive relpath =
   case findEntryByPath relpath refArchive `mplus`
          findEntryByPath relpath distArchive of
-            Nothing -> fail $ relpath ++ " missing in reference file"
+            Nothing -> throwError $ PandocSomeError $
+                        T.pack relpath <> " missing in reference file"
             Just e  -> case parseXMLDoc . UTF8.toStringLazy . fromEntry $ e of
-                       Nothing -> fail $ relpath ++ " corrupt in reference file"
+                       Nothing -> throwError $ PandocSomeError $
+                                   T.pack relpath <> " corrupt in reference file"
                        Just d  -> return d
 
 -- Copied from Util

@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Tests.Readers.Docx
    Copyright   : © 2017-2019 Jesse Rosenthal, John MacFarlane
@@ -46,7 +47,7 @@ instance ToString NoNormPandoc where
    where s = case d of
                   NoNormPandoc (Pandoc (Meta m) _)
                     | M.null m  -> Nothing
-                    | otherwise -> Just "" -- need this to get meta output
+                    | otherwise -> Just mempty -- need this to get meta output
 
 instance ToPandoc NoNormPandoc where
   toPandoc = unNoNorm
@@ -79,7 +80,7 @@ testForWarningsWithOptsIO opts name docxFile expected = do
   df <- B.readFile docxFile
   logs <-  runIOorExplode $ setVerbosity ERROR >> readDocx opts df >> P.getLog
   let warns = [m | DocxParserWarning m <- logs]
-  return $ test id name (unlines warns, unlines expected)
+  return $ test id name (T.unlines warns, unlines expected)
 
 testForWarningsWithOpts :: ReaderOptions -> String -> FilePath -> [String] -> TestTree
 testForWarningsWithOpts opts name docxFile expected =
@@ -256,6 +257,10 @@ tests = [ testGroup "document"
             "docx/lists.docx"
             "docx/lists.native"
           , testCompare
+            "compact lists"
+            "docx/lists-compact.docx"
+            "docx/lists-compact.native"
+          , testCompare
             "lists with level overrides"
             "docx/lists_level_override.docx"
             "docx/lists_level_override.native"
@@ -267,6 +272,10 @@ tests = [ testGroup "document"
             "lists restarting after interruption"
             "docx/lists_restarting.docx"
             "docx/lists_restarting.native"
+          , testCompare
+            "sublists reset numbering to 1"
+            "docx/lists_sublist_reset.docx"
+            "docx/lists_sublist_reset.native"
           , testCompare
             "definition lists"
             "docx/definition_list.docx"
@@ -425,6 +434,11 @@ tests = [ testGroup "document"
             "custom styles (`+styles`) enabled"
             "docx/custom-style-reference.docx"
             "docx/custom-style-with-styles.native"
+          , testCompareWithOpts
+            def{readerExtensions=extensionsFromList [Ext_styles]}
+            "custom styles (`+styles`): Compact style is removed from output"
+            "docx/compact-style-removal.docx"
+            "docx/compact-style-removal.native"
           ]
         , testGroup "metadata"
           [ testCompareWithOpts def{readerStandalone=True}

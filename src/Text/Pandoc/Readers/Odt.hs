@@ -1,5 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternGuards     #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Reader.Odt
    Copyright   : Copyright (C) 2015 Martin Linnemann
@@ -86,9 +87,8 @@ archiveToOdt archive
     where
       filePathIsOdtMedia :: FilePath -> Bool
       filePathIsOdtMedia fp =
-        let (dir, _) = splitFileName fp
-        in
-         (dir == "Pictures/")
+        let (dir, name) = splitFileName fp
+        in  (dir == "Pictures/") || (dir /= "./" && name == "content.xml")
 
 
 --

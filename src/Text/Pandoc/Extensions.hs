@@ -2,10 +2,9 @@
 {-# LANGUAGE NoImplicitPrelude          #-}
 {-# LANGUAGE DeriveDataTypeable         #-}
 {-# LANGUAGE DeriveGeneric              #-}
-#ifdef DERIVE_JSON_VIA_TH
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell            #-}
-#endif
+{-# LANGUAGE OverloadedStrings          #-}
 {- |
    Module      : Text.Pandoc.Extensions
    Copyright   : Copyright (C) 2012-2019 John MacFarlane
@@ -26,6 +25,7 @@ module Text.Pandoc.Extensions ( Extension(..)
                               , enableExtension
                               , disableExtension
                               , getDefaultExtensions
+                              , getAllExtensions
                               , pandocExtensions
                               , plainExtensions
                               , strictExtensions
@@ -36,17 +36,12 @@ where
 import Prelude
 import Data.Bits (clearBit, setBit, testBit, (.|.))
 import Data.Data (Data)
+import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Safe (readMay)
 import Text.Parsec
-
-#ifdef DERIVE_JSON_VIA_TH
 import Data.Aeson.TH (deriveJSON, defaultOptions)
-#else
-import Data.Aeson (FromJSON (..), ToJSON (..),
-                   defaultOptions, genericToEncoding)
-#endif
 
 newtype Extensions = Extensions Integer
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic)
@@ -132,6 +127,7 @@ data Extension =
     | Ext_multiline_tables    -- ^ Pandoc-style multiline tables
     | Ext_native_divs             -- ^ Use Div blocks for contents of <div> tags
     | Ext_native_spans            -- ^ Use Span inlines for contents of <span>
+    | Ext_native_numbering    -- ^ Use output format's native numbering for figures and tables
     | Ext_ntb                 -- ^ ConTeXt Natural Tables
     | Ext_old_dashes          -- ^ -- = em, - before number = en
     | Ext_pandoc_title_block  -- ^ Pandoc title block
@@ -155,6 +151,7 @@ data Extension =
     | Ext_tex_math_double_backslash  -- ^ TeX math btw \\(..\\) \\[..\\]
     | Ext_tex_math_single_backslash  -- ^ TeX math btw \(..\) \[..\]
     | Ext_yaml_metadata_block -- ^ YAML metadata block
+    | Ext_gutenberg           -- ^ Use Project Gutenberg conventions for plain
     deriving (Show, Read, Enum, Eq, Ord, Bounded, Data, Typeable, Generic)
 
 -- | Extensions to be used with pandoc-flavored markdown.
@@ -227,7 +224,7 @@ plainExtensions = extensionsFromList
   , Ext_strikeout
   ]
 
--- | Extensions to be used with github-flavored markdown.
+-- | Extensions to be used with PHP Markdown Extra.
 phpMarkdownExtraExtensions :: Extensions
 phpMarkdownExtraExtensions = extensionsFromList
   [ Ext_footnotes
@@ -309,13 +306,13 @@ strictExtensions = extensionsFromList
   ]
 
 -- | Default extensions from format-describing string.
-getDefaultExtensions :: String -> Extensions
-getDefaultExtensions "markdown_strict" = strictExtensions
+getDefaultExtensions :: T.Text -> Extensions
+getDefaultExtensions "markdown_strict"   = strictExtensions
 getDefaultExtensions "markdown_phpextra" = phpMarkdownExtraExtensions
-getDefaultExtensions "markdown_mmd" = multimarkdownExtensions
-getDefaultExtensions "markdown_github" = githubMarkdownExtensions
-getDefaultExtensions "markdown"        = pandocExtensions
-getDefaultExtensions "ipynb"           =
+getDefaultExtensions "markdown_mmd"      = multimarkdownExtensions
+getDefaultExtensions "markdown_github"   = githubMarkdownExtensions
+getDefaultExtensions "markdown"          = pandocExtensions
+getDefaultExtensions "ipynb"             =
   extensionsFromList
     [ Ext_all_symbols_escapable
     , Ext_pipe_tables
@@ -377,16 +374,148 @@ getDefaultExtensions "opml"            = pandocExtensions -- affects notes
 getDefaultExtensions _                 = extensionsFromList
                                           [Ext_auto_identifiers]
 
--- | Parse a format-specifying string into a markup format and a function that
--- takes Extensions and enables and disables extensions as defined in the format
--- spec.
-parseFormatSpec :: String
-                -> Either ParseError (String, Extensions -> Extensions)
+
+-- | Get all valid extensions for a format. This is used
+-- mainly in checking format specifications for validity.
+getAllExtensions :: T.Text -> Extensions
+getAllExtensions f = universalExtensions <> getAll f
+ where
+  autoIdExtensions           = extensionsFromList
+    [ Ext_auto_identifiers
+    , Ext_gfm_auto_identifiers
+    , Ext_ascii_identifiers
+    ]
+  universalExtensions        = extensionsFromList
+    [ Ext_east_asian_line_breaks ]
+  allMarkdownExtensions =
+    pandocExtensions <> autoIdExtensions <>
+      extensionsFromList
+       [ Ext_old_dashes
+       , Ext_angle_brackets_escapable
+       , Ext_lists_without_preceding_blankline
+       , Ext_four_space_rule
+       , Ext_spaced_reference_links
+       , Ext_hard_line_breaks
+       , Ext_ignore_line_breaks
+       , Ext_east_asian_line_breaks
+       , Ext_emoji
+       , Ext_tex_math_single_backslash
+       , Ext_tex_math_double_backslash
+       , Ext_markdown_attribute
+       , Ext_mmd_title_block
+       , Ext_abbreviations
+       , Ext_autolink_bare_uris
+       , Ext_mmd_link_attributes
+       , Ext_mmd_header_identifiers
+       , Ext_compact_definition_lists
+       , Ext_gutenberg
+       , Ext_smart
+       , Ext_literate_haskell
+       ]
+  getAll "markdown_strict"   = allMarkdownExtensions
+  getAll "markdown_phpextra" = allMarkdownExtensions
+  getAll "markdown_mmd"      = allMarkdownExtensions
+  getAll "markdown_github"   = allMarkdownExtensions
+  getAll "markdown"          = allMarkdownExtensions
+  getAll "ipynb"             = allMarkdownExtensions
+  getAll "docx"            = extensionsFromList
+    [ Ext_empty_paragraphs
+    , Ext_styles
+    ]
+  getAll "opendocument"    = extensionsFromList
+    [ Ext_empty_paragraphs
+    , Ext_native_numbering
+    ]
+  getAll "odt"             = getAll "opendocument" <> autoIdExtensions
+  getAll "muse"            = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_amuse ]
+  getAll "asciidoc"        = autoIdExtensions
+  getAll "plain"           = allMarkdownExtensions
+  getAll "gfm"             = githubMarkdownExtensions <>
+    autoIdExtensions <>
+    extensionsFromList
+    [ Ext_raw_html
+    , Ext_raw_tex            -- only supported in writer (for math)
+    , Ext_hard_line_breaks
+    , Ext_smart
+    ]
+  getAll "commonmark"      = getAll "gfm"
+  getAll "org"             = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_citations
+    , Ext_smart
+    ]
+  getAll "html"            = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_native_divs
+    , Ext_line_blocks
+    , Ext_native_spans
+    , Ext_empty_paragraphs
+    , Ext_raw_html
+    , Ext_raw_tex
+    , Ext_task_lists
+    , Ext_tex_math_dollars
+    , Ext_tex_math_single_backslash
+    , Ext_tex_math_double_backslash
+    , Ext_literate_haskell
+    , Ext_epub_html_exts
+    , Ext_smart
+    ]
+  getAll "html4"           = getAll "html"
+  getAll "html5"           = getAll "html"
+  getAll "epub"            = getAll "html"
+  getAll "epub2"           = getAll "epub"
+  getAll "epub3"           = getAll "epub"
+  getAll "latex"           = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_smart
+    , Ext_latex_macros
+    , Ext_raw_tex
+    , Ext_task_lists
+    , Ext_literate_haskell
+    ]
+  getAll "beamer"          = getAll "latex"
+  getAll "context"         = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_smart
+    , Ext_raw_tex
+    , Ext_ntb
+    ]
+  getAll "textile"         = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_old_dashes
+    , Ext_smart
+    , Ext_raw_tex
+    ]
+  getAll "opml"            = allMarkdownExtensions -- affects notes
+  getAll "twiki"           = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_smart ]
+  getAll "vimwiki"         = autoIdExtensions
+  getAll "dokuwiki"        = autoIdExtensions
+  getAll "tikiwiki"        = autoIdExtensions
+  getAll "rst"             = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_smart
+    , Ext_literate_haskell
+    ]
+  getAll "mediawiki"       = autoIdExtensions <>
+    extensionsFromList
+    [ Ext_smart ]
+  getAll _                 = mempty
+
+
+-- | Parse a format-specifying string into a markup format,
+-- a set of extensions to enable, and a set of extensions to disable.
+parseFormatSpec :: T.Text
+                -> Either ParseError (T.Text, [Extension], [Extension])
 parseFormatSpec = parse formatSpec ""
   where formatSpec = do
           name <- formatName
-          extMods <- many extMod
-          return (name, \x -> foldl (flip ($)) x extMods)
+          (extsToEnable, extsToDisable) <- foldl (flip ($)) ([],[]) <$>
+                                             many extMod
+          return (T.pack name, reverse extsToEnable, reverse extsToDisable)
         formatName = many1 $ noneOf "-+"
         extMod = do
           polarity <- oneOf "-+"
@@ -395,20 +524,12 @@ parseFormatSpec = parse formatSpec ""
                        Just n  -> return n
                        Nothing
                          | name == "lhs" -> return Ext_literate_haskell
-                         | otherwise -> fail $ "Unknown extension: " ++ name
-          return $ case polarity of
-                        '-' -> disableExtension ext
-                        _   -> enableExtension ext
+                         | otherwise -> Prelude.fail $
+                                          "Unknown extension: " ++ name
+          return $ \(extsToEnable, extsToDisable) ->
+                    case polarity of
+                        '+' -> (ext : extsToEnable, extsToDisable)
+                        _   -> (extsToEnable, ext : extsToDisable)
 
-#ifdef DERIVE_JSON_VIA_TH
 $(deriveJSON defaultOptions ''Extension)
 $(deriveJSON defaultOptions ''Extensions)
-#else
-instance ToJSON Extension where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON Extension
-
-instance ToJSON Extensions where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON Extensions
-#endif

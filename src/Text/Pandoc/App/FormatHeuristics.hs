@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.App.FormatHeuristics
    Copyright   : Copyright (C) 2006-2019 John MacFarlane
@@ -16,18 +17,19 @@ module Text.Pandoc.App.FormatHeuristics
 
 import Prelude
 import Data.Char (toLower)
+import Data.Text (Text)
 import System.FilePath (takeExtension)
 
--- Determine default reader based on source file extensions.
-formatFromFilePaths :: String -> [FilePath] -> String
-formatFromFilePaths fallback [] = fallback
-formatFromFilePaths fallback (x:xs) =
+-- Determine default format based on file extensions.
+formatFromFilePaths :: [FilePath] -> Maybe Text
+formatFromFilePaths [] = Nothing
+formatFromFilePaths (x:xs) =
   case formatFromFilePath x of
-    Just f     -> f
-    Nothing    -> formatFromFilePaths fallback xs
+    Just f     -> Just f
+    Nothing    -> formatFromFilePaths xs
 
 -- Determine format based on file extension
-formatFromFilePath :: FilePath -> Maybe String
+formatFromFilePath :: FilePath -> Maybe Text
 formatFromFilePath x =
   case takeExtension (map toLower x) of
     ".adoc"     -> Just "asciidoc"

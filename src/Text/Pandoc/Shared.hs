@@ -1,12 +1,14 @@
-{-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE NoImplicitPrelude     #-}
 {-# LANGUAGE CPP                   #-}
 {-# LANGUAGE DeriveDataTypeable    #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE ViewPatterns          #-}
-{-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE TypeSynonymInstances  #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE OverloadedStrings     #-}
 {- |
    Module      : Text.Pandoc.Shared
    Copyright   : Copyright (C) 2006-2019 John MacFarlane
@@ -21,14 +23,20 @@ Utility functions and definitions used by the various Pandoc modules.
 module Text.Pandoc.Shared (
                      -- * List processing
                      splitBy,
+                     splitTextBy,
                      splitByIndices,
                      splitStringByIndices,
+                     splitTextByIndices,
                      substitute,
                      ordNub,
                      -- * Text processing
                      ToString (..),
+                     ToText (..),
+                     tshow,
                      backslashEscapes,
                      escapeStringUsing,
+                     elemText,
+                     notElemText,
                      stripTrailingNewlines,
                      trim,
                      triml,
@@ -36,6 +44,7 @@ module Text.Pandoc.Shared (
                      trimMath,
                      stripFirstAndLast,
                      camelCaseToHyphenated,
+                     camelCaseStrToHyphenated,
                      toRomanNumeral,
                      escapeURI,
                      tabFilter,
@@ -47,13 +56,13 @@ module Text.Pandoc.Shared (
                      extractSpaces,
                      removeFormatting,
                      deNote,
+                     deLink,
                      stringify,
                      capitalize,
                      compactify,
                      compactifyDL,
                      linesToPara,
-                     Element (..),
-                     hierarchicalize,
+                     makeSections,
                      uniqueIdent,
                      inlineListToIdentifier,
                      isHeaderBlock,
@@ -67,6 +76,7 @@ module Text.Pandoc.Shared (
                      makeMeta,
                      eastAsianLineBreakFilter,
                      underlineSpan,
+                     htmlSpanLikeElements,
                      splitSentences,
                      filterIpynbOutput,
                      -- * TagSoup HTML handling
@@ -88,6 +98,7 @@ module Text.Pandoc.Shared (
                      defaultBlocksSeparator,
                      -- * Safe read
                      safeRead,
+                     safeStrRead,
                      -- * User data directory
                      defaultUserDataDirs,
                      -- * Version
@@ -104,11 +115,10 @@ import qualified Data.Bifunctor as Bifunctor
 import Data.Char (isAlpha, isLower, isSpace, isUpper, toLower, isAlphaNum,
                   generalCategory, GeneralCategory(NonSpacingMark,
                   SpacingCombiningMark, EnclosingMark, ConnectorPunctuation))
-import Data.Data (Data, Typeable)
 import Data.List (find, intercalate, intersperse, stripPrefix, sortBy)
 import Data.Ord (comparing)
 import qualified Data.Map as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Monoid (Any (..))
 import Data.Sequence (ViewL (..), ViewR (..), viewl, viewr)
 import qualified Data.Set as Set
@@ -128,12 +138,12 @@ import Text.Pandoc.Asciify (toAsciiChar)
 import Text.Pandoc.Definition
 import Text.Pandoc.Extensions (Extensions, Extension(..), extensionEnabled)
 import Text.Pandoc.Generic (bottomUp)
-import Text.Pandoc.Pretty (charWidth)
+import Text.DocLayout (charWidth)
 import Text.Pandoc.Walk
 
 -- | Version number of pandoc library.
-pandocVersion :: String
-pandocVersion = showVersion version
+pandocVersion :: T.Text
+pandocVersion = T.pack $ showVersion version
 
 --
 -- List processing
@@ -147,6 +157,13 @@ splitBy isSep lst =
       rest'         = dropWhile isSep rest
   in  first:splitBy isSep rest'
 
+splitTextBy :: (Char -> Bool) -> T.Text -> [T.Text]
+splitTextBy isSep t
+  | T.null t = []
+  | otherwise = let (first, rest) = T.break isSep t
+                    rest'         = T.dropWhile isSep rest
+                in  first : splitTextBy isSep rest'
+
 splitByIndices :: [Int] -> [a] -> [[a]]
 splitByIndices [] lst = [lst]
 splitByIndices (x:xs) lst = first:splitByIndices (map (\y -> y - x)  xs) rest
@@ -158,6 +175,9 @@ splitStringByIndices [] lst = [lst]
 splitStringByIndices (x:xs) lst =
   let (first, rest) = splitAt' x lst in
   first : splitStringByIndices (map (\y -> y - x) xs) rest
+
+splitTextByIndices :: [Int] -> T.Text -> [T.Text]
+splitTextByIndices ns = fmap T.pack . splitStringByIndices ns . T.unpack
 
 splitAt' :: Int -> [Char] -> ([Char],[Char])
 splitAt' _ []          = ([],[])
@@ -194,83 +214,115 @@ instance ToString String where
 instance ToString T.Text where
   toString = T.unpack
 
+class ToText a where
+  toText :: a -> T.Text
+
+instance ToText String where
+  toText = T.pack
+
+instance ToText T.Text where
+  toText = id
+
+tshow :: Show a => a -> T.Text
+tshow = T.pack . show
+
 -- | Returns an association list of backslash escapes for the
 -- designated characters.
 backslashEscapes :: [Char]    -- ^ list of special characters to escape
-                 -> [(Char, String)]
-backslashEscapes = map (\ch -> (ch, ['\\',ch]))
+                 -> [(Char, T.Text)]
+backslashEscapes = map (\ch -> (ch, T.pack ['\\',ch]))
 
 -- | Escape a string of characters, using an association list of
 -- characters and strings.
-escapeStringUsing :: [(Char, String)] -> String -> String
-escapeStringUsing _ [] = ""
-escapeStringUsing escapeTable (x:xs) =
-  case lookup x escapeTable of
-       Just str -> str ++ rest
-       Nothing  -> x:rest
-  where rest = escapeStringUsing escapeTable xs
+escapeStringUsing :: [(Char, T.Text)] -> T.Text -> T.Text
+escapeStringUsing tbl = T.concatMap $ \c -> fromMaybe (T.singleton c) $ lookup c tbl
+
+-- | @True@ exactly when the @Char@ appears in the @Text@.
+elemText :: Char -> T.Text -> Bool
+elemText c = T.any (== c)
+
+-- | @True@ exactly when the @Char@ does not appear in the @Text@.
+notElemText :: Char -> T.Text -> Bool
+notElemText c = T.all (/= c)
 
 -- | Strip trailing newlines from string.
-stripTrailingNewlines :: String -> String
-stripTrailingNewlines = reverse . dropWhile (== '\n') . reverse
+stripTrailingNewlines :: T.Text -> T.Text
+stripTrailingNewlines = T.dropWhileEnd (== '\n')
 
 -- | Remove leading and trailing space (including newlines) from string.
-trim :: String -> String
-trim = triml . trimr
+trim :: T.Text -> T.Text
+trim = T.dropAround (`elemText` " \r\n\t")
 
 -- | Remove leading space (including newlines) from string.
-triml :: String -> String
-triml = dropWhile (`elem` " \r\n\t")
+triml :: T.Text -> T.Text
+triml = T.dropWhile (`elemText` " \r\n\t")
 
 -- | Remove trailing space (including newlines) from string.
-trimr :: String -> String
-trimr = reverse . triml . reverse
+trimr :: T.Text -> T.Text
+trimr = T.dropWhileEnd (`elemText` " \r\n\t")
 
 -- | Trim leading space and trailing space unless after \.
-trimMath :: String -> String
-trimMath = triml . reverse . stripspace . reverse
+trimMath :: T.Text -> T.Text
+trimMath = triml . T.reverse . stripBeginSpace . T.reverse -- no Text.spanEnd
   where
-  stripspace (c1:c2:cs)
-    | c1  `elem` [' ','\t','\n','\r']
-    , c2 /= '\\' = stripspace (c2:cs)
-  stripspace cs = cs
+    stripBeginSpace t
+      | T.null pref = t
+      | Just ('\\', _) <- T.uncons suff = T.cons (T.last pref) suff
+      | otherwise = suff
+      where
+        (pref, suff) = T.span (`elemText` " \t\n\r") t
 
 -- | Strip leading and trailing characters from string
-stripFirstAndLast :: String -> String
-stripFirstAndLast str =
-  drop 1 $ take (length str - 1) str
+stripFirstAndLast :: T.Text -> T.Text
+stripFirstAndLast t = case T.uncons t of
+  Just (_, t') -> case T.unsnoc t' of
+    Just (t'', _) -> t''
+    _             -> t'
+  _               -> ""
 
 -- | Change CamelCase word to hyphenated lowercase (e.g., camel-case).
-camelCaseToHyphenated :: String -> String
-camelCaseToHyphenated [] = ""
-camelCaseToHyphenated (a:b:rest) | isLower a && isUpper b =
-  a:'-':toLower b:camelCaseToHyphenated rest
-camelCaseToHyphenated (a:rest) = toLower a:camelCaseToHyphenated rest
+camelCaseToHyphenated :: T.Text -> T.Text
+camelCaseToHyphenated = T.pack . camelCaseStrToHyphenated . T.unpack
+
+-- This may not work as expected on general Unicode, if it contains
+-- letters with a longer lower case form than upper case. I don't know
+-- what the camel case practices of affected scripts are, though.
+camelCaseStrToHyphenated :: String -> String
+camelCaseStrToHyphenated [] = ""
+camelCaseStrToHyphenated (a:b:rest)
+  | isLower a
+  , isUpper b = a:'-':toLower b:camelCaseStrToHyphenated rest
+-- handle ABCDef = abc-def
+camelCaseStrToHyphenated (a:b:c:rest)
+  | isUpper a
+  , isUpper b
+  , isLower c = toLower a:'-':toLower b:camelCaseStrToHyphenated (c:rest)
+camelCaseStrToHyphenated (a:rest) = toLower a:camelCaseStrToHyphenated rest
 
 -- | Convert number < 4000 to uppercase roman numeral.
-toRomanNumeral :: Int -> String
+toRomanNumeral :: Int -> T.Text
 toRomanNumeral x
   | x >= 4000 || x < 0 = "?"
-  | x >= 1000 = "M" ++ toRomanNumeral (x - 1000)
-  | x >= 900  = "CM" ++ toRomanNumeral (x - 900)
-  | x >= 500  = "D" ++ toRomanNumeral (x - 500)
-  | x >= 400  = "CD" ++ toRomanNumeral (x - 400)
-  | x >= 100  = "C" ++ toRomanNumeral (x - 100)
-  | x >= 90   = "XC" ++ toRomanNumeral (x - 90)
-  | x >= 50   = "L"  ++ toRomanNumeral (x - 50)
-  | x >= 40   = "XL" ++ toRomanNumeral (x - 40)
-  | x >= 10   = "X" ++ toRomanNumeral (x - 10)
+  | x >= 1000 = "M" <> toRomanNumeral (x - 1000)
+  | x >= 900  = "CM" <> toRomanNumeral (x - 900)
+  | x >= 500  = "D" <> toRomanNumeral (x - 500)
+  | x >= 400  = "CD" <> toRomanNumeral (x - 400)
+  | x >= 100  = "C" <> toRomanNumeral (x - 100)
+  | x >= 90   = "XC" <> toRomanNumeral (x - 90)
+  | x >= 50   = "L"  <> toRomanNumeral (x - 50)
+  | x >= 40   = "XL" <> toRomanNumeral (x - 40)
+  | x >= 10   = "X" <> toRomanNumeral (x - 10)
   | x == 9    = "IX"
-  | x >= 5    = "V" ++ toRomanNumeral (x - 5)
+  | x >= 5    = "V" <> toRomanNumeral (x - 5)
   | x == 4    = "IV"
-  | x >= 1    = "I" ++ toRomanNumeral (x - 1)
+  | x >= 1    = "I" <> toRomanNumeral (x - 1)
   | otherwise = ""
 
 -- | Escape whitespace and some punctuation characters in URI.
-escapeURI :: String -> String
-escapeURI = escapeURIString (not . needsEscaping)
-  where needsEscaping c = isSpace c || c `elem`
-                           ['<','>','|','"','{','}','[',']','^', '`']
+escapeURI :: T.Text -> T.Text
+escapeURI = T.pack . escapeURIString (not . needsEscaping) . T.unpack
+  where needsEscaping c = isSpace c || c `elemText` "<>|\"{}[]^`"
+
 
 -- | Convert tabs to spaces. Tabs will be preserved if tab stop is set to 0.
 tabFilter :: Int       -- ^ Tab stop
@@ -297,8 +349,11 @@ crFilter = T.filter (/= '\r')
 -- | Parse a date and convert (if possible) to "YYYY-MM-DD" format. We
 -- limit years to the range 1601-9999 (ISO 8601 accepts greater than
 -- or equal to 1583, but MS Word only accepts dates starting 1601).
-normalizeDate :: String -> Maybe String
-normalizeDate s = fmap (formatTime defaultTimeLocale "%F")
+normalizeDate :: T.Text -> Maybe T.Text
+normalizeDate = fmap T.pack . normalizeDate' . T.unpack
+
+normalizeDate' :: String -> Maybe String
+normalizeDate' s = fmap (formatTime defaultTimeLocale "%F")
   (msum $ map (\fs -> parsetimeWith fs s >>= rejectBadYear) formats :: Maybe Day)
   where rejectBadYear day = case toGregorian day of
           (y, _, _) | y >= 1601 && y <= 9999 -> Just day
@@ -314,25 +369,25 @@ normalizeDate s = fmap (formatTime defaultTimeLocale "%F")
 
 -- | Generate infinite lazy list of markers for an ordered list,
 -- depending on list attributes.
-orderedListMarkers :: (Int, ListNumberStyle, ListNumberDelim) -> [String]
+orderedListMarkers :: (Int, ListNumberStyle, ListNumberDelim) -> [T.Text]
 orderedListMarkers (start, numstyle, numdelim) =
-  let singleton c = [c]
-      nums = case numstyle of
-                     DefaultStyle -> map show [start..]
-                     Example      -> map show [start..]
-                     Decimal      -> map show [start..]
+  let nums = case numstyle of
+                     DefaultStyle -> map tshow [start..]
+                     Example      -> map tshow [start..]
+                     Decimal      -> map tshow [start..]
                      UpperAlpha   -> drop (start - 1) $ cycle $
-                                     map singleton ['A'..'Z']
+                                     map T.singleton ['A'..'Z']
                      LowerAlpha   -> drop (start - 1) $ cycle $
-                                     map singleton ['a'..'z']
+                                     map T.singleton ['a'..'z']
                      UpperRoman   -> map toRomanNumeral [start..]
-                     LowerRoman   -> map (map toLower . toRomanNumeral) [start..]
+                     LowerRoman   -> map (T.toLower . toRomanNumeral) [start..]
       inDelim str = case numdelim of
-                            DefaultDelim -> str ++ "."
-                            Period       -> str ++ "."
-                            OneParen     -> str ++ ")"
-                            TwoParens    -> "(" ++ str ++ ")"
+                            DefaultDelim -> str <> "."
+                            Period       -> str <> "."
+                            OneParen     -> str <> ")"
+                            TwoParens    -> "(" <> str <> ")"
   in  map inDelim nums
+
 
 -- | Extract the leading and trailing spaces from inside an inline element
 -- and place them outside the element.  SoftBreaks count as Spaces for
@@ -366,6 +421,10 @@ deNote :: Inline -> Inline
 deNote (Note _) = Str ""
 deNote x        = x
 
+deLink :: Inline -> Inline
+deLink (Link _ ils _) = Span nullAttr ils
+deLink x              = x
+
 deQuote :: Inline -> Inline
 deQuote (Quoted SingleQuote xs) =
   Span ("",[],[]) (Str "\8216" : xs ++ [Str "\8217"])
@@ -376,15 +435,16 @@ deQuote x = x
 -- | Convert pandoc structure to a string with formatting removed.
 -- Footnotes are skipped (since we don't want their contents in link
 -- labels).
-stringify :: Walkable Inline a => a -> String
+stringify :: Walkable Inline a => a -> T.Text
 stringify = query go . walk (deNote . deQuote)
-  where go :: Inline -> [Char]
+  where go :: Inline -> T.Text
         go Space                                       = " "
         go SoftBreak                                   = " "
         go (Str x)                                     = x
         go (Code _ x)                                  = x
         go (Math _ x)                                  = x
-        go (RawInline (Format "html") ('<':'b':'r':_)) = " " -- see #2105
+        go (RawInline (Format "html") (T.unpack -> ('<':'b':'r':_)))
+                                                       = " " -- see #2105
         go LineBreak                                   = " "
         go _                                           = ""
 
@@ -396,7 +456,7 @@ stringify = query go . walk (deNote . deQuote)
 capitalize :: Walkable Inline a => a -> a
 capitalize = walk go
   where go :: Inline -> Inline
-        go (Str s) = Str (T.unpack $ T.toUpper $ T.pack s)
+        go (Str s) = Str $ T.toUpper s
         go x       = x
 
 -- | Change final list item from @Para@ to @Plain@ if the list contains
@@ -449,96 +509,113 @@ isPara :: Block -> Bool
 isPara (Para _) = True
 isPara _        = False
 
--- | Data structure for defining hierarchical Pandoc documents
-data Element = Blk Block
-             | Sec Int [Int] Attr [Inline] [Element]
-             --    lvl  num attributes label    contents
-             deriving (Eq, Read, Show, Typeable, Data)
-
-instance Walkable Inline Element where
-  walk f (Blk x) = Blk (walk f x)
-  walk f (Sec lev nums attr ils elts) = Sec lev nums attr (walk f ils) (walk f elts)
-  walkM f (Blk x) = Blk `fmap` walkM f x
-  walkM f (Sec lev nums attr ils elts) = do
-    ils' <- walkM f ils
-    elts' <- walkM f elts
-    return $ Sec lev nums attr ils' elts'
-  query f (Blk x)              = query f x
-  query f (Sec _ _ _ ils elts) = query f ils `mappend` query f elts
-
-instance Walkable Block Element where
-  walk f (Blk x) = Blk (walk f x)
-  walk f (Sec lev nums attr ils elts) = Sec lev nums attr (walk f ils) (walk f elts)
-  walkM f (Blk x) = Blk `fmap` walkM f x
-  walkM f (Sec lev nums attr ils elts) = do
-    ils' <- walkM f ils
-    elts' <- walkM f elts
-    return $ Sec lev nums attr ils' elts'
-  query f (Blk x)              = query f x
-  query f (Sec _ _ _ ils elts) = query f ils `mappend` query f elts
-
 -- | Convert Pandoc inline list to plain text identifier.  HTML
 -- identifiers must start with a letter, and may contain only
 -- letters, digits, and the characters _-.
-inlineListToIdentifier :: Extensions -> [Inline] -> String
+inlineListToIdentifier :: Extensions -> [Inline] -> T.Text
 inlineListToIdentifier exts =
-  dropNonLetter . filterAscii . toIdent . stringify
+  dropNonLetter . filterAscii . toIdent . stringify . walk unEmojify
   where
+    unEmojify :: [Inline] -> [Inline]
+    unEmojify
+      | extensionEnabled Ext_gfm_auto_identifiers exts ||
+        extensionEnabled Ext_ascii_identifiers exts = walk unEmoji
+      | otherwise = id
+    unEmoji (Span ("",["emoji"],[("data-emoji",ename)]) _) = Str ename
+    unEmoji x = x
     dropNonLetter
       | extensionEnabled Ext_gfm_auto_identifiers exts = id
-      | otherwise = dropWhile (not . isAlpha)
+      | otherwise = T.dropWhile (not . isAlpha)
     filterAscii
       | extensionEnabled Ext_ascii_identifiers exts
-        = mapMaybe toAsciiChar
+        = T.pack . mapMaybe toAsciiChar . T.unpack
       | otherwise = id
     toIdent
       | extensionEnabled Ext_gfm_auto_identifiers exts =
-        filterPunct . spaceToDash . map toLower
-      | otherwise = intercalate "-" . words . filterPunct . map toLower
-    filterPunct = filter (\c -> isSpace c || isAlphaNum c || isAllowedPunct c)
+        filterPunct . spaceToDash . T.toLower
+      | otherwise = T.intercalate "-" . T.words . filterPunct . T.toLower
+    filterPunct = T.filter (\c -> isSpace c || isAlphaNum c || isAllowedPunct c)
     isAllowedPunct c
       | extensionEnabled Ext_gfm_auto_identifiers exts
         = c == '-' || c == '_' ||
           generalCategory c `elem` [NonSpacingMark, SpacingCombiningMark,
                                     EnclosingMark, ConnectorPunctuation]
       | otherwise = c == '_' || c == '-' || c == '.'
-    spaceToDash = map (\c -> if isSpace c then '-' else c)
+    spaceToDash = T.map (\c -> if isSpace c then '-' else c)
 
--- | Convert list of Pandoc blocks into (hierarchical) list of Elements
-hierarchicalize :: [Block] -> [Element]
-hierarchicalize blocks = S.evalState (hierarchicalizeWithIds blocks) []
 
-hierarchicalizeWithIds :: [Block] -> S.State [Int] [Element]
-hierarchicalizeWithIds [] = return []
-hierarchicalizeWithIds (Header level attr@(_,classes,_) title':xs) = do
-  lastnum <- S.get
-  let lastnum' = take level lastnum
-  let newnum = case length lastnum' of
-                    x | "unnumbered" `elem` classes -> []
-                      | x >= level -> init lastnum' ++ [last lastnum' + 1]
-                      | otherwise -> lastnum ++
-                           replicate (level - length lastnum - 1) 0 ++ [1]
-  unless (null newnum) $ S.put newnum
-  let (sectionContents, rest) = break (headerLtEq level) xs
-  sectionContents' <- hierarchicalizeWithIds sectionContents
-  rest' <- hierarchicalizeWithIds rest
-  return $ Sec level newnum attr title' sectionContents' : rest'
-hierarchicalizeWithIds (Div ("refs",classes',kvs')
-                         (Header level (ident,classes,kvs) title' : xs):ys) =
-  hierarchicalizeWithIds (Header level (ident,"references":classes,kvs)
-                           title' : Div ("refs",classes',kvs') xs : ys)
-hierarchicalizeWithIds (x:rest) = do
-  rest' <- hierarchicalizeWithIds rest
-  return $ Blk x : rest'
+-- | Put a list of Pandoc blocks into a hierarchical structure:
+-- a list of sections (each a Div with class "section" and first
+-- element a Header).  If the 'numbering' parameter is True, Header
+-- numbers are added via the number attribute on the header.
+-- If the baseLevel parameter is Just n, Header levels are
+-- adjusted to be gapless starting at level n.
+makeSections :: Bool -> Maybe Int -> [Block] -> [Block]
+makeSections numbering mbBaseLevel bs =
+  S.evalState (go bs) (mbBaseLevel, [])
+ where
+  go :: [Block] -> S.State (Maybe Int, [Int]) [Block]
+  go (Header level (ident,classes,kvs) title':xs) = do
+    (mbLevel, lastnum) <- S.get
+    let level' = fromMaybe level mbLevel
+    let lastnum' = take level' lastnum
+    let newnum =
+          if level' > 0
+             then case length lastnum' of
+                      x | "unnumbered" `elem` classes -> []
+                        | x >= level' -> init lastnum' ++ [last lastnum' + 1]
+                        | otherwise -> lastnum ++
+                             replicate (level' - length lastnum - 1) 0 ++ [1]
+             else []
+    unless (null newnum) $ S.modify $ \(mbl, _) -> (mbl, newnum)
+    let (sectionContents, rest) = break (headerLtEq level) xs
+    S.modify $ \(_, ln) -> (fmap (+ 1) mbLevel, ln)
+    sectionContents' <- go sectionContents
+    S.modify $ \(_, ln) -> (mbLevel, ln)
+    rest' <- go rest
+    let divattr = (ident, ["section"], [])
+    let attr = ("",classes,
+                   -- don't touch number if already present
+                   case lookup "number" kvs of
+                     Nothing | numbering ->
+                        ("number", T.intercalate "." (map tshow newnum)) : kvs
+                     _ -> kvs)
+    return $
+      Div divattr (Header level' attr title' : sectionContents') : rest'
+  go (Div (dident,dclasses,dkvs)
+       (Header level (ident,classes,kvs) title':ys) : xs)
+      | all (\case
+               Header level' _ _ -> level' > level
+               _                 -> True) ys
+      , "column" `notElem` dclasses
+      , "columns" `notElem` dclasses = do
+    inner <- go (Header level (ident,classes,kvs) title':ys)
+    let inner' =
+          case inner of
+            (Div (dident',dclasses',dkvs') zs@(Header{}:zs') : ws)
+              | T.null dident ->
+                Div (dident',dclasses' ++ dclasses,dkvs' ++ dkvs) zs : ws
+              | otherwise -> -- keep id on header so we don't lose anchor
+                Div (dident,dclasses ++ dclasses',dkvs ++ dkvs')
+                  (Header level (dident',classes,kvs) title':zs') : ws
+            _ -> inner  -- shouldn't happen
+    rest <- go xs
+    return $ inner' ++ rest
+  go (Div attr xs : rest) = do
+    xs' <- go xs
+    rest' <- go rest
+    return $ Div attr xs' : rest'
+  go (x:xs) = (x :) <$> go xs
+  go [] = return []
 
 headerLtEq :: Int -> Block -> Bool
-headerLtEq level (Header l _ _)                                  = l <= level
-headerLtEq level (Div ("",["references"],[]) (Header l _ _ : _)) = l <= level
-headerLtEq _ _                                                   = False
+headerLtEq level (Header l _ _)  = l <= level
+headerLtEq level (Div _ (b:_))   = headerLtEq level b
+headerLtEq _ _                   = False
 
 -- | Generate a unique identifier from a list of inlines.
 -- Second argument is a list of already used identifiers.
-uniqueIdent :: Extensions -> [Inline] -> Set.Set String -> String
+uniqueIdent :: Extensions -> [Inline] -> Set.Set T.Text -> T.Text
 uniqueIdent exts title' usedIdents =
   if baseIdent `Set.member` usedIdents
      then case find (\x -> not $ numIdent x `Set.member` usedIdents)
@@ -551,7 +628,7 @@ uniqueIdent exts title' usedIdents =
     baseIdent = case inlineListToIdentifier exts title' of
                      "" -> "section"
                      x  -> x
-    numIdent n = baseIdent ++ "-" ++ show n
+    numIdent n = baseIdent <> "-" <> tshow n
 
 -- | True if block is a Header block.
 isHeaderBlock :: Block -> Bool
@@ -560,10 +637,17 @@ isHeaderBlock _        = False
 
 -- | Shift header levels up or down.
 headerShift :: Int -> Pandoc -> Pandoc
-headerShift n = walk shift
-  where shift :: Block -> Block
-        shift (Header level attr inner) = Header (level + n) attr inner
-        shift x                         = x
+headerShift n (Pandoc meta (Header m _ ils : bs))
+  | n < 0
+  , m + n == 0 = headerShift n $
+                 B.setTitle (B.fromList ils) $ Pandoc meta bs
+headerShift n (Pandoc meta bs) = Pandoc meta (walk shift bs)
+ where
+   shift :: Block -> Block
+   shift (Header level attr inner)
+     | level + n > 0  = Header (level + n) attr inner
+     | otherwise      = Para inner
+   shift x            = x
 
 -- | Remove empty paragraphs.
 stripEmptyParagraphs :: Pandoc -> Pandoc
@@ -588,7 +672,7 @@ onlySimpleTableCells = all isSimpleCell . concat
 
 -- | Detect if a list is tight.
 isTightList :: [[Block]] -> Bool
-isTightList = all firstIsPlain
+isTightList = all (\item -> firstIsPlain item || null item)
   where firstIsPlain (Plain _ : _) = True
         firstIsPlain _             = False
 
@@ -625,7 +709,7 @@ handleTaskListItem handleInlines exts bls =
 -- | Set a field of a 'Meta' object.  If the field already has a value,
 -- convert it into a list with the new value appended to the old value(s).
 addMetaField :: ToMetaValue a
-             => String
+             => T.Text
              -> a
              -> Meta
              -> Meta
@@ -647,12 +731,16 @@ makeMeta title authors date =
 -- | Remove soft breaks between East Asian characters.
 eastAsianLineBreakFilter :: Pandoc -> Pandoc
 eastAsianLineBreakFilter = bottomUp go
-  where go (x:SoftBreak:y:zs) =
-         case (stringify x, stringify y) of
-               (xs@(_:_), c:_)
-                 | charWidth (last xs) == 2 && charWidth c == 2 -> x:y:zs
-               _ -> x:SoftBreak:y:zs
-        go xs = xs
+  where go (x:SoftBreak:y:zs)
+          | Just (_, b) <- T.unsnoc $ stringify x
+          , Just (c, _) <- T.uncons $ stringify y
+          , charWidth b == 2
+          , charWidth c == 2
+          = x:y:zs
+          | otherwise
+          = x:SoftBreak:y:zs
+        go xs
+          = xs
 
 -- | Builder for underline.
 -- This probably belongs in Builder.hs in pandoc-types.
@@ -660,25 +748,31 @@ eastAsianLineBreakFilter = bottomUp go
 underlineSpan :: Inlines -> Inlines
 underlineSpan = B.spanWith ("", ["underline"], [])
 
+-- | Set of HTML elements that are represented as Span with a class equal as
+-- the element tag itself.
+htmlSpanLikeElements :: Set.Set T.Text
+htmlSpanLikeElements = Set.fromList ["kbd", "mark", "dfn"]
+
 -- | Returns the first sentence in a list of inlines, and the rest.
 breakSentence :: [Inline] -> ([Inline], [Inline])
 breakSentence [] = ([],[])
 breakSentence xs =
-  let isSentenceEndInline (Str ys@(_:_)) | last ys == '.' = True
-      isSentenceEndInline (Str ys@(_:_)) | last ys == '?' = True
-      isSentenceEndInline LineBreak      = True
-      isSentenceEndInline _              = False
+  let isSentenceEndInline (Str ys)
+        | Just (_, c) <- T.unsnoc ys = c == '.' || c == '?'
+      isSentenceEndInline LineBreak  = True
+      isSentenceEndInline _          = False
       (as, bs) = break isSentenceEndInline xs
   in  case bs of
-           []             -> (as, [])
-           [c]            -> (as ++ [c], [])
-           (c:Space:cs)   -> (as ++ [c], cs)
-           (c:SoftBreak:cs) -> (as ++ [c], cs)
-           (Str ".":Str (')':ys):cs) -> (as ++ [Str ".", Str (')':ys)], cs)
-           (x@(Str ('.':')':_)):cs) -> (as ++ [x], cs)
-           (LineBreak:x@(Str ('.':_)):cs) -> (as ++[LineBreak], x:cs)
-           (c:cs)         -> (as ++ [c] ++ ds, es)
-              where (ds, es) = breakSentence cs
+        []             -> (as, [])
+        [c]            -> (as ++ [c], [])
+        (c:Space:cs)   -> (as ++ [c], cs)
+        (c:SoftBreak:cs) -> (as ++ [c], cs)
+        (Str ".":Str s@(T.uncons -> Just (')',_)):cs)
+          -> (as ++ [Str ".", Str s], cs)
+        (x@(Str (T.stripPrefix ".)" -> Just _)):cs) -> (as ++ [x], cs)
+        (LineBreak:x@(Str (T.uncons -> Just ('.',_))):cs) -> (as ++[LineBreak], x:cs)
+        (c:cs)         -> (as ++ [c] ++ ds, es)
+          where (ds, es) = breakSentence cs
 
 -- | Split a list of inlines into sentences.
 splitSentences :: [Inline] -> [[Inline]]
@@ -688,7 +782,8 @@ splitSentences xs =
 
 -- | Process ipynb output cells.  If mode is Nothing,
 -- remove all output.  If mode is Just format, select
--- best output for the format.
+-- best output for the format.  If format is not ipynb,
+-- strip out ANSI escape sequences from CodeBlocks (see #5633).
 filterIpynbOutput :: Maybe Format -> Pandoc -> Pandoc
 filterIpynbOutput mode = walk go
   where go (Div (ident, ("output":os), kvs) bs) =
@@ -699,6 +794,7 @@ filterIpynbOutput mode = walk go
               | fmt == Format "ipynb"
                           -> Div (ident, ("output":os), kvs) bs
               | otherwise -> Div (ident, ("output":os), kvs) $
+                              walk removeANSI $
                               take 1 $ sortBy (comparing rank) bs
                  where
                   rank (RawBlock (Format "html") _)
@@ -714,6 +810,14 @@ filterIpynbOutput mode = walk go
                     | otherwise = 3
                   rank (Para [Image{}]) = 1
                   rank _ = 2
+                  removeANSI (CodeBlock attr code) =
+                    CodeBlock attr (removeANSIEscapes code)
+                  removeANSI x = x
+                  removeANSIEscapes t
+                    | Just cs <- T.stripPrefix "\x1b[" t =
+                        removeANSIEscapes $ T.drop 1 $ T.dropWhile (/='m') cs
+                    | Just (c, cs) <- T.uncons t = T.cons c $ removeANSIEscapes cs
+                    | otherwise = ""
         go x = x
 
 --
@@ -721,12 +825,12 @@ filterIpynbOutput mode = walk go
 --
 
 -- | Render HTML tags.
-renderTags' :: [Tag String] -> String
+renderTags' :: [Tag T.Text] -> T.Text
 renderTags' = renderTagsOptions
                renderOptions{ optMinimize = matchTags ["hr", "br", "img",
                                                        "meta", "link"]
                             , optRawTag   = matchTags ["script", "style"] }
-              where matchTags tags = flip elem tags . map toLower
+              where matchTags tags = flip elem tags . T.toLower
 
 --
 -- File handling
@@ -773,8 +877,8 @@ collapseFilePath = Posix.joinPath . reverse . foldl go [] . splitDirectories
 -- Convert the path part of a file: URI to a regular path.
 -- On windows, @/c:/foo@ should be @c:/foo@.
 -- On linux, @/foo@ should be @/foo@.
-uriPathToPath :: String -> FilePath
-uriPathToPath path =
+uriPathToPath :: T.Text -> FilePath
+uriPathToPath (T.unpack -> path) =
 #ifdef _WINDOWS
   case path of
     '/':ps -> ps
@@ -800,7 +904,7 @@ filteredFilesFromArchive zf f =
 
 -- | Schemes from http://www.iana.org/assignments/uri-schemes.html plus
 -- the unofficial schemes doi, javascript, isbn, pmid.
-schemes :: Set.Set String
+schemes :: Set.Set T.Text
 schemes = Set.fromList
   -- Official IANA schemes
   [ "aaa", "aaas", "about", "acap", "acct", "acr", "adiumxtra", "afp", "afs"
@@ -852,11 +956,11 @@ schemes = Set.fromList
 
 -- | Check if the string is a valid URL with a IANA or frequently used but
 -- unofficial scheme (see @schemes@).
-isURI :: String -> Bool
-isURI = maybe False hasKnownScheme . parseURI
+isURI :: T.Text -> Bool
+isURI = maybe False hasKnownScheme . parseURI . T.unpack
   where
-    hasKnownScheme = (`Set.member` schemes) . map toLower .
-                     filter (/= ':') . uriScheme
+    hasKnownScheme = (`Set.member` schemes) . T.toLower .
+                     T.filter (/= ':') . T.pack . uriScheme
 
 ---
 --- Squash blocks into inlines
@@ -909,12 +1013,14 @@ defaultBlocksSeparator =
 -- Safe read
 --
 
-safeRead :: (MonadPlus m, Read a) => String -> m a
-safeRead s = case reads s of
+safeRead :: (MonadPlus m, Read a) => T.Text -> m a
+safeRead = safeStrRead . T.unpack
+
+safeStrRead :: (MonadPlus m, Read a) => String -> m a
+safeStrRead s = case reads s of
                   (d,x):_
                     | all isSpace x -> return d
                   _                 -> mzero
-
 --
 -- User data directory
 --

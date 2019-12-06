@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {- |
@@ -13,9 +14,9 @@
 Shared utility functions for pandoc writers.
 -}
 module Text.Pandoc.Writers.Shared (
-                       metaToJSON
-                     , metaToJSON'
-                     , addVariablesToJSON
+                       metaToContext
+                     , metaToContext'
+                     , addVariablesToContext
                      , getField
                      , setField
                      , resetField
@@ -33,159 +34,130 @@ module Text.Pandoc.Writers.Shared (
                      , toSubscript
                      , toSuperscript
                      , toTableOfContents
+                     , endsWithPlain
                      )
 where
 import Prelude
+import Safe (lastMay)
+import qualified Data.ByteString.Lazy as BL
+import Data.Maybe (fromMaybe, isNothing)
 import Control.Monad (zipWithM)
-import qualified Data.Aeson as Aeson
-import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value (Object),
-                   encode, fromJSON)
+import Data.Aeson (ToJSON (..), encode)
 import Data.Char (chr, ord, isSpace)
-import qualified Data.HashMap.Strict as H
 import Data.List (groupBy, intersperse, transpose, foldl')
-import Data.Scientific (Scientific)
+import Data.Text.Conversions (FromText(..))
 import qualified Data.Map as M
-import Data.Maybe (isJust)
 import qualified Data.Text as T
-import qualified Data.Traversable as Traversable
 import qualified Text.Pandoc.Builder as Builder
 import Text.Pandoc.Definition
 import Text.Pandoc.Options
-import Text.Pandoc.Pretty
-import Text.Pandoc.Shared (stringify, hierarchicalize, Element(..), deNote,
-                            safeRead)
+import Text.DocLayout
+import Text.Pandoc.Shared (stringify, makeSections, deNote, deLink)
 import Text.Pandoc.Walk (walk)
-import Text.Pandoc.UTF8 (toStringLazy)
+import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.XML (escapeStringForXML)
+import Text.DocTemplates (Context(..), Val(..), TemplateTarget,
+                          ToContext(..), FromContext(..))
 
--- | Create JSON value for template from a 'Meta' and an association list
+-- | Create template Context from a 'Meta' and an association list
 -- of variables, specified at the command line or in the writer.
 -- Variables overwrite metadata fields with the same names.
 -- If multiple variables are set with the same name, a list is
 -- assigned.  Does nothing if 'writerTemplate' is Nothing.
-metaToJSON :: (Functor m, Monad m, ToJSON a)
-           => WriterOptions
-           -> ([Block] -> m a)
-           -> ([Inline] -> m a)
-           -> Meta
-           -> m Value
-metaToJSON opts blockWriter inlineWriter meta
-  | isJust (writerTemplate opts) =
-    addVariablesToJSON opts <$> metaToJSON' blockWriter inlineWriter meta
-  | otherwise = return (Object H.empty)
+metaToContext :: (Monad m, TemplateTarget a)
+              => WriterOptions
+              -> ([Block] -> m (Doc a))
+              -> ([Inline] -> m (Doc a))
+              -> Meta
+              -> m (Context a)
+metaToContext opts blockWriter inlineWriter meta =
+  case writerTemplate opts of
+    Nothing -> return mempty
+    Just _  -> addVariablesToContext opts <$>
+                metaToContext' blockWriter inlineWriter meta
 
--- | Like 'metaToJSON', but does not include variables and is
+-- | Like 'metaToContext, but does not include variables and is
 -- not sensitive to 'writerTemplate'.
-metaToJSON' :: (Functor m, Monad m, ToJSON a)
-           => ([Block] -> m a)
-           -> ([Inline] -> m a)
+metaToContext' :: (Monad m, TemplateTarget a)
+           => ([Block] -> m (Doc a))
+           -> ([Inline] -> m (Doc a))
            -> Meta
-           -> m Value
-metaToJSON' blockWriter inlineWriter (Meta metamap) = do
-  renderedMap <- Traversable.mapM
-                 (metaValueToJSON blockWriter inlineWriter)
-                 metamap
-  return $ M.foldrWithKey defField (Object H.empty) renderedMap
+           -> m (Context a)
+metaToContext' blockWriter inlineWriter (Meta metamap) =
+  Context <$> mapM (metaValueToVal blockWriter inlineWriter) metamap
 
--- | Add variables to JSON object, replacing any existing values.
--- Also include @meta-json@, a field containing a string representation
--- of the original JSON object itself, prior to addition of variables.
-addVariablesToJSON :: WriterOptions -> Value -> Value
-addVariablesToJSON opts metadata =
-  foldl (\acc (x,y) -> setField x y acc)
-       (defField "meta-json" (toStringLazy $ encode metadata) (Object mempty))
-       (writerVariables opts)
-    `combineMetadata` metadata
-  where combineMetadata (Object o1) (Object o2) = Object $ H.union o1 o2
-        combineMetadata x _                     = x
+-- | Add variables to a template Context, using monoidal append.
+-- Also add `meta-json`.  Note that metadata values are used
+-- in template contexts only when like-named variables aren't set.
+addVariablesToContext :: TemplateTarget a
+                      => WriterOptions -> Context a -> Context a
+addVariablesToContext opts c1 =
+  c2 <> (fromText <$> writerVariables opts) <> c1
+ where
+   c2 = Context $
+          M.insert "meta-json" (SimpleVal $ literal $ fromText jsonrep)
+                               mempty
+   jsonrep = UTF8.toText $ BL.toStrict $ encode $ toJSON c1
 
-metaValueToJSON :: (Functor m, Monad m, ToJSON a)
-                => ([Block] -> m a)
-                -> ([Inline] -> m a)
-                -> MetaValue
-                -> m Value
-metaValueToJSON blockWriter inlineWriter (MetaMap metamap) = toJSON <$>
-  Traversable.mapM (metaValueToJSON blockWriter inlineWriter) metamap
-metaValueToJSON blockWriter inlineWriter (MetaList xs) = toJSON <$>
-  Traversable.mapM (metaValueToJSON blockWriter inlineWriter) xs
-metaValueToJSON _ _ (MetaBool b) = return $ toJSON b
-metaValueToJSON _ inlineWriter (MetaString s@('0':_:_)) =
-   -- don't treat string with leading 0 as string (#5479)
-   toJSON <$> inlineWriter (Builder.toList (Builder.text s))
-metaValueToJSON _ inlineWriter (MetaString s) =
-  case safeRead s of
-     Just (n :: Scientific) -> return $ Aeson.Number n
-     Nothing -> toJSON <$> inlineWriter (Builder.toList (Builder.text s))
-metaValueToJSON blockWriter _ (MetaBlocks bs) = toJSON <$> blockWriter bs
-metaValueToJSON blockWriter inlineWriter (MetaInlines [Str s]) =
-  metaValueToJSON blockWriter inlineWriter (MetaString s)
-metaValueToJSON _ inlineWriter (MetaInlines is) = toJSON <$> inlineWriter is
+metaValueToVal :: (Monad m, TemplateTarget a)
+               => ([Block] -> m (Doc a))
+               -> ([Inline] -> m (Doc a))
+               -> MetaValue
+               -> m (Val a)
+metaValueToVal blockWriter inlineWriter (MetaMap metamap) =
+  MapVal . Context <$> mapM (metaValueToVal blockWriter inlineWriter) metamap
+metaValueToVal blockWriter inlineWriter (MetaList xs) = ListVal <$>
+  mapM (metaValueToVal blockWriter inlineWriter) xs
+metaValueToVal _ _ (MetaBool True) = return $ SimpleVal "true"
+metaValueToVal _ _ (MetaBool False) = return NullVal
+metaValueToVal _ inlineWriter (MetaString s) =
+   SimpleVal <$> inlineWriter (Builder.toList (Builder.text s))
+metaValueToVal blockWriter _ (MetaBlocks bs) = SimpleVal <$> blockWriter bs
+metaValueToVal _ inlineWriter (MetaInlines is) = SimpleVal <$> inlineWriter is
 
--- | Retrieve a field value from a JSON object.
-getField :: FromJSON a
-         => String
-         -> Value
-         -> Maybe a
-getField field (Object hashmap) = do
-  result <- H.lookup (T.pack field) hashmap
-  case fromJSON result of
-       Success x -> return x
-       _         -> fail "Could not convert from JSON"
-getField _ _ = fail "Not a JSON object"
 
-setField :: ToJSON a
-         => String
-         -> a
-         -> Value
-         -> Value
--- | Set a field of a JSON object.  If the field already has a value,
+-- | Retrieve a field value from a template context.
+getField   :: FromContext a b => T.Text -> Context a -> Maybe b
+getField field (Context m) = M.lookup field m >>= fromVal
+
+-- | Set a field of a template context.  If the field already has a value,
 -- convert it into a list with the new value appended to the old value(s).
 -- This is a utility function to be used in preparing template contexts.
-setField field val (Object hashmap) =
-  Object $ H.insertWith combine (T.pack field) (toJSON val) hashmap
-  where combine newval oldval =
-          case fromJSON oldval of
-                Success xs -> toJSON $ xs ++ [newval]
-                _          -> toJSON [oldval, newval]
-setField _ _  x = x
+setField   :: ToContext a b => T.Text -> b -> Context a -> Context a
+setField field val (Context m) =
+  Context $ M.insertWith combine field (toVal val) m
+ where
+  combine newval (ListVal xs)   = ListVal (xs ++ [newval])
+  combine newval x              = ListVal [x, newval]
 
-resetField :: ToJSON a
-           => String
-           -> a
-           -> Value
-           -> Value
--- | Reset a field of a JSON object.  If the field already has a value,
--- the new value replaces it.
+-- | Reset a field of a template context.  If the field already has a
+-- value, the new value replaces it.
 -- This is a utility function to be used in preparing template contexts.
-resetField field val (Object hashmap) =
-  Object $ H.insert (T.pack field) (toJSON val) hashmap
-resetField _ _  x = x
+resetField :: ToContext a b => T.Text -> b -> Context a -> Context a
+resetField field val (Context m) =
+  Context (M.insert field (toVal val) m)
 
-defField :: ToJSON a
-         => String
-         -> a
-         -> Value
-         -> Value
--- | Set a field of a JSON object if it currently has no value.
+-- | Set a field of a template context if it currently has no value.
 -- If it has a value, do nothing.
 -- This is a utility function to be used in preparing template contexts.
-defField field val (Object hashmap) =
-  Object $ H.insertWith f (T.pack field) (toJSON val) hashmap
-    where f _newval oldval = oldval
-defField _ _  x = x
+defField   :: ToContext a b => T.Text -> b -> Context a -> Context a
+defField field val (Context m) =
+  Context (M.insertWith f field (toVal val) m)
+  where
+    f _newval oldval = oldval
 
 -- Produce an HTML tag with the given pandoc attributes.
-tagWithAttrs :: String -> Attr -> Doc
+tagWithAttrs :: HasChars a => T.Text -> Attr -> Doc a
 tagWithAttrs tag (ident,classes,kvs) = hsep
-  ["<" <> text tag
-  ,if null ident
+  ["<" <> text (T.unpack tag)
+  ,if T.null ident
       then empty
-      else "id=" <> doubleQuotes (text ident)
+      else "id=" <> doubleQuotes (text $ T.unpack ident)
   ,if null classes
       then empty
-      else "class=" <> doubleQuotes (text (unwords classes))
-  ,hsep (map (\(k,v) -> text k <> "=" <>
-                doubleQuotes (text (escapeStringForXML v))) kvs)
+      else "class=" <> doubleQuotes (text $ T.unpack (T.unwords classes))
+  ,hsep (map (\(k,v) -> text (T.unpack k) <> "=" <>
+                doubleQuotes (text $ T.unpack (escapeStringForXML v))) kvs)
   ] <> ">"
 
 isDisplayMath :: Inline -> Bool
@@ -221,88 +193,105 @@ fixDisplayMath (Para lst)
                          not (isDisplayMath x || isDisplayMath y)) lst
 fixDisplayMath x = x
 
-unsmartify :: WriterOptions -> String -> String
-unsmartify opts ('\8217':xs) = '\'' : unsmartify opts xs
-unsmartify opts ('\8230':xs) = "..." ++ unsmartify opts xs
-unsmartify opts ('\8211':xs)
-  | isEnabled Ext_old_dashes opts = '-' : unsmartify opts xs
-  | otherwise                     = "--" ++ unsmartify opts xs
-unsmartify opts ('\8212':xs)
-  | isEnabled Ext_old_dashes opts = "--" ++ unsmartify opts xs
-  | otherwise                     = "---" ++ unsmartify opts xs
-unsmartify opts ('\8220':xs) = '"' : unsmartify opts xs
-unsmartify opts ('\8221':xs) = '"' : unsmartify opts xs
-unsmartify opts ('\8216':xs) = '\'' : unsmartify opts xs
-unsmartify opts (x:xs) = x : unsmartify opts xs
-unsmartify _ [] = []
+unsmartify :: WriterOptions -> T.Text -> T.Text
+unsmartify opts = T.concatMap $ \c -> case c of
+  '\8217' -> "'"
+  '\8230' -> "..."
+  '\8211'
+    | isEnabled Ext_old_dashes opts -> "-"
+    | otherwise                     -> "--"
+  '\8212'
+    | isEnabled Ext_old_dashes opts -> "--"
+    | otherwise                     -> "---"
+  '\8220' -> "\""
+  '\8221' -> "\""
+  '\8216' -> "'"
+  _       -> T.singleton c
 
-gridTable :: Monad m
+gridTable :: (Monad m, HasChars a)
           => WriterOptions
-          -> (WriterOptions -> [Block] -> m Doc)
+          -> (WriterOptions -> [Block] -> m (Doc a))
           -> Bool -- ^ headless
           -> [Alignment]
           -> [Double]
           -> [[Block]]
           -> [[[Block]]]
-          -> m Doc
+          -> m (Doc a)
 gridTable opts blocksToDoc headless aligns widths headers rows = do
   -- the number of columns will be used in case of even widths
   let numcols = maximum (length aligns : length widths :
                            map length (headers:rows))
+  let officialWidthsInChars widths' = map (
+                        (\x -> if x < 1 then 1 else x) .
+                        (\x -> x - 3) . floor .
+                        (fromIntegral (writerColumns opts) *)
+                        ) widths'
   -- handleGivenWidths wraps the given blocks in order for them to fit
   -- in cells with given widths. the returned content can be
   -- concatenated with borders and frames
-  let handleGivenWidths widths' = do
-        let widthsInChars' = map (
-                      (\x -> if x < 1 then 1 else x) .
-                      (\x -> x - 3) . floor .
-                      (fromIntegral (writerColumns opts) *)
-                      ) widths'
-            -- replace page width (in columns) in the options with a
-            -- given width if smaller (adjusting by two)
-            useWidth w = opts{writerColumns = min (w - 2) (writerColumns opts)}
-            -- prepare options to use with header and row cells
-            columnOptions = map useWidth widthsInChars'
+  let handleGivenWidthsInChars widthsInChars' = do
+        -- replace page width (in columns) in the options with a
+        -- given width if smaller (adjusting by two)
+        let useWidth w = opts{writerColumns = min (w - 2) (writerColumns opts)}
+        -- prepare options to use with header and row cells
+        let columnOptions = map useWidth widthsInChars'
         rawHeaders' <- zipWithM blocksToDoc columnOptions headers
         rawRows' <- mapM
              (\cs -> zipWithM blocksToDoc columnOptions cs)
              rows
         return (widthsInChars', rawHeaders', rawRows')
+  let handleGivenWidths widths' = handleGivenWidthsInChars
+                                     (officialWidthsInChars widths')
   -- handleFullWidths tries to wrap cells to the page width or even
   -- more in cases where `--wrap=none`. thus the content here is left
   -- as wide as possible
-  let handleFullWidths = do
+  let handleFullWidths widths' = do
         rawHeaders' <- mapM (blocksToDoc opts) headers
         rawRows' <- mapM (mapM (blocksToDoc opts)) rows
         let numChars [] = 0
             numChars xs = maximum . map offset $ xs
-        let widthsInChars' =
+        let minWidthsInChars =
                 map numChars $ transpose (rawHeaders' : rawRows')
+        let widthsInChars' = zipWith max
+                              minWidthsInChars
+                              (officialWidthsInChars widths')
         return (widthsInChars', rawHeaders', rawRows')
   -- handleZeroWidths calls handleFullWidths to check whether a wide
   -- table would fit in the page. if the produced table is too wide,
   -- it calculates even widths and passes the content to
   -- handleGivenWidths
-  let handleZeroWidths = do
-        (widthsInChars', rawHeaders', rawRows') <- handleFullWidths
+  let handleZeroWidths widths' = do
+        (widthsInChars', rawHeaders', rawRows') <- handleFullWidths widths'
         if foldl' (+) 0 widthsInChars' > writerColumns opts
-           then -- use even widths
-                handleGivenWidths
-                  (replicate numcols (1.0 / fromIntegral numcols) :: [Double])
+           then do -- use even widths except for thin columns
+             let evenCols  = max 5
+                              (((writerColumns opts - 1) `div` numcols) - 3)
+             let (numToExpand, colsToExpand) =
+                   foldr (\w (n, tot) -> if w < evenCols
+                                            then (n, tot + (evenCols - w))
+                                            else (n + 1, tot))
+                                   (0,0) widthsInChars'
+             let expandAllowance = colsToExpand `div` numToExpand
+             let newWidthsInChars = map (\w -> if w < evenCols
+                                                  then w
+                                                  else min
+                                                       (evenCols + expandAllowance)
+                                                       w)
+                                        widthsInChars'
+             handleGivenWidthsInChars newWidthsInChars
            else return (widthsInChars', rawHeaders', rawRows')
   -- render the contents of header and row cells differently depending
   -- on command line options, widths given in this specific table, and
   -- cells' contents
   let handleWidths
-        | writerWrapText opts == WrapNone  = handleFullWidths
-        | all (== 0) widths                  = handleZeroWidths
+        | writerWrapText opts == WrapNone    = handleFullWidths widths
+        | all (== 0) widths                  = handleZeroWidths widths
         | otherwise                          = handleGivenWidths widths
   (widthsInChars, rawHeaders, rawRows) <- handleWidths
   let hpipeBlocks blocks = hcat [beg, middle, end]
-        where h       = maximum (1 : map height blocks)
-              sep'    = lblock 3 $ vcat (replicate h (text " | "))
-              beg     = lblock 2 $ vcat (replicate h (text "| "))
-              end     = lblock 2 $ vcat (replicate h (text " |"))
+        where sep'    = vfill " | "
+              beg     = vfill "| "
+              end     = vfill " |"
               middle  = chomp $ hcat $ intersperse sep' blocks
   let makeRow = hpipeBlocks . zipWith lblock widthsInChars
   let head' = makeRow rawHeaders
@@ -335,22 +324,20 @@ gridTable opts blocksToDoc headless aligns widths headers rows = do
            body $$
            border '-' (repeat AlignDefault) widthsInChars
 
-
-
 -- | Retrieve the metadata value for a given @key@
 -- and convert to Bool.
-lookupMetaBool :: String -> Meta -> Bool
+lookupMetaBool :: T.Text -> Meta -> Bool
 lookupMetaBool key meta =
   case lookupMeta key meta of
-      Just (MetaBlocks _)     -> True
-      Just (MetaInlines _)    -> True
-      Just (MetaString (_:_)) -> True
-      Just (MetaBool True)    -> True
-      _                       -> False
+      Just (MetaBlocks _)  -> True
+      Just (MetaInlines _) -> True
+      Just (MetaString x)  -> not (T.null x)
+      Just (MetaBool True) -> True
+      _                    -> False
 
 -- | Retrieve the metadata value for a given @key@
 -- and extract blocks.
-lookupMetaBlocks :: String -> Meta -> [Block]
+lookupMetaBlocks :: T.Text -> Meta -> [Block]
 lookupMetaBlocks key meta =
   case lookupMeta key meta of
          Just (MetaBlocks bs)   -> bs
@@ -360,7 +347,7 @@ lookupMetaBlocks key meta =
 
 -- | Retrieve the metadata value for a given @key@
 -- and extract inlines.
-lookupMetaInlines :: String -> Meta -> [Inline]
+lookupMetaInlines :: T.Text -> Meta -> [Inline]
 lookupMetaInlines key meta =
   case lookupMeta key meta of
          Just (MetaString s)           -> [Str s]
@@ -371,15 +358,14 @@ lookupMetaInlines key meta =
 
 -- | Retrieve the metadata value for a given @key@
 -- and convert to String.
-lookupMetaString :: String -> Meta -> String
+lookupMetaString :: T.Text -> Meta -> T.Text
 lookupMetaString key meta =
   case lookupMeta key meta of
          Just (MetaString s)    -> s
          Just (MetaInlines ils) -> stringify ils
          Just (MetaBlocks bs)   -> stringify bs
-         Just (MetaBool b)      -> show b
+         Just (MetaBool b)      -> T.pack (show b)
          _                      -> ""
-
 
 toSuperscript :: Char -> Maybe Char
 toSuperscript '1' = Just '\x00B9'
@@ -413,17 +399,32 @@ toTableOfContents :: WriterOptions
                   -> [Block]
                   -> Block
 toTableOfContents opts bs =
-  BulletList $ map (elementToListItem opts) (hierarchicalize bs)
+  BulletList $ filter (not . null)
+             $ map (sectionToListItem opts)
+             $ makeSections (writerNumberSections opts) Nothing bs
 
 -- | Converts an Element to a list item for a table of contents,
-elementToListItem :: WriterOptions -> Element -> [Block]
-elementToListItem opts (Sec lev _nums (ident,_,_) headerText subsecs)
-  = Plain headerLink : [BulletList listContents | not (null subsecs)
-                                                , lev < writerTOCDepth opts]
+sectionToListItem :: WriterOptions -> Block -> [Block]
+sectionToListItem opts (Div (ident,_,_)
+                         (Header lev (_,classes,kvs) ils : subsecs))
+  | not (isNothing (lookup "number" kvs) && "unlisted" `elem` classes)
+  = Plain headerLink : [BulletList listContents | not (null listContents)
+                                              , lev < writerTOCDepth opts]
  where
-   headerText' = walk deNote headerText
-   headerLink = if null ident
+   num = fromMaybe "" $ lookup "number" kvs
+   addNumber  = if T.null num
+                   then id
+                   else (Span ("",["toc-section-number"],[])
+                           [Str num] :) . (Space :)
+   headerText' = addNumber $ walk (deLink . deNote) ils
+   headerLink = if T.null ident
                    then headerText'
-                   else [Link nullAttr headerText' ('#':ident, "")]
-   listContents = map (elementToListItem opts) subsecs
-elementToListItem _ (Blk _) = []
+                   else [Link nullAttr headerText' ("#" <> ident, "")]
+   listContents = filter (not . null) $ map (sectionToListItem opts) subsecs
+sectionToListItem _ _ = []
+
+endsWithPlain :: [Block] -> Bool
+endsWithPlain xs =
+  case lastMay xs of
+    Just (Plain{}) -> True
+    _              -> False

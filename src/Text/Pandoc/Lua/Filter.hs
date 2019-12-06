@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {- |
 Module      : Text.Pandoc.Lua.Filter
@@ -20,6 +20,7 @@ module Text.Pandoc.Lua.Filter ( LuaFilterFunction
                               , walkBlocks
                               , blockElementNames
                               , inlineElementNames
+                              , module Text.Pandoc.Lua.Walk
                               ) where
 import Prelude
 import Control.Monad (mplus, (>=>))
@@ -31,7 +32,8 @@ import Data.Map (Map)
 import Foreign.Lua (Lua, Peekable, Pushable)
 import Text.Pandoc.Definition
 import Text.Pandoc.Lua.Marshaling ()
-import Text.Pandoc.Walk (walkM, Walkable)
+import Text.Pandoc.Lua.Walk (SingletonsList (..))
+import Text.Pandoc.Walk (Walkable (walkM))
 
 import qualified Data.Map.Strict as Map
 import qualified Foreign.Lua as Lua
@@ -91,7 +93,10 @@ pushFilterFunction :: LuaFilterFunction -> Lua ()
 pushFilterFunction (LuaFilterFunction fnRef) =
   Lua.getref Lua.registryindex fnRef
 
-
+-- | Fetch either a list of elements from the stack. If there is a single
+-- element instead of a list, fetch that element as a singleton list. If the top
+-- of the stack is nil, return the default element that was passed to this
+-- function. If none of these apply, raise an error.
 elementOrList :: Peekable a => a -> Lua [a]
 elementOrList x = do
   let topOfStack = Lua.stackTop
@@ -115,6 +120,12 @@ tryFilter (LuaFilter fnMap) x =
     Just fn -> runFilterFunction fn x *> elementOrList x
     Nothing -> return [x]
 
+-- | Apply filter on a sequence of AST elements.
+runOnSequence :: (Data a, Peekable a, Pushable a)
+              => LuaFilter -> SingletonsList a -> Lua (SingletonsList a)
+runOnSequence lf (SingletonsList xs) =
+  SingletonsList <$> mconcatMapM (tryFilter lf) xs
+
 -- | Push a value to the stack via a lua filter function. The filter function is
 -- called with given element as argument and is expected to return an element.
 -- Alternatively, the function can return nothing or nil, in which case the
@@ -129,22 +140,26 @@ walkMWithLuaFilter :: LuaFilter -> Pandoc -> Lua Pandoc
 walkMWithLuaFilter f =
   walkInlines f >=> walkBlocks f >=> walkMeta f >=> walkPandoc f
 
-mconcatMapM :: (Monad m, Functor m) => (a -> m [a]) -> [a] -> m [a]
+mconcatMapM :: (Monad m) => (a -> m [a]) -> [a] -> m [a]
 mconcatMapM f = fmap mconcat . mapM f
 
 hasOneOf :: LuaFilter -> [String] -> Bool
 hasOneOf (LuaFilter fnMap) = any (\k -> Map.member k fnMap)
 
-walkInlines :: Walkable [Inline] a => LuaFilter -> a -> Lua a
-walkInlines f =
-  if f `hasOneOf` inlineElementNames
-     then walkM (mconcatMapM (tryFilter f :: Inline -> Lua [Inline]))
+walkInlines :: Walkable (SingletonsList Inline) a => LuaFilter -> a -> Lua a
+walkInlines lf =
+  let f :: SingletonsList Inline -> Lua (SingletonsList Inline)
+      f = runOnSequence lf
+  in if lf `hasOneOf` inlineElementNames
+     then walkM f
      else return
 
-walkBlocks :: Walkable [Block] a => LuaFilter -> a -> Lua a
-walkBlocks f =
-  if f `hasOneOf` blockElementNames
-     then walkM (mconcatMapM (tryFilter f :: Block -> Lua [Block]))
+walkBlocks :: Walkable (SingletonsList Block) a => LuaFilter -> a -> Lua a
+walkBlocks lf =
+  let f :: SingletonsList Block -> Lua (SingletonsList Block)
+      f = runOnSequence lf
+  in if lf `hasOneOf` blockElementNames
+     then walkM f
      else return
 
 walkMeta :: LuaFilter -> Pandoc -> Lua Pandoc
@@ -165,7 +180,7 @@ constructorsFor :: DataType -> [String]
 constructorsFor x = map show (dataTypeConstrs x)
 
 inlineElementNames :: [String]
-inlineElementNames = "Inline" : constructorsFor (dataTypeOf (Str []))
+inlineElementNames = "Inline" : constructorsFor (dataTypeOf (Str mempty))
 
 blockElementNames :: [String]
 blockElementNames = "Block" : constructorsFor (dataTypeOf (Para []))

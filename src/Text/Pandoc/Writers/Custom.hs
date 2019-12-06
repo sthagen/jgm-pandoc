@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE NoImplicitPrelude  #-}
+{-# LANGUAGE OverloadedStrings  #-}
 {- |
    Module      : Text.Pandoc.Writers.Custom
    Copyright   : Copyright (C) 2012-2019 John MacFarlane
@@ -17,35 +18,35 @@ import Prelude
 import Control.Arrow ((***))
 import Control.Exception
 import Control.Monad (when)
-import Data.Char (toLower)
 import Data.List (intersperse)
 import qualified Data.Map as M
+import qualified Data.Text as T
 import Data.Text (Text, pack)
 import Data.Typeable
 import Foreign.Lua (Lua, Pushable)
+import Text.DocLayout (render, literal)
 import Text.Pandoc.Class (PandocIO)
 import Text.Pandoc.Definition
-import Text.Pandoc.Error
 import Text.Pandoc.Lua (Global (..), LuaException (LuaException),
                         runLua, setGlobals)
 import Text.Pandoc.Lua.Util (addField, dofileWithTraceback)
 import Text.Pandoc.Options
-import Text.Pandoc.Templates
+import Text.Pandoc.Templates (renderTemplate)
 import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.Writers.Shared
 
 import qualified Foreign.Lua as Lua
 
-attrToMap :: Attr -> M.Map String String
+attrToMap :: Attr -> M.Map T.Text T.Text
 attrToMap (id',classes,keyvals) = M.fromList
     $ ("id", id')
-    : ("class", unwords classes)
+    : ("class", T.unwords classes)
     : keyvals
 
 newtype Stringify a = Stringify a
 
 instance Pushable (Stringify Format) where
-  push (Stringify (Format f)) = Lua.push (map toLower f)
+  push (Stringify (Format f)) = Lua.push (T.toLower f)
 
 instance Pushable (Stringify [Inline]) where
   push (Stringify ils) = Lua.push =<< inlineListToCustom ils
@@ -82,7 +83,7 @@ instance (Pushable a, Pushable b) => Pushable (KeyValue a b) where
     Lua.push v
     Lua.rawset (Lua.nthFromTop 3)
 
-data PandocLuaException = PandocLuaException String
+data PandocLuaException = PandocLuaException Text
     deriving (Show, Typeable)
 
 instance Exception PandocLuaException
@@ -99,22 +100,21 @@ writeCustom luaFile opts doc@(Pandoc meta _) = do
     -- check for error in lua script (later we'll change the return type
     -- to handle this more gracefully):
     when (stat /= Lua.OK) $
-      Lua.tostring' (-1) >>= throw . PandocLuaException . UTF8.toString
+      Lua.tostring' (-1) >>= throw . PandocLuaException . UTF8.toText
     rendered <- docToCustom opts doc
-    context <- metaToJSON opts
-               blockListToCustom
-               inlineListToCustom
+    context <- metaToContext opts
+               (fmap (literal . pack) . blockListToCustom)
+               (fmap (literal . pack) . inlineListToCustom)
                meta
-    return (rendered, context)
+    return (pack rendered, context)
   let (body, context) = case res of
         Left (LuaException msg) -> throw (PandocLuaException msg)
         Right x -> x
-  case writerTemplate opts of
-       Nothing  -> return $ pack body
-       Just tpl ->
-         case applyTemplate (pack tpl) $ setField "body" body context of
-              Left e  -> throw (PandocTemplateError e)
-              Right r -> return (pack r)
+  return $
+    case writerTemplate opts of
+       Nothing  -> body
+       Just tpl -> render Nothing $
+                    renderTemplate tpl $ setField "body" body context
 
 docToCustom :: WriterOptions -> Pandoc -> Lua String
 docToCustom opts (Pandoc (Meta metamap) blocks) = do

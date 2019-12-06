@@ -89,6 +89,18 @@ tests = [ testGroup "base tag"
           , test htmlNativeDivs "<main> followed by text" $ "<main>main content</main>non-main content" =?>
             doc (divWith ("", [], [("role", "main")]) (plain (text "main content")) <> plain (text "non-main content"))
           ]
+        , testGroup "samp"
+          [
+            test html "inline samp block" $ 
+            "<samp>Answer is 42</samp>" =?> 
+            plain (codeWith ("",["sample"],[]) "Answer is 42")
+          ]
+        , testGroup "var"
+        [
+          test html "inline var block" $ 
+          "<var>result</var>" =?> 
+          plain (codeWith ("",["variable"],[]) "result")
+        ]
         , askOption $ \(QuickCheckTests numtests) ->
             testProperty "Round trip" $
               withMaxSuccess (if QuickCheckTests numtests == defaultValue

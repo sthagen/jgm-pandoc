@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE NoImplicitPrelude   #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {- |
@@ -19,12 +20,15 @@ module Text.Pandoc.App.OutputSettings
   , optToOutputSettings
   ) where
 import Prelude
+import qualified Data.Map as M
+import qualified Data.Text as T
+import Text.DocTemplates (toVal, Context(..), Val(..))
 import qualified Control.Exception as E
 import Control.Monad
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.Trans
 import Data.Char (toLower)
-import Data.List (find, isPrefixOf, isSuffixOf)
+import Data.List (find, isPrefixOf)
 import Data.Maybe (fromMaybe)
 import Skylighting (defaultSyntaxMap)
 import Skylighting.Parser (addSyntaxDefinition, parseSyntaxDefinition)
@@ -32,24 +36,25 @@ import System.Directory (getCurrentDirectory)
 import System.Exit (exitSuccess)
 import System.FilePath
 import System.IO (stdout)
+import Data.String
 import Text.Pandoc
 import Text.Pandoc.App.FormatHeuristics (formatFromFilePaths)
 import Text.Pandoc.App.Opt (Opt (..))
-import Text.Pandoc.App.CommandLineOptions (engines)
-import Text.Pandoc.BCP47 (Lang (..), parseBCP47)
+import Text.Pandoc.App.CommandLineOptions (engines, lookupHighlightStyle,
+                                          setVariable)
 import qualified Text.Pandoc.UTF8 as UTF8
+
+readUtf8File :: PandocMonad m => FilePath -> m T.Text
+readUtf8File = fmap UTF8.toText . readFileStrict
 
 -- | Settings specifying how document output should be produced.
 data OutputSettings = OutputSettings
-  { outputFormat :: String
+  { outputFormat :: T.Text
   , outputWriter :: Writer PandocIO
-  , outputWriterName :: String
+  , outputWriterName :: T.Text
   , outputWriterOptions :: WriterOptions
   , outputPdfProgram :: Maybe String
   }
-
-readUtf8File :: PandocMonad m => FilePath -> m String
-readUtf8File = fmap UTF8.toString . readFileStrict
 
 -- | Get output settings from command line options.
 optToOutputSettings :: Opt -> PandocIO OutputSettings
@@ -58,92 +63,102 @@ optToOutputSettings opts = do
 
   when (optDumpArgs opts) . liftIO $ do
     UTF8.hPutStrLn stdout outputFile
-    mapM_ (UTF8.hPutStrLn stdout) (optInputFiles opts)
+    mapM_ (UTF8.hPutStrLn stdout) (fromMaybe [] $ optInputFiles opts)
     exitSuccess
 
   epubMetadata <- case optEpubMetadata opts of
                          Nothing -> return Nothing
                          Just fp -> Just <$> readUtf8File fp
 
-  let pdfOutput = map toLower (takeExtension outputFile) == ".pdf"
+  let pdfOutput = map toLower (takeExtension outputFile) == ".pdf" ||
+                  optTo opts == Just "pdf"
   (writerName, maybePdfProg) <-
     if pdfOutput
-       then liftIO $ pdfWriterAndProg (optWriter opts) (optPdfEngine opts)
-       else case optWriter opts of
-              Nothing  ->
-                return (formatFromFilePaths "html" [outputFile], Nothing)
-              Just f   -> return (f, Nothing)
+       then liftIO $ pdfWriterAndProg
+               (case optTo opts of
+                  Just "pdf" -> Nothing
+                  x          -> x)
+               (optPdfEngine opts)
+       else case optTo opts of
+              Just f -> return (f, Nothing)
+              Nothing
+               | outputFile == "-" -> return ("html", Nothing)
+               | otherwise ->
+                     case formatFromFilePaths [outputFile] of
+                           Nothing -> do
+                             report $ CouldNotDeduceFormat
+                                [T.pack $ takeExtension outputFile] "html"
+                             return ("html", Nothing)
+                           Just f  -> return (f, Nothing)
 
-  let format = if ".lua" `isSuffixOf` writerName
+  let format = if ".lua" `T.isSuffixOf` writerName
                   then writerName
-                  else map toLower $ baseWriterName writerName
+                  else T.toLower $ baseWriterName writerName
 
-  (writer, writerExts) <-
-            if ".lua" `isSuffixOf` format
+  (writer :: Writer PandocIO, writerExts) <-
+            if ".lua" `T.isSuffixOf` format
                then return (TextWriter
-                       (\o d -> writeCustom writerName o d)
+                       (\o d -> writeCustom (T.unpack writerName) o d)
                                :: Writer PandocIO, mempty)
-               else case getWriter (map toLower writerName) of
-                         Left e  -> throwError $ PandocAppError $
-                           if format == "pdf"
-                              then e ++ "\n" ++ pdfIsNoWriterErrorMsg
-                              else e
-                         Right (w, es) -> return (w :: Writer PandocIO, es)
-
+               else getWriter (T.toLower writerName)
 
   let standalone = optStandalone opts || not (isTextFormat format) || pdfOutput
-
-  let addStringAsVariable varname s vars = return $ (varname, s) : vars
 
   let addSyntaxMap existingmap f = do
         res <- liftIO (parseSyntaxDefinition f)
         case res of
-              Left errstr -> throwError $ PandocSyntaxMapError errstr
+              Left errstr -> throwError $ PandocSyntaxMapError $ T.pack errstr
               Right syn   -> return $ addSyntaxDefinition syn existingmap
 
   syntaxMap <- foldM addSyntaxMap defaultSyntaxMap
                      (optSyntaxDefinitions opts)
 
-  -- note: this reverses the list constructed in option parsing,
-  -- which in turn was reversed from the command-line order,
-  -- so we end up with the correct order in the variable list:
-  let withList _ [] vars     = return vars
-      withList f (x:xs) vars = f x vars >>= withList f xs
+  hlStyle <- maybe (return Nothing) (fmap Just . lookupHighlightStyle . T.unpack)
+                (optHighlightStyle opts)
 
-  let addContentsAsVariable varname fp vars = do
-        s <- UTF8.toString . fst <$> fetchItem fp
-        return $ (varname, s) : vars
+  let setVariableM k v = return . setVariable k (fromString v)
+
+  let setListVariableM _ [] ctx = return ctx
+      setListVariableM k vs ctx = do
+        let ctxMap = unContext ctx
+        return $ Context $
+          case M.lookup k ctxMap of
+              Just (ListVal xs) -> M.insert k
+                                  (ListVal $ xs ++ map toVal vs) ctxMap
+              Just v -> M.insert k
+                         (ListVal $ v : map toVal vs) ctxMap
+              Nothing -> M.insert k (toVal vs) ctxMap
+
+  let getTextContents fp = UTF8.toText . fst <$> fetchItem (T.pack fp)
+
+  let setFilesVariableM k fps ctx = do
+        xs <- mapM getTextContents fps
+        setListVariableM k xs ctx
 
   curdir <- liftIO getCurrentDirectory
 
   variables <-
-    withList (addStringAsVariable "sourcefile")
-             (reverse $ optInputFiles opts)
-             (("outputfile", fromMaybe "-" (optOutputFile opts))
-              : optVariables opts)
-             -- we reverse this list because, unlike
-             -- the other option lists here, it is
-             -- not reversed when parsed from CLI arguments.
-             -- See withList, above.
+    return (optVariables opts)
     >>=
-    withList (addContentsAsVariable "include-before")
-             (optIncludeBeforeBody opts)
+    setListVariableM "sourcefile"
+      (maybe ["-"] (fmap T.pack) (optInputFiles opts))
     >>=
-    withList (addContentsAsVariable "include-after")
-             (optIncludeAfterBody opts)
+    setVariableM "outputfile" outputFile
     >>=
-    withList (addContentsAsVariable "header-includes")
-             (optIncludeInHeader opts)
+    setFilesVariableM "include-before" (optIncludeBeforeBody opts)
     >>=
-    withList (addStringAsVariable "css") (optCss opts)
+    setFilesVariableM "include-after" (optIncludeAfterBody opts)
     >>=
-    maybe return (addStringAsVariable "title-prefix")
-                 (optTitlePrefix opts)
+    setFilesVariableM "header-includes" (optIncludeInHeader opts)
     >>=
-    maybe return (addStringAsVariable "epub-cover-image")
+    setListVariableM "css" (map T.pack $ optCss opts)
+    >>=
+    maybe return (setVariableM "title-prefix" . T.unpack) (optTitlePrefix opts)
+    >>=
+    maybe return (setVariableM "epub-cover-image")
                  (optEpubCoverImage opts)
     >>=
-    addStringAsVariable "curdir" curdir
+    setVariableM "curdir" curdir
     >>=
     (\vars ->  if format == "dzslides"
                   then do
@@ -153,24 +168,24 @@ optToOutputSettings opts = do
                       let dzcore = unlines
                                  $ dropWhile (not . (dzline `isPrefixOf`))
                                  $ lines dztempl
-                      return $ ("dzslides-core", dzcore) : vars
+                      setVariableM "dzslides-core" dzcore vars
                   else return vars)
 
-  templ <- case optTemplate opts of
+  templStr <- case optTemplate opts of
                   _ | not standalone -> return Nothing
                   Nothing -> Just <$> getDefaultTemplate format
                   Just tp -> do
                     -- strip off extensions
                     let tp' = case takeExtension tp of
-                                   "" -> tp <.> format
+                                   "" -> tp <.> T.unpack format
                                    _  -> tp
-                    Just . UTF8.toString <$>
+                    Just . UTF8.toText <$>
                           ((do surl <- stSourceURL <$> getCommonState
                                -- we don't want to look for templates remotely
                                -- unless the full URL is specified:
                                modifyCommonState $ \st -> st{
                                   stSourceURL = Nothing }
-                               (bs, _) <- fetchItem tp'
+                               (bs, _) <- fetchItem $ T.pack tp'
                                modifyCommonState $ \st -> st{
                                   stSourceURL = surl }
                                return bs)
@@ -181,11 +196,15 @@ optToOutputSettings opts = do
                                        readDataFile ("templates" </> tp')
                                     _ -> throwError e))
 
-  case lookup "lang" (optMetadata opts) of
-         Just l  -> case parseBCP47 l of
-                         Left _   -> return ()
-                         Right l' -> setTranslations l'
-         Nothing -> setTranslations $ Lang "en" "" "US" []
+  let templatePath = fromMaybe "" $ optTemplate opts
+
+  templ <- case templStr of
+             Nothing -> return Nothing
+             Just ts -> do
+               res <- compileTemplate templatePath ts
+               case res of
+                 Left  e -> throwError $ PandocTemplateError $ T.pack e
+                 Right t -> return $ Just t
 
   let writerOpts = def {
           writerTemplate         = templ
@@ -202,7 +221,7 @@ optToOutputSettings opts = do
         , writerReferenceLinks   = optReferenceLinks opts
         , writerReferenceLocation = optReferenceLocation opts
         , writerDpi              = optDpi opts
-        , writerWrapText         = optWrapText opts
+        , writerWrapText         = optWrap opts
         , writerColumns          = optColumns opts
         , writerEmailObfuscation = optEmailObfuscation opts
         , writerIdentifierPrefix = optIdentifierPrefix opts
@@ -210,9 +229,9 @@ optToOutputSettings opts = do
         , writerTopLevelDivision = optTopLevelDivision opts
         , writerListings         = optListings opts
         , writerSlideLevel       = optSlideLevel opts
-        , writerHighlightStyle   = optHighlightStyle opts
+        , writerHighlightStyle   = hlStyle
         , writerSetextHeaders    = optSetextHeaders opts
-        , writerEpubSubdirectory = optEpubSubdirectory opts
+        , writerEpubSubdirectory = T.pack $ optEpubSubdirectory opts
         , writerEpubMetadata     = epubMetadata
         , writerEpubFonts        = optEpubFonts opts
         , writerEpubChapterLevel = optEpubChapterLevel opts
@@ -229,24 +248,16 @@ optToOutputSettings opts = do
     , outputPdfProgram = maybePdfProg
     }
 
-baseWriterName :: String -> String
-baseWriterName = takeWhile (\c -> c /= '+' && c /= '-')
+baseWriterName :: T.Text -> T.Text
+baseWriterName = T.takeWhile (\c -> c /= '+' && c /= '-')
 
-pdfIsNoWriterErrorMsg :: String
-pdfIsNoWriterErrorMsg =
-  "To create a pdf using pandoc, use " ++
-  "-t latex|beamer|context|ms|html5" ++
-  "\nand specify an output file with " ++
-  ".pdf extension (-o filename.pdf)."
-
-pdfWriterAndProg :: Maybe String              -- ^ user-specified writer name
+pdfWriterAndProg :: Maybe T.Text              -- ^ user-specified writer name
                  -> Maybe String              -- ^ user-specified pdf-engine
-                 -> IO (String, Maybe String) -- ^ IO (writerName, maybePdfEngineProg)
-pdfWriterAndProg mWriter mEngine = do
-  let panErr msg = liftIO $ E.throwIO $ PandocAppError msg
+                 -> IO (T.Text, Maybe String) -- ^ IO (writerName, maybePdfEngineProg)
+pdfWriterAndProg mWriter mEngine =
   case go mWriter mEngine of
       Right (writ, prog) -> return (writ, Just prog)
-      Left err           -> panErr err
+      Left err           -> liftIO $ E.throwIO $ PandocAppError err
     where
       go Nothing Nothing       = Right ("latex", "pdflatex")
       go (Just writer) Nothing = (writer,) <$> engineForWriter writer
@@ -254,19 +265,20 @@ pdfWriterAndProg mWriter mEngine = do
       go (Just writer) (Just engine) =
            case find (== (baseWriterName writer, takeBaseName engine)) engines of
                 Just _  -> Right (writer, engine)
-                Nothing -> Left $ "pdf-engine " ++ engine ++
-                           " is not compatible with output format " ++ writer
+                Nothing -> Left $ "pdf-engine " <> T.pack engine <>
+                           " is not compatible with output format " <> writer
 
       writerForEngine eng = case [f | (f,e) <- engines, e == eng] of
                                  fmt : _ -> Right fmt
                                  []      -> Left $
-                                   "pdf-engine " ++ eng ++ " not known"
+                                   "pdf-engine " <> T.pack eng <> " not known"
 
-      engineForWriter "pdf" = Left pdfIsNoWriterErrorMsg
+      engineForWriter "pdf" = Left "pdf writer"
       engineForWriter w = case [e |  (f,e) <- engines, f == baseWriterName w] of
                                 eng : _ -> Right eng
                                 []      -> Left $
-                                   "cannot produce pdf output from " ++ w
+                                   "cannot produce pdf output from " <> w
 
-isTextFormat :: String -> Bool
-isTextFormat s = s `notElem` ["odt","docx","epub2","epub3","epub","pptx"]
+isTextFormat :: T.Text -> Bool
+isTextFormat s =
+  s `notElem` ["odt","docx","epub2","epub3","epub","pptx","pdf"]

@@ -13,6 +13,11 @@ import Text.Pandoc.Builder
 html :: (ToPandoc a) => a -> String
 html = unpack . purely (writeHtml4String def{ writerWrapText = WrapNone }) . toPandoc
 
+htmlQTags :: (ToPandoc a) => a -> String
+htmlQTags = unpack
+  . purely (writeHtml4String def{ writerWrapText = WrapNone, writerHtmlQTags = True })
+  . toPandoc
+
 {-
   "my test" =: X =?> Y
 
@@ -48,4 +53,38 @@ tests = [ testGroup "inline code"
             definitionList [(mempty, [para $ text "foo bar"])]
             =?> "<dl><dt></dt><dd><p>foo bar</p></dd></dl>"
           ]
+        , testGroup "quotes"
+          [ "quote with cite attribute (without q-tags)" =:
+            doubleQuoted (spanWith ("", [], [("cite", "http://example.org")]) (str "examples"))
+            =?> "“<span cite=\"http://example.org\">examples</span>”"
+          , tQ "quote with cite attribute (with q-tags)" $
+            doubleQuoted (spanWith ("", [], [("cite", "http://example.org")]) (str "examples"))
+            =?> "<q cite=\"http://example.org\">examples</q>"
+          ]
+        , testGroup "sample"
+          [ "sample should be rendered correctly" =:
+            plain (codeWith ("",["sample"],[]) "Answer is 42") =?>
+            "<samp>Answer is 42</samp>"
+          ]
+        , testGroup "variable"
+          [ "variable should be rendered correctly" =:
+            plain (codeWith ("",["variable"],[]) "result") =?>
+            "<var>result</var>"
+          ]
+        , testGroup "sample with style"
+          [ "samp should wrap highlighted code" =:
+            codeWith ("",["sample","haskell"],[]) ">>="
+            =?> ("<samp><code class=\"sourceCode haskell\">" ++ 
+                "<span class=\"op\">&gt;&gt;=</span></code></samp>")
+          ]
+        , testGroup "variable with style"
+          [ "var should wrap highlighted code" =:
+            codeWith ("",["haskell","variable"],[]) ">>="
+            =?> ("<var><code class=\"sourceCode haskell\">" ++ 
+                "<span class=\"op\">&gt;&gt;=</span></code></var>")
+          ]
         ]
+        where
+          tQ :: (ToString a, ToPandoc a)
+               => String -> (a, String) -> TestTree
+          tQ = test htmlQTags

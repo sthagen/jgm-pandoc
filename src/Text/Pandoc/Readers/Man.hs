@@ -1,4 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE ViewPatterns      #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Readers.Man
    Copyright   : Copyright (C) 2018-2019 Yan Pashkovsky and John MacFarlane
@@ -63,7 +65,7 @@ readWithMTokens :: PandocMonad m
         -> [RoffToken]                       -- ^ input
         -> m (Either PandocError a)
 readWithMTokens parser state input =
-  let leftF = PandocParsecError . intercalate "\n" $ show <$> input
+  let leftF = PandocParsecError . T.pack . intercalate "\n" $ show <$> input
   in mapLeft leftF `liftM` runParserT parser state "source" input
 
 parseMan :: PandocMonad m => ManParser m Pandoc
@@ -131,7 +133,7 @@ parseTable = do
       Left _  -> do
         res' <- lift $ readWithMTokens blockstcell st ts'
         case res' of
-          Left _  -> fail "Could not parse table cell"
+          Left _  -> Prelude.fail "Could not parse table cell"
           Right x -> do
             modifyState $ \s -> s{ tableCellsPlain = False }
             return x
@@ -141,7 +143,7 @@ parseTable = do
   isHrule ([cellfmt], _) = columnType cellfmt `elem` ['_','-','=']
   isHrule (_, [RoffTokens ss]) =
     case Foldable.toList ss of
-      [TextLine [RoffStr [c]]] -> c `elem` ['_','-','=']
+      [TextLine [RoffStr (T.unpack -> [c])]] -> c `elem` ['_','-','=']
       _                     -> False
   isHrule _ = False
 
@@ -191,7 +193,7 @@ memptyLine = msatisfy isEmptyLine where
   isEmptyLine EmptyLine = True
   isEmptyLine _ = False
 
-mmacro :: PandocMonad m => String -> ManParser m RoffToken
+mmacro :: PandocMonad m => T.Text -> ManParser m RoffToken
 mmacro mk = msatisfy isControlLine where
   isControlLine (ControlLine mk' _ _) | mk == mk' = True
                             | otherwise = False
@@ -284,7 +286,7 @@ parseInline = try $ do
     _ -> mzero
 
 handleInlineMacro :: PandocMonad m
-                  => String -> [Arg] -> SourcePos -> ManParser m Inlines
+                  => T.Text -> [Arg] -> SourcePos -> ManParser m Inlines
 handleInlineMacro mname args _pos = do
   case mname of
     "UR" -> parseLink args
@@ -323,8 +325,7 @@ parseItalic [] = do
 parseItalic args = return $
   emph $ mconcat $ intersperse B.space $ map linePartsToInlines args
 
-parseAlternatingFonts :: PandocMonad m
-                      => [Inlines -> Inlines]
+parseAlternatingFonts :: [Inlines -> Inlines]
                       -> [Arg]
                       -> ManParser m Inlines
 parseAlternatingFonts constructors args = return $ mconcat $
@@ -340,7 +341,7 @@ bareIP = msatisfy isBareIP where
   isBareIP (ControlLine "IP" [] _) = True
   isBareIP _                  = False
 
-endmacro :: PandocMonad m => String -> ManParser m ()
+endmacro :: PandocMonad m => T.Text -> ManParser m ()
 endmacro name = void (mmacro name)
              <|> lookAhead (void newBlockMacro)
              <|> lookAhead eof
@@ -357,7 +358,7 @@ parseCodeBlock = try $ do
   toks <- (mmacro "nf" *> manyTill codeline (endmacro "fi"))
       <|> (mmacro "EX" *> manyTill codeline (endmacro "EE"))
   optional (mmacro "in")
-  return $ codeBlock (intercalate "\n" $ catMaybes toks)
+  return $ codeBlock (T.intercalate "\n" $ catMaybes toks)
 
   where
 
@@ -367,7 +368,7 @@ parseCodeBlock = try $ do
       ControlLine "PP" _ _ -> return $ Just "" -- .PP sometimes used for blank line
       ControlLine mname args pos -> do
         (Just . query getText <$> handleInlineMacro mname args pos) <|>
-          do report $ SkippedContent ('.':mname) pos
+          do report $ SkippedContent ("." <> mname) pos
              return Nothing
       Tbl _ _ pos     -> do
         report $ SkippedContent "TABLE" pos
@@ -376,12 +377,12 @@ parseCodeBlock = try $ do
       TextLine ss
         | not (null ss)
         , all isFontToken ss -> return Nothing
-        | otherwise -> return $ Just $ linePartsToString ss
+        | otherwise -> return $ Just $ linePartsToText ss
 
   isFontToken Font{}     = True
   isFontToken _            = False
 
-  getText :: Inline -> String
+  getText :: Inline -> T.Text
   getText (Str s)    = s
   getText Space      = " "
   getText (Code _ s) = s
@@ -417,8 +418,8 @@ listItem mbListType = try $ do
   (ControlLine _ args _) <- mmacro "IP"
   case args of
     (arg1 : _)  -> do
-      let cs = linePartsToString arg1
-      let cs' = if not ('.' `elem` cs || ')' `elem` cs) then cs ++ "." else cs
+      let cs = linePartsToText arg1
+      let cs' = if not (T.any (== '.') cs || T.any (== ')') cs) then cs <> "." else cs
       let lt = case Parsec.runParser anyOrderedListMarker defaultParserState
                      "list marker" cs' of
                   Right (start, listtype, listdelim)
@@ -468,7 +469,7 @@ parseLink args = do
   ControlLine _ endargs _ <- mmacro "UE"
   let url = case args of
               [] -> ""
-              (x:_) -> linePartsToString x
+              (x:_) -> linePartsToText x
   return $ link url "" contents <>
     case endargs of
       []    -> mempty
@@ -480,7 +481,7 @@ parseEmailLink args = do
   ControlLine _ endargs _ <- mmacro "ME"
   let url = case args of
               [] -> ""
-              (x:_) -> "mailto:" ++ linePartsToString x
+              (x:_) -> "mailto:" <> linePartsToText x
   return $ link url "" contents <>
     case endargs of
       []    -> mempty
@@ -491,6 +492,6 @@ skipUnknownMacro = do
   tok <- mmacroAny
   case tok of
     ControlLine mkind _ pos -> do
-      report $ SkippedContent ('.':mkind) pos
+      report $ SkippedContent ("." <> mkind) pos
       return mempty
-    _                 -> fail "the impossible happened"
+    _                 -> Prelude.fail "the impossible happened"

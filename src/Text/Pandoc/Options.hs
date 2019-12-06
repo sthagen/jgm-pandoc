@@ -2,9 +2,8 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
 {-# LANGUAGE NoImplicitPrelude  #-}
-#ifdef DERIVE_JSON_VIA_TH
 {-# LANGUAGE TemplateHaskell    #-}
-#endif
+{-# LANGUAGE OverloadedStrings  #-}
 {- |
    Module      : Text.Pandoc.Options
    Copyright   : Copyright (C) 2012-2019 John MacFarlane
@@ -31,23 +30,28 @@ module Text.Pandoc.Options ( module Text.Pandoc.Extensions
                            , ReferenceLocation (..)
                            , def
                            , isEnabled
+                           , defaultMathJaxURL
+                           , defaultKaTeXURL
                            ) where
 import Prelude
+import Control.Applicative ((<|>))
+import Data.Char (toLower)
+import Data.Maybe (fromMaybe)
 import Data.Data (Data)
 import Data.Default
+import Data.Text (Text)
+import Text.DocTemplates (Context(..))
 import qualified Data.Set as Set
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Skylighting (SyntaxMap, defaultSyntaxMap)
 import Text.Pandoc.Extensions
 import Text.Pandoc.Highlighting (Style, pygments)
-
-#ifdef DERIVE_JSON_VIA_TH
-import Data.Aeson.TH (deriveJSON, defaultOptions)
-#else
-import Data.Aeson (FromJSON (..), ToJSON (..),
-                   defaultOptions, genericToEncoding)
-#endif
+import Text.Pandoc.Shared (camelCaseStrToHyphenated)
+import Text.DocTemplates (Template)
+import Data.Aeson.TH (deriveJSON, defaultOptions, Options(..),
+                      SumEncoding(..))
+import Data.YAML
 
 class HasSyntaxExtensions a where
   getExtensions :: a -> Extensions
@@ -57,10 +61,10 @@ data ReaderOptions = ReaderOptions{
        , readerStandalone            :: Bool -- ^ Standalone document with header
        , readerColumns               :: Int  -- ^ Number of columns in terminal
        , readerTabStop               :: Int  -- ^ Tab stop
-       , readerIndentedCodeClasses   :: [String] -- ^ Default classes for
+       , readerIndentedCodeClasses   :: [Text] -- ^ Default classes for
                                        -- indented code blocks
-       , readerAbbreviations         :: Set.Set String -- ^ Strings to treat as abbreviations
-       , readerDefaultImageExtension :: String -- ^ Default extension for images
+       , readerAbbreviations         :: Set.Set Text -- ^ Strings to treat as abbreviations
+       , readerDefaultImageExtension :: Text -- ^ Default extension for images
        , readerTrackChanges          :: TrackChanges -- ^ Track changes setting for docx
        , readerStripComments         :: Bool -- ^ Strip HTML comments instead of parsing as raw HTML
 } deriving (Show, Read, Data, Typeable, Generic)
@@ -81,7 +85,7 @@ instance Default ReaderOptions
                , readerStripComments         = False
                }
 
-defaultAbbrevs :: Set.Set String
+defaultAbbrevs :: Set.Set Text
 defaultAbbrevs = Set.fromList
                  [ "Mr.", "Mrs.", "Ms.", "Capt.", "Dr.", "Prof.",
                    "Gen.", "Gov.", "e.g.", "i.e.", "Sgt.", "St.",
@@ -96,23 +100,64 @@ defaultAbbrevs = Set.fromList
 data EPUBVersion = EPUB2 | EPUB3 deriving (Eq, Show, Read, Data, Typeable, Generic)
 
 data HTMLMathMethod = PlainMath
-                    | WebTeX String               -- url of TeX->image script.
+                    | WebTeX Text               -- url of TeX->image script.
                     | GladTeX
                     | MathML
-                    | MathJax String              -- url of MathJax.js
-                    | KaTeX String                -- url of KaTeX files
+                    | MathJax Text              -- url of MathJax.js
+                    | KaTeX Text                -- url of KaTeX files
                     deriving (Show, Read, Eq, Data, Typeable, Generic)
+
+instance FromYAML HTMLMathMethod where
+   parseYAML node =
+     (withMap "HTMLMathMethod" $ \m -> do
+        method <- m .: "method"
+        mburl <- m .:? "url"
+        case method :: Text of
+          "plain" -> return PlainMath
+          "webtex" -> return $ WebTeX $ fromMaybe "" mburl
+          "gladtex" -> return GladTeX
+          "mathml" -> return MathML
+          "mathjax" -> return $ MathJax $
+                         fromMaybe defaultMathJaxURL mburl
+          "katex" -> return $ KaTeX $
+                         fromMaybe defaultKaTeXURL mburl
+          _ -> fail $ "Unknown HTML math method " ++ show method) node
+       <|> (withStr "HTMLMathMethod" $ \method ->
+             case method of
+               "plain" -> return PlainMath
+               "webtex" -> return $ WebTeX ""
+               "gladtex" -> return GladTeX
+               "mathml" -> return MathML
+               "mathjax" -> return $ MathJax defaultMathJaxURL
+               "katex" -> return $ KaTeX defaultKaTeXURL
+               _  -> fail $ "Unknown HTML math method " ++ show method) node
 
 data CiteMethod = Citeproc                        -- use citeproc to render them
                   | Natbib                        -- output natbib cite commands
                   | Biblatex                      -- output biblatex cite commands
                 deriving (Show, Read, Eq, Data, Typeable, Generic)
 
+instance FromYAML CiteMethod where
+  parseYAML = withStr "Citeproc" $ \t ->
+    case t of
+      "citeproc" -> return Citeproc
+      "natbib"   -> return Natbib
+      "biblatex" -> return Biblatex
+      _          -> fail $ "Unknown citation method " ++ show t
+
 -- | Methods for obfuscating email addresses in HTML.
 data ObfuscationMethod = NoObfuscation
                        | ReferenceObfuscation
                        | JavascriptObfuscation
                        deriving (Show, Read, Eq, Data, Typeable, Generic)
+
+instance FromYAML ObfuscationMethod where
+  parseYAML = withStr "Citeproc" $ \t ->
+    case t of
+      "none"       -> return NoObfuscation
+      "references" -> return ReferenceObfuscation
+      "javascript" -> return JavascriptObfuscation
+      _            -> fail $ "Unknown obfuscation method " ++ show t
 
 -- | Varieties of HTML slide shows.
 data HTMLSlideVariant = S5Slides
@@ -129,11 +174,28 @@ data TrackChanges = AcceptChanges
                   | AllChanges
                   deriving (Show, Read, Eq, Data, Typeable, Generic)
 
+instance FromYAML TrackChanges where
+  parseYAML = withStr "TrackChanges" $ \t ->
+    case t of
+      "accept"     -> return AcceptChanges
+      "reject"     -> return RejectChanges
+      "all"        -> return AllChanges
+      _            -> fail $ "Unknown track changes method " ++ show t
+
 -- | Options for wrapping text in the output.
 data WrapOption = WrapAuto        -- ^ Automatically wrap to width
                 | WrapNone        -- ^ No non-semantic newlines
                 | WrapPreserve    -- ^ Preserve wrapping of input source
                 deriving (Show, Read, Eq, Data, Typeable, Generic)
+
+instance FromYAML WrapOption where
+  parseYAML = withStr "WrapOption" $ \t ->
+    case t of
+      "auto"     -> return WrapAuto
+      "none"     -> return WrapNone
+      "preserve" -> return WrapPreserve
+      _          -> fail $ "Unknown wrap method " ++ show t
+
 
 -- | Options defining the type of top-level headers.
 data TopLevelDivision = TopLevelPart      -- ^ Top-level headers become parts
@@ -143,16 +205,35 @@ data TopLevelDivision = TopLevelPart      -- ^ Top-level headers become parts
                                           --   heuristics
                       deriving (Show, Read, Eq, Data, Typeable, Generic)
 
+instance FromYAML TopLevelDivision where
+  parseYAML = withStr "TopLevelDivision" $ \t ->
+    case t of
+      "part"     -> return TopLevelPart
+      "chapter"  -> return TopLevelChapter
+      "section"  -> return TopLevelSection
+      "default"  -> return TopLevelDefault
+      _          -> fail $ "Unknown top level division " ++ show t
+
+
 -- | Locations for footnotes and references in markdown output
 data ReferenceLocation = EndOfBlock    -- ^ End of block
                        | EndOfSection  -- ^ prior to next section header (or end of document)
                        | EndOfDocument -- ^ at end of document
                        deriving (Show, Read, Eq, Data, Typeable, Generic)
 
+instance FromYAML ReferenceLocation where
+  parseYAML = withStr "ReferenceLocation" $ \t ->
+    case t of
+      "block"    -> return EndOfBlock
+      "section"  -> return EndOfSection
+      "document" -> return EndOfDocument
+      _          -> fail $ "Unknown reference location " ++ show t
+
+
 -- | Options for writers
 data WriterOptions = WriterOptions
-  { writerTemplate          :: Maybe String -- ^ Template to use
-  , writerVariables         :: [(String, String)] -- ^ Variables to set in template
+  { writerTemplate          :: Maybe (Template Text) -- ^ Template to use
+  , writerVariables         :: Context Text -- ^ Variables to set in template
   , writerTabStop           :: Int    -- ^ Tabstop for conversion btw spaces and tabs
   , writerTableOfContents   :: Bool   -- ^ Include table of contents
   , writerIncremental       :: Bool   -- ^ True if lists should be incremental
@@ -166,7 +247,7 @@ data WriterOptions = WriterOptions
   , writerWrapText          :: WrapOption  -- ^ Option for wrapping text
   , writerColumns           :: Int    -- ^ Characters in a line (for text wrapping)
   , writerEmailObfuscation  :: ObfuscationMethod -- ^ How to obfuscate emails
-  , writerIdentifierPrefix  :: String -- ^ Prefix for section & note ids in HTML
+  , writerIdentifierPrefix  :: Text -- ^ Prefix for section & note ids in HTML
                                      -- and for footnote marks in markdown
   , writerCiteMethod        :: CiteMethod -- ^ How to print cites
   , writerHtmlQTags         :: Bool       -- ^ Use @<q>@ tags for quotes in HTML
@@ -176,8 +257,8 @@ data WriterOptions = WriterOptions
   , writerHighlightStyle    :: Maybe Style  -- ^ Style to use for highlighting
                                            -- (Nothing = no highlighting)
   , writerSetextHeaders     :: Bool       -- ^ Use setext headers for levels 1-2 in markdown
-  , writerEpubSubdirectory  :: String       -- ^ Subdir for epub in OCF
-  , writerEpubMetadata      :: Maybe String -- ^ Metadata to include in EPUB
+  , writerEpubSubdirectory  :: Text       -- ^ Subdir for epub in OCF
+  , writerEpubMetadata      :: Maybe Text -- ^ Metadata to include in EPUB
   , writerEpubFonts         :: [FilePath] -- ^ Paths to fonts to embed
   , writerEpubChapterLevel  :: Int            -- ^ Header level for chapters (separate files)
   , writerTOCDepth          :: Int            -- ^ Number of levels to include in TOC
@@ -189,7 +270,7 @@ data WriterOptions = WriterOptions
 
 instance Default WriterOptions where
   def = WriterOptions { writerTemplate         = Nothing
-                      , writerVariables        = []
+                      , writerVariables        = mempty
                       , writerTabStop          = 4
                       , writerTableOfContents  = False
                       , writerIncremental      = False
@@ -229,50 +310,47 @@ instance HasSyntaxExtensions WriterOptions where
 isEnabled :: HasSyntaxExtensions a => Extension -> a -> Bool
 isEnabled ext opts = ext `extensionEnabled` getExtensions opts
 
-#ifdef DERIVE_JSON_VIA_TH
+defaultMathJaxURL :: Text
+defaultMathJaxURL = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/"
+
+defaultKaTeXURL :: Text
+defaultKaTeXURL = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/"
+
 $(deriveJSON defaultOptions ''ReaderOptions)
-$(deriveJSON defaultOptions ''HTMLMathMethod)
-$(deriveJSON defaultOptions ''CiteMethod)
-$(deriveJSON defaultOptions ''ObfuscationMethod)
+
+$(deriveJSON defaultOptions{
+   constructorTagModifier = map toLower,
+   sumEncoding = TaggedObject{
+                    tagFieldName = "method",
+                    contentsFieldName = "url" }
+                           } ''HTMLMathMethod)
+
+$(deriveJSON defaultOptions{ constructorTagModifier =
+                               camelCaseStrToHyphenated
+                           } ''CiteMethod)
+
+$(deriveJSON defaultOptions{ constructorTagModifier =
+                            \t -> case t of
+                                    "NoObfuscation"         -> "none"
+                                    "ReferenceObfuscation"  -> "references"
+                                    "JavascriptObfuscation" -> "javascript"
+                                    _                       -> "none"
+                           } ''ObfuscationMethod)
+
 $(deriveJSON defaultOptions ''HTMLSlideVariant)
-$(deriveJSON defaultOptions ''TrackChanges)
-$(deriveJSON defaultOptions ''WrapOption)
-$(deriveJSON defaultOptions ''TopLevelDivision)
-$(deriveJSON defaultOptions ''ReferenceLocation)
-#else
-instance ToJSON CiteMethod where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON CiteMethod
 
-instance ToJSON ReaderOptions where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON ReaderOptions
+$(deriveJSON defaultOptions{ constructorTagModifier =
+                               camelCaseStrToHyphenated
+                           } ''TrackChanges)
 
-instance ToJSON ObfuscationMethod where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON ObfuscationMethod
+$(deriveJSON defaultOptions{ constructorTagModifier =
+                               camelCaseStrToHyphenated
+                           } ''WrapOption)
 
-instance ToJSON WrapOption where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON WrapOption
+$(deriveJSON defaultOptions{ constructorTagModifier =
+                               camelCaseStrToHyphenated . drop 8
+                           } ''TopLevelDivision)
 
-instance ToJSON HTMLMathMethod where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON HTMLMathMethod
-
-instance ToJSON HTMLSlideVariant where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON HTMLSlideVariant
-
-instance ToJSON TopLevelDivision where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON TopLevelDivision
-
-instance ToJSON ReferenceLocation where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON ReferenceLocation
-
-instance ToJSON TrackChanges where
-  toEncoding = genericToEncoding defaultOptions
-instance FromJSON TrackChanges
-#endif
+$(deriveJSON defaultOptions{ constructorTagModifier =
+                               camelCaseStrToHyphenated
+                           } ''ReferenceLocation)

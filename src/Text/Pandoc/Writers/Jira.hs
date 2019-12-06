@@ -17,7 +17,6 @@ JIRA:
 module Text.Pandoc.Writers.Jira ( writeJira ) where
 import Prelude
 import Control.Monad.State.Strict
-import Data.Char (toLower)
 import Data.Foldable (find)
 import Data.Text (Text, pack)
 import Text.Pandoc.Class (PandocMonad, report)
@@ -25,10 +24,11 @@ import Text.Pandoc.Definition
 import Text.Pandoc.Logging (LogMessage (BlockNotRendered, InlineNotRendered))
 import Text.Pandoc.Options (WriterOptions (writerTemplate))
 import Text.Pandoc.Shared (blocksToInlines, linesToPara)
-import Text.Pandoc.Templates (renderTemplate')
+import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Writers.Math (texMathToInlines)
-import Text.Pandoc.Writers.Shared (metaToJSON, defField)
+import Text.Pandoc.Writers.Shared (metaToContext, defField)
 import qualified Data.Text as T
+import Text.DocLayout (literal, render)
 
 data WriterState = WriterState
   { stNotes     :: [Text]      -- Footnotes
@@ -53,35 +53,30 @@ writeJira opts document =
 pandocToJira :: PandocMonad m
              => WriterOptions -> Pandoc -> JiraWriter m Text
 pandocToJira opts (Pandoc meta blocks) = do
-  metadata <- metaToJSON opts (blockListToJira opts)
-                 (inlineListToJira opts) meta
+  metadata <- metaToContext opts
+                 (fmap literal . blockListToJira opts)
+                 (fmap literal . inlineListToJira opts) meta
   body <- blockListToJira opts blocks
   notes <- gets $ T.intercalate "\n" . reverse . stNotes
-  let main = body <> if T.null notes then "" else "\n\n" <> notes
+  let main = body <> if T.null notes
+                        then mempty
+                        else T.pack "\n\n" <> notes
   let context = defField "body" main metadata
-  case writerTemplate opts of
-    Nothing  -> return main
-    Just tpl -> renderTemplate' tpl context
+  return $
+    case writerTemplate opts of
+      Nothing  -> main
+      Just tpl -> render Nothing $ renderTemplate tpl context
 
 -- | Escape one character as needed for Jira.
 escapeCharForJira :: Char -> Text
-escapeCharForJira c = case c of
-  '&'      -> "&amp;"
-  '<'      -> "&lt;"
-  '>'      -> "&gt;"
-  '"'      -> "&quot;"
-  '*'      -> "&ast;"
-  '_'      -> "&lowbar;"
-  '@'      -> "&commat;"
-  '+'      -> "&plus;"
-  '-'      -> "&hyphen;"
-  '|'      -> "&vert;"
-  '{'      -> "\\{"
-  '\x2014' -> " -- "
-  '\x2013' -> " - "
-  '\x2019' -> "'"
-  '\x2026' -> "..."
-  _        -> T.singleton c
+escapeCharForJira c =
+  let specialChars = "_*-+~^|!{}[]" :: String
+  in case c of
+    '\x2013' -> " -- "
+    '\x2014' -> " --- "
+    '\x2026' -> "..."
+    _ | c `elem` specialChars -> T.cons '\\' (T.singleton c)
+    _                         -> T.singleton c
 
 -- | Escape string as needed for Jira.
 escapeStringForJira :: Text -> Text
@@ -92,7 +87,7 @@ anchor :: Attr -> Text
 anchor (ident,_,_) =
   if ident == ""
   then ""
-  else "{anchor:" <> pack ident <> "}"
+  else "{anchor:" <> ident <> "}"
 
 -- | Append a newline character unless we are in a list.
 appendNewlineUnlessInList :: PandocMonad m
@@ -125,7 +120,7 @@ blockToJira opts (LineBlock lns) =
 
 blockToJira _ b@(RawBlock f str) =
   if f == Format "jira"
-  then return (pack str)
+  then return str
   else "" <$ report (BlockNotRendered b)
 
 blockToJira _ HorizontalRule = return "----\n"
@@ -136,22 +131,22 @@ blockToJira opts (Header level attr inlines) = do
   return $ prefix <> anchor attr <> contents <> "\n"
 
 blockToJira _ (CodeBlock attr@(_,classes,_) str) = do
-  let lang = find (\c -> map toLower c `elem` knownLanguages) classes
+  let lang = find (\c -> T.toLower c `elem` knownLanguages) classes
   let start = case lang of
                 Nothing -> "{code}"
-                Just l  -> "{code:" <> pack l <> "}"
+                Just l  -> "{code:" <> l <> "}"
   let anchorMacro = anchor attr
   appendNewlineUnlessInList . T.intercalate "\n" $
     (if anchorMacro == "" then id else (anchorMacro :))
-    [start, escapeStringForJira (pack str), "{code}"]
+    [start, str, "{code}"]
 
 blockToJira opts (BlockQuote [p@(Para _)]) = do
   contents <- blockToJira opts p
-  appendNewlineUnlessInList ("bq. " <> contents)
+  return ("bq. " <> contents)
 
 blockToJira opts (BlockQuote blocks) = do
   contents <- blockListToJira opts blocks
-  appendNewlineUnlessInList . T.intercalate "\n" $
+  appendNewlineUnlessInList . T.unlines $
     [ "{quote}", contents, "{quote}"]
 
 blockToJira opts (Table _caption _aligns _widths headers rows) = do
@@ -269,9 +264,9 @@ inlineToJira opts (Quoted DoubleQuote lst) = do
 inlineToJira opts (Cite _  lst) = inlineListToJira opts lst
 
 inlineToJira _ (Code attr str) =
-  return (anchor attr <> "{{" <> escapeStringForJira (pack str) <> "}}")
+  return (anchor attr <> "{{" <> str <> "}}")
 
-inlineToJira _ (Str str) = return $ escapeStringForJira (pack str)
+inlineToJira _ (Str str) = return $ escapeStringForJira str
 
 inlineToJira opts (Math InlineMath str) =
   lift (texMathToInlines InlineMath str) >>= inlineListToJira opts
@@ -283,7 +278,7 @@ inlineToJira opts (Math DisplayMath str) = do
 
 inlineToJira _opts il@(RawInline f str) =
   if f == Format "jira"
-  then return (pack str)
+  then return str
   else "" <$ report (InlineNotRendered il)
 
 inlineToJira _ LineBreak = return "\n"
@@ -297,12 +292,12 @@ inlineToJira opts (Link _attr txt (src, _title)) = do
   return $ T.concat
     [ "["
     , if null txt then "" else linkText <> "|"
-    , pack src
+    , src
     , "]"
     ]
 
 inlineToJira _opts (Image attr _alt (src, _title)) =
-  return . T.concat $ [anchor attr, "!", pack src, "!"]
+  return . T.concat $ [anchor attr, "!", src, "!"]
 
 inlineToJira opts (Note contents) = do
   curNotes <- gets stNotes
@@ -313,7 +308,7 @@ inlineToJira opts (Note contents) = do
   return $ "[" <> pack (show newnum) <> "]"
 
 -- | Language codes recognized by jira
-knownLanguages :: [String]
+knownLanguages :: [Text]
 knownLanguages =
   [ "actionscript", "ada", "applescript", "bash", "c", "c#", "c++"
   , "css", "erlang", "go", "groovy", "haskell", "html", "javascript"

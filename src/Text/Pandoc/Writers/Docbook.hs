@@ -1,6 +1,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
+{-# LANGUAGE ViewPatterns      #-}
 {- |
    Module      : Text.Pandoc.Writers.Docbook
    Copyright   : Copyright (C) 2006-2019 John MacFarlane
@@ -15,11 +16,10 @@ Conversion of 'Pandoc' documents to Docbook XML.
 module Text.Pandoc.Writers.Docbook ( writeDocbook4, writeDocbook5 ) where
 import Prelude
 import Control.Monad.Reader
-import Data.Char (toLower)
 import Data.Generics (everywhere, mkT)
-import Data.List (isPrefixOf, isSuffixOf, stripPrefix)
 import Data.Monoid (Any (..))
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Class (PandocMonad, report)
 import Text.Pandoc.Definition
@@ -27,12 +27,12 @@ import Text.Pandoc.Highlighting (languages, languagesByExtension)
 import Text.Pandoc.ImageSize
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
-import Text.Pandoc.Pretty
+import Text.DocLayout
 import Text.Pandoc.Shared
-import Text.Pandoc.Templates (renderTemplate')
+import Text.Pandoc.Templates (renderTemplate)
+import Text.Pandoc.Writers.Shared
 import Text.Pandoc.Walk
 import Text.Pandoc.Writers.Math
-import Text.Pandoc.Writers.Shared
 import Text.Pandoc.XML
 import Text.TeXMath
 import qualified Text.XML.Light as Xml
@@ -50,21 +50,21 @@ authorToDocbook opts name' = do
                     then Just $ writerColumns opts
                     else Nothing
   return $ B.rawInline "docbook" $ render colwidth $
-      if ',' `elem` name
+      if T.any (== ',') name
          then -- last name first
-              let (lastname, rest) = break (==',') name
+              let (lastname, rest) = T.break (==',') name
                   firstname = triml rest in
-              inTagsSimple "firstname" (text $ escapeStringForXML firstname) <>
-              inTagsSimple "surname" (text $ escapeStringForXML lastname)
+              inTagsSimple "firstname" (literal $ escapeStringForXML firstname) <>
+              inTagsSimple "surname" (literal $ escapeStringForXML lastname)
          else -- last name last
-              let namewords = words name
+              let namewords = T.words name
                   lengthname = length namewords
                   (firstname, lastname) = case lengthname of
                     0 -> ("","")
                     1 -> ("", name)
-                    n -> (unwords (take (n-1) namewords), last namewords)
-               in inTagsSimple "firstname" (text $ escapeStringForXML firstname) $$
-                  inTagsSimple "surname" (text $ escapeStringForXML lastname)
+                    n -> (T.unwords (take (n-1) namewords), last namewords)
+               in inTagsSimple "firstname" (literal $ escapeStringForXML firstname) $$
+                  inTagsSimple "surname" (literal $ escapeStringForXML lastname)
 
 writeDocbook4 :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeDocbook4 opts d =
@@ -77,72 +77,36 @@ writeDocbook5 opts d =
 -- | Convert Pandoc document to string in Docbook format.
 writeDocbook :: PandocMonad m => WriterOptions -> Pandoc -> DB m Text
 writeDocbook opts (Pandoc meta blocks) = do
-  let elements = hierarchicalize blocks
   let colwidth = if writerWrapText opts == WrapAuto
                     then Just $ writerColumns opts
                     else Nothing
-  let render' :: Doc -> Text
-      render' = render colwidth
-  let opts'    = if maybe False (("/book>" `isSuffixOf`) . trimr)
-                            (writerTemplate opts) &&
-                     TopLevelDefault == writerTopLevelDivision opts
-                    then opts{ writerTopLevelDivision = TopLevelChapter }
-                    else opts
   -- The numbering here follows LaTeX's internal numbering
-  let startLvl = case writerTopLevelDivision opts' of
+  let startLvl = case writerTopLevelDivision opts of
                    TopLevelPart    -> -1
                    TopLevelChapter -> 0
                    TopLevelSection -> 1
                    TopLevelDefault -> 1
+  let fromBlocks = blocksToDocbook opts .
+                   makeSections False (Just startLvl)
   auths' <- mapM (authorToDocbook opts) $ docAuthors meta
   let meta' = B.setMeta "author" auths' meta
-  metadata <- metaToJSON opts
-                 (fmap (render' . vcat) .
-                          mapM (elementToDocbook opts' startLvl) .
-                            hierarchicalize)
-                 (fmap render' . inlinesToDocbook opts')
+  metadata <- metaToContext opts
+                 (fromBlocks)
+                 (inlinesToDocbook opts)
                  meta'
-  main <- (render' . vcat) <$> mapM (elementToDocbook opts' startLvl) elements
+  main <- fromBlocks blocks
   let context = defField "body" main
-              $
-                  defField "mathml" (case writerHTMLMathMethod opts of
+              $ defField "mathml" (case writerHTMLMathMethod opts of
                                           MathML -> True
                                           _      -> False) metadata
-  (if writerPreferAscii opts then toEntities else id) <$>
+  return $ render colwidth $
+    (if writerPreferAscii opts then fmap toEntities else id) $
     case writerTemplate opts of
-         Nothing  -> return main
-         Just tpl -> renderTemplate' tpl context
-
--- | Convert an Element to Docbook.
-elementToDocbook :: PandocMonad m => WriterOptions -> Int -> Element -> DB m Doc
-elementToDocbook opts _   (Blk block) = blockToDocbook opts block
-elementToDocbook opts lvl (Sec _ _num (id',_,_) title elements) = do
-  version <- ask
-  -- Docbook doesn't allow sections with no content, so insert some if needed
-  let elements' = if null elements
-                    then [Blk (Para [])]
-                    else elements
-      tag = case lvl of
-                 -1                   -> "part"
-                 0                    -> "chapter"
-                 n | n >= 1 && n <= 5 -> if version == DocBook5
-                                              then "section"
-                                              else "sect" ++ show n
-                 _                    -> "simplesect"
-      idName = if version == DocBook5
-                 then "xml:id"
-                 else "id"
-      idAttr = [(idName, writerIdentifierPrefix opts ++ id') | not (null id')]
-      nsAttr = if version == DocBook5 && lvl == 0 then [("xmlns", "http://docbook.org/ns/docbook"),("xmlns:xlink", "http://www.w3.org/1999/xlink")]
-                                      else []
-      attribs = nsAttr ++ idAttr
-  contents <- mapM (elementToDocbook opts (lvl + 1)) elements'
-  title' <- inlinesToDocbook opts title
-  return $ inTags True tag attribs $
-      inTagsSimple "title" title' $$ vcat contents
+         Nothing  -> main
+         Just tpl -> renderTemplate tpl context
 
 -- | Convert a list of Pandoc blocks to Docbook.
-blocksToDocbook :: PandocMonad m => WriterOptions -> [Block] -> DB m Doc
+blocksToDocbook :: PandocMonad m => WriterOptions -> [Block] -> DB m (Doc Text)
 blocksToDocbook opts = fmap vcat . mapM (blockToDocbook opts)
 
 -- | Auxiliary function to convert Plain block to Para.
@@ -153,13 +117,13 @@ plainToPara x         = x
 -- | Convert a list of pairs of terms and definitions into a list of
 -- Docbook varlistentrys.
 deflistItemsToDocbook :: PandocMonad m
-                      => WriterOptions -> [([Inline],[[Block]])] -> DB m Doc
+                      => WriterOptions -> [([Inline],[[Block]])] -> DB m (Doc Text)
 deflistItemsToDocbook opts items =
   vcat <$> mapM (uncurry (deflistItemToDocbook opts)) items
 
 -- | Convert a term and a list of blocks into a Docbook varlistentry.
 deflistItemToDocbook :: PandocMonad m
-                     => WriterOptions -> [Inline] -> [[Block]] -> DB m Doc
+                     => WriterOptions -> [Inline] -> [[Block]] -> DB m (Doc Text)
 deflistItemToDocbook opts term defs = do
   term' <- inlinesToDocbook opts term
   def' <- blocksToDocbook opts $ concatMap (map plainToPara) defs
@@ -168,30 +132,53 @@ deflistItemToDocbook opts term defs = do
       inTagsIndented "listitem" def'
 
 -- | Convert a list of lists of blocks to a list of Docbook list items.
-listItemsToDocbook :: PandocMonad m => WriterOptions -> [[Block]] -> DB m Doc
+listItemsToDocbook :: PandocMonad m => WriterOptions -> [[Block]] -> DB m (Doc Text)
 listItemsToDocbook opts items = vcat <$> mapM (listItemToDocbook opts) items
 
 -- | Convert a list of blocks into a Docbook list item.
-listItemToDocbook :: PandocMonad m => WriterOptions -> [Block] -> DB m Doc
+listItemToDocbook :: PandocMonad m => WriterOptions -> [Block] -> DB m (Doc Text)
 listItemToDocbook opts item =
   inTagsIndented "listitem" <$> blocksToDocbook opts (map plainToPara item)
 
-imageToDocbook :: WriterOptions -> Attr -> String -> Doc
+imageToDocbook :: WriterOptions -> Attr -> Text -> Doc Text
 imageToDocbook _ attr src = selfClosingTag "imagedata" $
-  ("fileref", src) : idAndRole attr ++ dims
+  ("fileref", src) : idAndRole attr <> dims
   where
-    dims = go Width "width" ++ go Height "depth"
+    dims = go Width "width" <> go Height "depth"
     go dir dstr = case dimension dir attr of
-                    Just a  -> [(dstr, show a)]
+                    Just a  -> [(dstr, tshow a)]
                     Nothing -> []
 
 -- | Convert a Pandoc block element to Docbook.
-blockToDocbook :: PandocMonad m => WriterOptions -> Block -> DB m Doc
+blockToDocbook :: PandocMonad m => WriterOptions -> Block -> DB m (Doc Text)
 blockToDocbook _ Null = return empty
 -- Add ids to paragraphs in divs with ids - this is needed for
 -- pandoc-citeproc to get link anchors in bibliographies:
+blockToDocbook opts (Div (id',"section":_,_) (Header lvl _ ils : xs)) = do
+  version <- ask
+  -- Docbook doesn't allow sections with no content, so insert some if needed
+  let bs = if null xs
+              then [Para []]
+              else xs
+      tag = case lvl of
+                 -1                   -> "part"
+                 0                    -> "chapter"
+                 n | n >= 1 && n <= 5 -> if version == DocBook5
+                                              then "section"
+                                              else "sect" <> tshow n
+                 _                    -> "simplesect"
+      idName = if version == DocBook5
+                 then "xml:id"
+                 else "id"
+      idAttr = [(idName, writerIdentifierPrefix opts <> id') | not (T.null id')]
+      nsAttr = if version == DocBook5 && lvl == 0 then [("xmlns", "http://docbook.org/ns/docbook"),("xmlns:xlink", "http://www.w3.org/1999/xlink")]
+                                      else []
+      attribs = nsAttr <> idAttr
+  title' <- inlinesToDocbook opts ils
+  contents <- blocksToDocbook opts bs
+  return $ inTags True tag attribs $ inTagsSimple "title" title' $$ contents
 blockToDocbook opts (Div (ident,_,_) [Para lst]) =
-  let attribs = [("id", ident) | not (null ident)] in
+  let attribs = [("id", ident) | not (T.null ident)] in
   if hasLineBreaks lst
      then (flush . nowrap . inTags False "literallayout" attribs)
                          <$> inlinesToDocbook opts lst
@@ -199,16 +186,16 @@ blockToDocbook opts (Div (ident,_,_) [Para lst]) =
 blockToDocbook opts (Div (ident,_,_) bs) = do
   contents <- blocksToDocbook opts (map plainToPara bs)
   return $
-    (if null ident
+    (if T.null ident
         then mempty
         else selfClosingTag "anchor" [("id", ident)]) $$ contents
 blockToDocbook _ h@Header{} = do
-  -- should not occur after hierarchicalize, except inside lists/blockquotes
+  -- should be handled by Div section above, except inside lists/blockquotes
   report $ BlockNotRendered h
   return empty
 blockToDocbook opts (Plain lst) = inlinesToDocbook opts lst
 -- title beginning with fig: indicates that the image is a figure
-blockToDocbook opts (Para [Image attr txt (src,'f':'i':'g':':':_)]) = do
+blockToDocbook opts (Para [Image attr txt (src,T.stripPrefix "fig:" -> Just _)]) = do
   alt <- inlinesToDocbook opts txt
   let capt = if null txt
                 then empty
@@ -228,16 +215,16 @@ blockToDocbook opts (LineBlock lns) =
 blockToDocbook opts (BlockQuote blocks) =
   inTagsIndented "blockquote" <$> blocksToDocbook opts blocks
 blockToDocbook _ (CodeBlock (_,classes,_) str) = return $
-  text ("<programlisting" ++ lang ++ ">") <> cr <>
-     flush (text (escapeStringForXML str) <> cr <> text "</programlisting>")
+  literal ("<programlisting" <> lang <> ">") <> cr <>
+     flush (literal (escapeStringForXML str) <> cr <> literal "</programlisting>")
     where lang  = if null langs
                      then ""
-                     else " language=\"" ++ escapeStringForXML (head langs) ++
+                     else " language=\"" <> escapeStringForXML (head langs) <>
                           "\""
-          isLang l    = map toLower l `elem` map (map toLower) languages
+          isLang l    = T.toLower l `elem` map T.toLower languages
           langsFrom s = if isLang s
                            then [s]
-                           else languagesByExtension . map toLower $ s
+                           else languagesByExtension . T.toLower $ s
           langs       = concatMap langsFrom classes
 blockToDocbook opts (BulletList lst) = do
   let attribs = [("spacing", "compact") | isTightList lst]
@@ -253,26 +240,26 @@ blockToDocbook opts (OrderedList (start, numstyle, _) (first:rest)) = do
                        UpperRoman   -> [("numeration", "upperroman")]
                        LowerRoman   -> [("numeration", "lowerroman")]
       spacing    = [("spacing", "compact") | isTightList (first:rest)]
-      attribs    = numeration ++ spacing
+      attribs    = numeration <> spacing
   items <- if start == 1
               then listItemsToDocbook opts (first:rest)
               else do
                 first' <- blocksToDocbook opts (map plainToPara first)
                 rest' <- listItemsToDocbook opts rest
                 return $
-                  inTags True "listitem" [("override",show start)] first' $$
+                  inTags True "listitem" [("override",tshow start)] first' $$
                    rest'
   return $ inTags True "orderedlist" attribs items
 blockToDocbook opts (DefinitionList lst) = do
   let attribs = [("spacing", "compact") | isTightList $ concatMap snd lst]
   inTags True "variablelist" attribs <$> deflistItemsToDocbook opts lst
 blockToDocbook _ b@(RawBlock f str)
-  | f == "docbook" = return $ text str -- raw XML block
+  | f == "docbook" = return $ literal str -- raw XML block
   | f == "html"    = do
                      version <- ask
                      if version == DocBook5
                         then return empty -- No html in Docbook5
-                        else return $ text str -- allow html for backwards compatibility
+                        else return $ literal str -- allow html for backwards compatibility
   | otherwise      = do
       report $ BlockNotRendered b
       return empty
@@ -283,9 +270,9 @@ blockToDocbook opts (Table caption aligns widths headers rows) = do
                    else inTagsIndented "title" <$>
                          inlinesToDocbook opts caption
   let tableType    = if isEmpty captionDoc then "informaltable" else "table"
-      percent w    = show (truncate (100*w) :: Integer) ++ "*"
+      percent w    = tshow (truncate (100*w) :: Integer) <> "*"
       coltags = vcat $ zipWith (\w al -> selfClosingTag "colspec"
-                       ([("colwidth", percent w) | w > 0] ++
+                       ([("colwidth", percent w) | w > 0] <>
                         [("align", alignmentToString al)])) widths aligns
   head' <- if all null headers
               then return empty
@@ -293,7 +280,7 @@ blockToDocbook opts (Table caption aligns widths headers rows) = do
   body' <- (inTagsIndented "tbody" . vcat) <$>
               mapM (tableRowToDocbook opts) rows
   return $ inTagsIndented tableType $ captionDoc $$
-        inTags True "tgroup" [("cols", show (length headers))] (
+        inTags True "tgroup" [("cols", tshow (length headers))] (
          coltags $$ head' $$ body')
 
 hasLineBreaks :: [Inline] -> Bool
@@ -306,7 +293,7 @@ hasLineBreaks = getAny . query isLineBreak . walk removeNote
     isLineBreak LineBreak = Any True
     isLineBreak _         = Any False
 
-alignmentToString :: Alignment -> [Char]
+alignmentToString :: Alignment -> Text
 alignmentToString alignment = case alignment of
                                  AlignLeft    -> "left"
                                  AlignRight   -> "right"
@@ -316,24 +303,24 @@ alignmentToString alignment = case alignment of
 tableRowToDocbook :: PandocMonad m
                   => WriterOptions
                   -> [[Block]]
-                  -> DB m Doc
+                  -> DB m (Doc Text)
 tableRowToDocbook opts cols =
   (inTagsIndented "row" . vcat) <$> mapM (tableItemToDocbook opts) cols
 
 tableItemToDocbook :: PandocMonad m
                    => WriterOptions
                    -> [Block]
-                   -> DB m Doc
+                   -> DB m (Doc Text)
 tableItemToDocbook opts item =
   (inTags True "entry" [] . vcat) <$> mapM (blockToDocbook opts) item
 
 -- | Convert a list of inline elements to Docbook.
-inlinesToDocbook :: PandocMonad m => WriterOptions -> [Inline] -> DB m Doc
+inlinesToDocbook :: PandocMonad m => WriterOptions -> [Inline] -> DB m (Doc Text)
 inlinesToDocbook opts lst = hcat <$> mapM (inlineToDocbook opts) lst
 
 -- | Convert an inline element to Docbook.
-inlineToDocbook :: PandocMonad m => WriterOptions -> Inline -> DB m Doc
-inlineToDocbook _ (Str str) = return $ text $ escapeStringForXML str
+inlineToDocbook :: PandocMonad m => WriterOptions -> Inline -> DB m (Doc Text)
+inlineToDocbook _ (Str str) = return $ literal $ escapeStringForXML str
 inlineToDocbook opts (Emph lst) =
   inTagsSimple "emphasis" <$> inlinesToDocbook opts lst
 inlineToDocbook opts (Strong lst) =
@@ -353,18 +340,18 @@ inlineToDocbook opts (Quoted _ lst) =
 inlineToDocbook opts (Cite _ lst) =
   inlinesToDocbook opts lst
 inlineToDocbook opts (Span (ident,_,_) ils) =
-  ((if null ident
+  ((if T.null ident
        then mempty
        else selfClosingTag "anchor" [("id", ident)]) <>) <$>
   inlinesToDocbook opts ils
 inlineToDocbook _ (Code _ str) =
-  return $ inTagsSimple "literal" $ text (escapeStringForXML str)
+  return $ inTagsSimple "literal" $ literal (escapeStringForXML str)
 inlineToDocbook opts (Math t str)
   | isMathML (writerHTMLMathMethod opts) = do
     res <- convertMath writeMathML t str
     case res of
          Right r  -> return $ inTagsSimple tagtype
-                     $ text $ Xml.ppcElement conf
+                     $ literal $ T.pack $ Xml.ppcElement conf
                      $ fixNS
                      $ removeAttr r
          Left il  -> inlineToDocbook opts il
@@ -378,19 +365,19 @@ inlineToDocbook opts (Math t str)
            fixNS' qname = qname{ Xml.qPrefix = Just "mml" }
            fixNS = everywhere (mkT fixNS')
 inlineToDocbook _ il@(RawInline f x)
-  | f == "html" || f == "docbook" = return $ text x
+  | f == "html" || f == "docbook" = return $ literal x
   | otherwise                     = do
       report $ InlineNotRendered il
       return empty
-inlineToDocbook _ LineBreak = return $ text "\n"
+inlineToDocbook _ LineBreak = return $ literal "\n"
 -- currently ignore, would require the option to add custom
 -- styles to the document
 inlineToDocbook _ Space = return space
 -- because we use \n for LineBreak, we can't do soft breaks:
 inlineToDocbook _ SoftBreak = return space
 inlineToDocbook opts (Link attr txt (src, _))
-  | Just email <- stripPrefix "mailto:" src =
-      let emailLink = inTagsSimple "email" $ text $
+  | Just email <- T.stripPrefix "mailto:" src =
+      let emailLink = inTagsSimple "email" $ literal $
                       escapeStringForXML email
       in  case txt of
            [Str s] | escapeURI s == email -> return emailLink
@@ -399,17 +386,17 @@ inlineToDocbook opts (Link attr txt (src, _))
                                           char '(' <> emailLink <> char ')'
   | otherwise = do
       version <- ask
-      (if "#" `isPrefixOf` src
-            then inTags False "link" $ ("linkend", writerIdentifierPrefix opts ++ drop 1 src) : idAndRole attr
+      (if "#" `T.isPrefixOf` src
+            then inTags False "link" $ ("linkend", writerIdentifierPrefix opts <> T.drop 1 src) : idAndRole attr
             else if version == DocBook5
                     then inTags False "link" $ ("xlink:href", src) : idAndRole attr
                     else inTags False "ulink" $ ("url", src) : idAndRole attr )
         <$> inlinesToDocbook opts txt
 inlineToDocbook opts (Image attr _ (src, tit)) = return $
-  let titleDoc = if null tit
+  let titleDoc = if T.null tit
                    then empty
                    else inTagsIndented "objectinfo" $
-                        inTagsIndented "title" (text $ escapeStringForXML tit)
+                        inTagsIndented "title" (literal $ escapeStringForXML tit)
   in  inTagsIndented "inlinemediaobject" $ inTagsIndented "imageobject" $
       titleDoc $$ imageToDocbook opts attr src
 inlineToDocbook opts (Note contents) =
@@ -419,12 +406,12 @@ isMathML :: HTMLMathMethod -> Bool
 isMathML MathML = True
 isMathML _      = False
 
-idAndRole :: Attr -> [(String, String)]
-idAndRole (id',cls,_) = ident ++ role
+idAndRole :: Attr -> [(Text, Text)]
+idAndRole (id',cls,_) = ident <> role
   where
-    ident = if null id'
+    ident = if T.null id'
                then []
                else [("id", id')]
     role  = if null cls
                then []
-               else [("role", unwords cls)]
+               else [("role", T.unwords cls)]

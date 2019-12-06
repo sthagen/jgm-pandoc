@@ -4,7 +4,7 @@ env: &env
     environment:
       LC_ALL: "C.UTF-8"
     docker:
-      - image: fpco/stack-build:lts
+      - image: fpco/stack-build:lts-13
 
 #-----------------------------------------------------------------------------
 # Common utility stuff, not to be modified usually
@@ -74,6 +74,12 @@ commands:
 #-----------------------------------------------------------------------------
 
 jobs:
+  cabal-ghc-8_8_1:
+      <<: *env
+      steps:
+          - cabal_build:
+              ghcversion: 8.8.1
+
   cabal-ghc-8_6_5:
       <<: *env
       steps:
@@ -120,3 +126,5 @@ workflows:
       - cabal-ghc-8_2_2
       - cabal-ghc-8_0_2
       - stack-ghc-8_6
+      # - cabal-ghc-8_8_1
+

@@ -1,5 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Lua.Module.Pandoc
    Copyright   : Copyright © 2017-2019 Albert Krewinkel
@@ -16,14 +17,14 @@ module Text.Pandoc.Lua.Module.Pandoc
 
 import Prelude
 import Control.Monad (when)
+import Control.Monad.Except (throwError)
 import Data.Default (Default (..))
 import Data.Maybe (fromMaybe)
-import Data.Text (pack)
 import Foreign.Lua (Lua, NumResults, Optional, Peekable, Pushable)
 import System.Exit (ExitCode (..))
 import Text.Pandoc.Class (runIO)
 import Text.Pandoc.Definition (Block, Inline)
-import Text.Pandoc.Lua.Filter (walkInlines, walkBlocks, LuaFilter)
+import Text.Pandoc.Lua.Filter (walkInlines, walkBlocks, LuaFilter, SingletonsList (..))
 import Text.Pandoc.Lua.Marshaling ()
 import Text.Pandoc.Walk (Walkable)
 import Text.Pandoc.Options (ReaderOptions (readerExtensions))
@@ -32,8 +33,10 @@ import Text.Pandoc.Readers (Reader (..), getReader)
 
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BSL
+import qualified Data.Text as T
 import qualified Foreign.Lua as Lua
 import qualified Text.Pandoc.Lua.Util as LuaUtil
+import Text.Pandoc.Error
 
 -- | Push the "pandoc" on the lua stack. Requires the `list` module to be
 -- loaded.
@@ -46,7 +49,8 @@ pushModule datadir = do
   LuaUtil.addFunction "walk_inline" walkInline
   return 1
 
-walkElement :: (Pushable a, Walkable [Inline] a, Walkable [Block] a)
+walkElement :: (Walkable (SingletonsList Inline) a,
+                Walkable (SingletonsList Block) a)
             => a -> LuaFilter -> Lua a
 walkElement x f = walkInlines f x >>= walkBlocks f
 
@@ -56,20 +60,23 @@ walkInline = walkElement
 walkBlock :: Block -> LuaFilter -> Lua Block
 walkBlock = walkElement
 
-readDoc :: String -> Optional String -> Lua NumResults
+readDoc :: T.Text -> Optional T.Text -> Lua NumResults
 readDoc content formatSpecOrNil = do
   let formatSpec = fromMaybe "markdown" (Lua.fromOptional formatSpecOrNil)
-  case getReader formatSpec of
-    Left  s      -> Lua.raiseError s -- Unknown reader
-    Right (reader, es) ->
-      case reader of
-        TextReader r -> do
-          res <- Lua.liftIO . runIO $
-                 r def{ readerExtensions = es } (pack content)
-          case res of
-            Right pd -> (1 :: NumResults) <$ Lua.push pd -- success, push Pandoc
-            Left s   -> Lua.raiseError (show s)          -- error while reading
-        _  -> Lua.raiseError "Only string formats are supported at the moment."
+  res <- Lua.liftIO . runIO $
+           getReader formatSpec >>= \(rdr,es) ->
+             case rdr of
+               TextReader r ->
+                 r def{ readerExtensions = es } content
+               _ -> throwError $ PandocSomeError $
+                      "Only textual formats are supported"
+  case res of
+    Right pd -> (1 :: NumResults) <$ Lua.push pd -- success, push Pandoc
+    Left  (PandocUnknownReaderError f) -> Lua.raiseError $
+       "Unknown reader: " <> f
+    Left  (PandocUnsupportedExtensionError e f) -> Lua.raiseError $
+       "Extension " <> e <> " not supported for " <> f
+    Left  e      -> Lua.raiseError $ show e
 
 -- | Pipes input through a command.
 pipeFn :: String
@@ -80,10 +87,10 @@ pipeFn command args input = do
   (ec, output) <- Lua.liftIO $ pipeProcess Nothing command args input
   case ec of
     ExitSuccess -> 1 <$ Lua.push output
-    ExitFailure n -> Lua.raiseError (PipeError command n output)
+    ExitFailure n -> Lua.raiseError (PipeError (T.pack command) n output)
 
 data PipeError = PipeError
-  { pipeErrorCommand :: String
+  { pipeErrorCommand :: T.Text
   , pipeErrorCode :: Int
   , pipeErrorOutput :: BL.ByteString
   }
@@ -112,7 +119,7 @@ instance Pushable PipeError where
         pipeErrorMessage :: PipeError -> Lua BL.ByteString
         pipeErrorMessage (PipeError cmd errorCode output) = return $ mconcat
           [ BSL.pack "Error running "
-          , BSL.pack cmd
+          , BSL.pack $ T.unpack cmd
           , BSL.pack " (error code "
           , BSL.pack $ show errorCode
           , BSL.pack "): "

@@ -2,6 +2,9 @@
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
+{-# LANGUAGE MultiWayIf        #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE ViewPatterns      #-}
 {- |
    Module      : Text.Pandoc.Readers.Docx
    Copyright   : Copyright (C) 2014-2019 Jesse Rosenthal
@@ -64,13 +67,14 @@ import Control.Monad.State.Strict
 import qualified Data.ByteString.Lazy as B
 import Data.Default (Default)
 import Data.List (delete, intersect)
+import Data.Char (isSpace)
 import qualified Data.Map as M
+import qualified Data.Text as T
 import Data.Maybe (isJust, fromMaybe)
 import Data.Sequence (ViewL (..), viewl)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import Text.Pandoc.Builder
--- import Text.Pandoc.Definition
 import Text.Pandoc.MediaBag (MediaBag)
 import Text.Pandoc.Options
 import Text.Pandoc.Readers.Docx.Combine
@@ -98,14 +102,14 @@ readDocx opts bytes
 readDocx _ _ =
   throwError $ PandocSomeError "couldn't parse docx file"
 
-data DState = DState { docxAnchorMap :: M.Map String String
-                     , docxAnchorSet :: Set.Set String
-                     , docxImmedPrevAnchor :: Maybe String
+data DState = DState { docxAnchorMap :: M.Map T.Text T.Text
+                     , docxAnchorSet :: Set.Set T.Text
+                     , docxImmedPrevAnchor :: Maybe T.Text
                      , docxMediaBag  :: MediaBag
                      , docxDropCap   :: Inlines
                      -- keep track of (numId, lvl) values for
                      -- restarting
-                     , docxListState :: M.Map (String, String) Integer
+                     , docxListState :: M.Map (T.Text, T.Text) Integer
                      , docxPrevPara  :: Inlines
                      }
 
@@ -121,24 +125,25 @@ instance Default DState where
 
 data DEnv = DEnv { docxOptions       :: ReaderOptions
                  , docxInHeaderBlock :: Bool
+                 , docxInBidi        :: Bool
                  }
 
 instance Default DEnv where
-  def = DEnv def False
+  def = DEnv def False False
 
 type DocxContext m = ReaderT DEnv (StateT DState m)
 
 evalDocxContext :: PandocMonad m => DocxContext m a -> DEnv -> DState -> m a
-evalDocxContext ctx env st = flip evalStateT st $flip runReaderT env ctx
+evalDocxContext ctx env st = flip evalStateT st $ runReaderT ctx env
 
 -- This is empty, but we put it in for future-proofing.
-spansToKeep :: [String]
+spansToKeep :: [CharStyleName]
 spansToKeep = []
 
-divsToKeep :: [String]
-divsToKeep = ["list-item", "Definition", "DefinitionTerm"]
+divsToKeep :: [ParaStyleName]
+divsToKeep = ["Definition", "Definition Term"]
 
-metaStyles :: M.Map String String
+metaStyles :: M.Map ParaStyleName T.Text
 metaStyles = M.fromList [ ("Title", "title")
                         , ("Subtitle", "subtitle")
                         , ("Author", "author")
@@ -150,7 +155,7 @@ sepBodyParts = span (\bp -> isMetaPar bp || isEmptyPar bp)
 
 isMetaPar :: BodyPart -> Bool
 isMetaPar (Paragraph pPr _) =
-  not $ null $ intersect (pStyle pPr) (M.keys metaStyles)
+  not $ null $ intersect (getStyleNames $ pStyle pPr) (M.keys metaStyles)
 isMetaPar _ = False
 
 isEmptyPar :: BodyPart -> Bool
@@ -163,11 +168,11 @@ isEmptyPar (Paragraph _ parParts) =
     isEmptyElem _           = True
 isEmptyPar _ = False
 
-bodyPartsToMeta' :: PandocMonad m => [BodyPart] -> DocxContext m (M.Map String MetaValue)
+bodyPartsToMeta' :: PandocMonad m => [BodyPart] -> DocxContext m (M.Map T.Text MetaValue)
 bodyPartsToMeta' [] = return M.empty
 bodyPartsToMeta' (bp : bps)
   | (Paragraph pPr parParts) <- bp
-  , (c : _)<- (pStyle pPr) `intersect` (M.keys metaStyles)
+  , (c : _)<- getStyleNames (pStyle pPr) `intersect` M.keys metaStyles
   , (Just metaField) <- M.lookup c metaStyles = do
     inlines <- smushInlines <$> mapM parPartToInlines parParts
     remaining <- bodyPartsToMeta' bps
@@ -197,11 +202,29 @@ fixAuthors (MetaBlocks blks) =
           g _          = MetaInlines []
 fixAuthors mv = mv
 
-codeStyles :: [String]
-codeStyles = ["VerbatimChar"]
+isInheritedFromStyles :: (Eq (StyleName s), HasStyleName s, HasParentStyle s) => [StyleName s] -> s -> Bool
+isInheritedFromStyles names sty
+  | getStyleName sty `elem` names = True
+  | Just psty <- getParentStyle sty = isInheritedFromStyles names psty
+  | otherwise = False
 
-codeDivs :: [String]
-codeDivs = ["SourceCode"]
+hasStylesInheritedFrom :: [ParaStyleName] -> ParagraphStyle -> Bool
+hasStylesInheritedFrom ns s = any (isInheritedFromStyles ns) $ pStyle s
+
+removeStyleNamed :: ParaStyleName -> ParagraphStyle -> ParagraphStyle
+removeStyleNamed sn ps = ps{pStyle = filter (\psd -> getStyleName psd /= sn) $ pStyle ps}
+
+isCodeCharStyle :: CharStyle -> Bool
+isCodeCharStyle = isInheritedFromStyles ["Verbatim Char"]
+
+isCodeDiv :: ParagraphStyle -> Bool
+isCodeDiv = hasStylesInheritedFrom ["Source Code"]
+
+isBlockQuote :: ParStyle -> Bool
+isBlockQuote =
+  isInheritedFromStyles [
+    "Quote", "Block Text", "Block Quote", "Block Quotation"
+    ]
 
 runElemToInlines :: RunElem -> Inlines
 runElemToInlines (TextRun s)   = text s
@@ -210,74 +233,48 @@ runElemToInlines Tab           = space
 runElemToInlines SoftHyphen    = text "\xad"
 runElemToInlines NoBreakHyphen = text "\x2011"
 
-runElemToString :: RunElem -> String
-runElemToString (TextRun s)   = s
-runElemToString LnBrk         = ['\n']
-runElemToString Tab           = ['\t']
-runElemToString SoftHyphen    = ['\xad']
-runElemToString NoBreakHyphen = ['\x2011']
+runElemToText :: RunElem -> T.Text
+runElemToText (TextRun s)   = s
+runElemToText LnBrk         = T.singleton '\n'
+runElemToText Tab           = T.singleton '\t'
+runElemToText SoftHyphen    = T.singleton '\xad'
+runElemToText NoBreakHyphen = T.singleton '\x2011'
 
-runToString :: Run -> String
-runToString (Run _ runElems) = concatMap runElemToString runElems
-runToString _                = ""
+runToText :: Run -> T.Text
+runToText (Run _ runElems) = T.concat $ map runElemToText runElems
+runToText _                = ""
 
-parPartToString :: ParPart -> String
-parPartToString (PlainRun run)             = runToString run
-parPartToString (InternalHyperLink _ runs) = concatMap runToString runs
-parPartToString (ExternalHyperLink _ runs) = concatMap runToString runs
-parPartToString _                          = ""
+parPartToText :: ParPart -> T.Text
+parPartToText (PlainRun run)             = runToText run
+parPartToText (InternalHyperLink _ runs) = T.concat $ map runToText runs
+parPartToText (ExternalHyperLink _ runs) = T.concat $ map runToText runs
+parPartToText _                          = ""
 
-blacklistedCharStyles :: [String]
+blacklistedCharStyles :: [CharStyleName]
 blacklistedCharStyles = ["Hyperlink"]
 
 resolveDependentRunStyle :: PandocMonad m => RunStyle -> DocxContext m RunStyle
 resolveDependentRunStyle rPr
-  | Just (s, _)  <- rStyle rPr, s `elem` blacklistedCharStyles =
+  | Just s  <- rParentStyle rPr
+  , getStyleName s `elem` blacklistedCharStyles =
     return rPr
-  | Just (_, cs) <- rStyle rPr = do
+  | Just s  <- rParentStyle rPr = do
       opts <- asks docxOptions
       if isEnabled Ext_styles opts
         then return rPr
-        else do rPr' <- resolveDependentRunStyle cs
-                return $
-                  RunStyle { isBold = case isBold rPr of
-                               Just bool -> Just bool
-                               Nothing   -> isBold rPr'
-                           , isItalic = case isItalic rPr of
-                               Just bool -> Just bool
-                               Nothing   -> isItalic rPr'
-                           , isSmallCaps = case isSmallCaps rPr of
-                               Just bool -> Just bool
-                               Nothing   -> isSmallCaps rPr'
-                           , isStrike = case isStrike rPr of
-                               Just bool -> Just bool
-                               Nothing   -> isStrike rPr'
-                           , isRTL = case isRTL rPr of
-                               Just bool -> Just bool
-                               Nothing   -> isRTL rPr'
-                           , rVertAlign = case rVertAlign rPr of
-                               Just valign -> Just valign
-                               Nothing     -> rVertAlign rPr'
-                           , rUnderline = case rUnderline rPr of
-                               Just ulstyle -> Just ulstyle
-                               Nothing      -> rUnderline rPr'
-                           , rStyle = rStyle rPr
-                           }
+        else leftBiasedMergeRunStyle rPr <$> resolveDependentRunStyle (cStyleData s)
   | otherwise = return rPr
 
 runStyleToTransform :: PandocMonad m => RunStyle -> DocxContext m (Inlines -> Inlines)
 runStyleToTransform rPr
-  | Just (s, _) <- rStyle rPr
-  , s `elem` spansToKeep = do
-      transform <- runStyleToTransform rPr{rStyle = Nothing}
-      return $ spanWith ("", [s], []) . transform
-  | Just (s, _) <- rStyle rPr = do
-      opts <- asks docxOptions
-      let extraInfo = if isEnabled Ext_styles opts
-                      then spanWith ("", [], [("custom-style", s)])
-                      else id
-      transform <- runStyleToTransform rPr{rStyle = Nothing}
-      return $ extraInfo . transform
+  | Just sn <- getStyleName <$> rParentStyle rPr
+  , sn `elem` spansToKeep = do
+      transform <- runStyleToTransform rPr{rParentStyle = Nothing}
+      return $ spanWith ("", [normalizeToClassName sn], []) . transform
+  | Just s <- rParentStyle rPr = do
+      ei <- extraInfo spanWith s
+      transform <- runStyleToTransform rPr{rParentStyle = Nothing}
+      return $ ei . transform
   | Just True <- isItalic rPr = do
       transform <- runStyleToTransform rPr{isItalic = Nothing}
       return $ emph  . transform
@@ -295,7 +292,10 @@ runStyleToTransform rPr
       return $ spanWith ("",[],[("dir","rtl")]) . transform
   | Just False <- isRTL rPr = do
       transform <- runStyleToTransform rPr{isRTL = Nothing}
-      return $ spanWith ("",[],[("dir","ltr")]) . transform
+      inBidi <- asks docxInBidi
+      return $ if inBidi
+               then spanWith ("",[],[("dir","ltr")]) . transform
+               else transform
   | Just SupScrpt <- rVertAlign rPr = do
       transform <- runStyleToTransform rPr{rVertAlign = Nothing}
       return $ superscript . transform
@@ -309,10 +309,9 @@ runStyleToTransform rPr
 
 runToInlines :: PandocMonad m => Run -> DocxContext m Inlines
 runToInlines (Run rs runElems)
-  | Just (s, _) <- rStyle rs
-  , s `elem` codeStyles = do
+  | maybe False isCodeCharStyle $ rParentStyle rs = do
       rPr <- resolveDependentRunStyle rs
-      let codeString = code $ concatMap runElemToString runElems
+      let codeString = code $ T.concat $ map runElemToText runElems
       return $ case rVertAlign rPr of
         Just SupScrpt -> superscript codeString
         Just SubScrpt -> subscript codeString
@@ -330,17 +329,17 @@ runToInlines (Endnote bps) = do
   return $ note blksList
 runToInlines (InlineDrawing fp title alt bs ext) = do
   (lift . lift) $ P.insertMedia fp Nothing bs
-  return $ imageWith (extentToAttr ext) fp title $ text alt
+  return $ imageWith (extentToAttr ext) (T.pack fp) title $ text alt
 runToInlines InlineChart = return $ spanWith ("", ["chart"], []) $ text "[CHART]"
 
 extentToAttr :: Extent -> Attr
 extentToAttr (Just (w, h)) =
   ("", [], [("width", showDim w), ("height", showDim h)] )
   where
-    showDim d = show (d / 914400) ++ "in"
+    showDim d = tshow (d / 914400) <> "in"
 extentToAttr _ = nullAttr
 
-blocksToInlinesWarn :: PandocMonad m => String -> Blocks -> DocxContext m Inlines
+blocksToInlinesWarn :: PandocMonad m => T.Text -> Blocks -> DocxContext m Inlines
 blocksToInlinesWarn cmtId blks = do
   let blkList = toList blks
       notParaOrPlain :: Block -> Bool
@@ -349,7 +348,7 @@ blocksToInlinesWarn cmtId blks = do
       notParaOrPlain _         = True
   unless ( not (any notParaOrPlain blkList)) $
     lift $ P.report $ DocxParserWarning $
-      "Docx comment " ++ cmtId ++ " will not retain formatting"
+      "Docx comment " <> cmtId <> " will not retain formatting"
   return $ blocksToInlines' blkList
 
 -- The majority of work in this function is done in the primed
@@ -442,12 +441,12 @@ parPartToInlines' (BookMark _ anchor) =
         return $ spanWith (newAnchor, ["anchor"], []) mempty
 parPartToInlines' (Drawing fp title alt bs ext) = do
   (lift . lift) $ P.insertMedia fp Nothing bs
-  return $ imageWith (extentToAttr ext) fp title $ text alt
+  return $ imageWith (extentToAttr ext) (T.pack fp) title $ text alt
 parPartToInlines' Chart =
   return $ spanWith ("", ["chart"], []) $ text "[CHART]"
 parPartToInlines' (InternalHyperLink anchor runs) = do
   ils <- smushInlines <$> mapM runToInlines runs
-  return $ link ('#' : anchor) "" ils
+  return $ link ("#" <> anchor) "" ils
 parPartToInlines' (ExternalHyperLink target runs) = do
   ils <- smushInlines <$> mapM runToInlines runs
   return $ link target "" ils
@@ -465,7 +464,7 @@ isAnchorSpan (Span (_, classes, kvs) _) =
   null kvs
 isAnchorSpan _ = False
 
-dummyAnchors :: [String]
+dummyAnchors :: [T.Text]
 dummyAnchors = ["_GoBack"]
 
 makeHeaderAnchor :: PandocMonad m => Blocks -> DocxContext m Blocks
@@ -479,7 +478,7 @@ makeHeaderAnchor' (Header n (ident, classes, kvs) ils)
   , (Span (anchIdent, ["anchor"], _) cIls) <- c = do
     hdrIDMap <- gets docxAnchorMap
     exts <- readerExtensions <$> asks docxOptions
-    let newIdent = if null ident
+    let newIdent = if T.null ident
                    then uniqueIdent exts ils (Set.fromList $ M.elems hdrIDMap)
                    else ident
         newIls = concatMap f ils where f il | il == c   = cIls
@@ -492,7 +491,7 @@ makeHeaderAnchor' (Header n (ident, classes, kvs) ils) =
   do
     hdrIDMap <- gets docxAnchorMap
     exts <- readerExtensions <$> asks docxOptions
-    let newIdent = if null ident
+    let newIdent = if T.null ident
                    then uniqueIdent exts ils (Set.fromList $ M.elems hdrIDMap)
                    else ident
     modify $ \s -> s {docxAnchorMap = M.insert newIdent newIdent hdrIDMap}
@@ -525,120 +524,117 @@ trimSps (Many ils) = Many $ Seq.dropWhileL isSp $Seq.dropWhileR isSp ils
         isSp LineBreak = True
         isSp _         = False
 
+extraInfo :: (Eq (StyleName a), PandocMonad m, HasStyleName a)
+          => (Attr -> i -> i) -> a -> DocxContext m (i -> i)
+extraInfo f s = do
+  opts <- asks docxOptions
+  return $ if | isEnabled Ext_styles opts
+              -> f ("", [], [("custom-style", fromStyleName $ getStyleName s)])
+              | otherwise -> id
+
 parStyleToTransform :: PandocMonad m => ParagraphStyle -> DocxContext m (Blocks -> Blocks)
 parStyleToTransform pPr
   | (c:cs) <- pStyle pPr
-  , c `elem` divsToKeep = do
+  , getStyleName c `elem` divsToKeep = do
       let pPr' = pPr { pStyle = cs }
       transform <- parStyleToTransform pPr'
-      return $ divWith ("", [c], []) . transform
+      return $ divWith ("", [normalizeToClassName $ getStyleName c], []) . transform
   | (c:cs) <- pStyle pPr,
-    c `elem` listParagraphDivs = do
+    getStyleName c `elem` listParagraphStyles = do
       let pPr' = pPr { pStyle = cs, indentation = Nothing}
       transform <- parStyleToTransform pPr'
-      return $ divWith ("", [c], []) . transform
-  | (c:cs) <- pStyle pPr
-  , Just True <- pBlockQuote pPr = do
-      opts <- asks docxOptions
+      return $ divWith ("", [normalizeToClassName $ getStyleName c], []) . transform
+  | (c:cs) <- pStyle pPr = do
       let pPr' = pPr { pStyle = cs }
       transform <- parStyleToTransform pPr'
-      let extraInfo = if isEnabled Ext_styles opts
-                      then divWith ("", [], [("custom-style", c)])
-                      else id
-      return $ extraInfo . blockQuote . transform
-  | (c:cs) <- pStyle pPr = do
-      opts <- asks docxOptions
-      let pPr' = pPr { pStyle = cs}
-      transform <- parStyleToTransform pPr'
-      let extraInfo = if isEnabled Ext_styles opts
-                      then divWith ("", [], [("custom-style", c)])
-                      else id
-      return $ extraInfo . transform
+      ei <- extraInfo divWith c
+      return $ ei . (if isBlockQuote c then blockQuote else id) . transform
   | null (pStyle pPr)
-  , Just left <- indentation pPr >>= leftParIndent
-  , Just hang <- indentation pPr >>= hangingParIndent = do
+  , Just left <- indentation pPr >>= leftParIndent = do
     let pPr' = pPr { indentation = Nothing }
+        hang = fromMaybe 0 $ indentation pPr >>= hangingParIndent
     transform <- parStyleToTransform pPr'
-    return $ case (left - hang) > 0 of
-               True  -> blockQuote . transform
-               False -> transform
-  | null (pStyle pPr),
-    Just left <- indentation pPr >>= leftParIndent = do
-      let pPr' = pPr { indentation = Nothing }
-      transform <- parStyleToTransform pPr'
-      return $ case left > 0 of
-         True  -> blockQuote . transform
-         False -> transform
+    return $ if (left - hang) > 0
+             then blockQuote . transform
+             else transform
 parStyleToTransform _ = return id
+
+normalizeToClassName :: (FromStyleName a) => a -> T.Text
+normalizeToClassName = T.map go . fromStyleName
+  where go c | isSpace c = '-'
+             | otherwise = c
 
 bodyPartToBlocks :: PandocMonad m => BodyPart -> DocxContext m Blocks
 bodyPartToBlocks (Paragraph pPr parparts)
-  | not $ null $ codeDivs `intersect` (pStyle pPr) = do
+  | Just True <- pBidi pPr = do
+      let pPr' = pPr { pBidi = Nothing }
+      local (\s -> s{ docxInBidi = True })
+        (bodyPartToBlocks (Paragraph pPr' parparts))
+  | isCodeDiv pPr = do
       transform <- parStyleToTransform pPr
       return $
         transform $
         codeBlock $
-        concatMap parPartToString parparts
+        T.concat $
+        map parPartToText parparts
   | Just (style, n) <- pHeading pPr = do
     ils <-local (\s-> s{docxInHeaderBlock=True})
            (smushInlines <$> mapM parPartToInlines parparts)
     makeHeaderAnchor $
-      headerWith ("", delete style (pStyle pPr), []) n ils
+      headerWith ("", map normalizeToClassName . delete style $ getStyleNames (pStyle pPr), []) n ils
   | otherwise = do
-    ils <- (trimSps . smushInlines) <$> mapM parPartToInlines parparts
+    ils <- trimSps . smushInlines <$> mapM parPartToInlines parparts
     prevParaIls <- gets docxPrevPara
     dropIls <- gets docxDropCap
     let ils' = dropIls <> ils
-    if dropCap pPr
+    let (paraOrPlain, pPr')
+          | hasStylesInheritedFrom ["Compact"] pPr = (plain, removeStyleNamed "Compact" pPr)
+          | otherwise = (para, pPr)
+    if dropCap pPr'
       then do modify $ \s -> s { docxDropCap = ils' }
               return mempty
       else do modify $ \s -> s { docxDropCap = mempty }
               let ils'' = prevParaIls <>
                           (if isNull prevParaIls then mempty else space) <>
                           ils'
+                  handleInsertion = do
+                    modify $ \s -> s {docxPrevPara = mempty}
+                    transform <- parStyleToTransform pPr'
+                    return $ transform $ paraOrPlain ils''
               opts <- asks docxOptions
-              case () of
-
-                _ | isNull ils'' && not (isEnabled Ext_empty_paragraphs opts) ->
+              if  | isNull ils'' && not (isEnabled Ext_empty_paragraphs opts) ->
                     return mempty
-                _ | Just (TrackedChange Insertion _) <- pChange pPr
-                  , AcceptChanges <- readerTrackChanges opts -> do
-                      modify $ \s -> s {docxPrevPara = mempty}
-                      transform <- parStyleToTransform pPr
-                      return $ transform $ para ils''
-                _ | Just (TrackedChange Insertion _) <- pChange pPr
+                  | Just (TrackedChange Insertion _) <- pChange pPr'
+                  , AcceptChanges <- readerTrackChanges opts ->
+                      handleInsertion
+                  | Just (TrackedChange Insertion _) <- pChange pPr'
                   , RejectChanges <- readerTrackChanges opts -> do
                       modify $ \s -> s {docxPrevPara = ils''}
                       return mempty
-                _ | Just (TrackedChange Insertion cInfo) <- pChange pPr
+                  | Just (TrackedChange Insertion cInfo) <- pChange pPr'
                   , AllChanges <- readerTrackChanges opts
                   , ChangeInfo _ cAuthor cDate <- cInfo -> do
                       let attr = ("", ["paragraph-insertion"], [("author", cAuthor), ("date", cDate)])
                           insertMark = spanWith attr mempty
-                      transform <- parStyleToTransform pPr
+                      transform <- parStyleToTransform pPr'
                       return $ transform $
-                        para $ ils'' <> insertMark
-                _ | Just (TrackedChange Deletion _) <- pChange pPr
+                        paraOrPlain $ ils'' <> insertMark
+                  | Just (TrackedChange Deletion _) <- pChange pPr'
                   , AcceptChanges <- readerTrackChanges opts -> do
                       modify $ \s -> s {docxPrevPara = ils''}
                       return mempty
-                _ | Just (TrackedChange Deletion _) <- pChange pPr
-                  , RejectChanges <- readerTrackChanges opts -> do
-                      modify $ \s -> s {docxPrevPara = mempty}
-                      transform <- parStyleToTransform pPr
-                      return $ transform $ para ils''
-                _ | Just (TrackedChange Deletion cInfo) <- pChange pPr
+                  | Just (TrackedChange Deletion _) <- pChange pPr'
+                  , RejectChanges <- readerTrackChanges opts ->
+                      handleInsertion
+                  | Just (TrackedChange Deletion cInfo) <- pChange pPr'
                   , AllChanges <- readerTrackChanges opts
                   , ChangeInfo _ cAuthor cDate <- cInfo -> do
                       let attr = ("", ["paragraph-deletion"], [("author", cAuthor), ("date", cDate)])
                           insertMark = spanWith attr mempty
-                      transform <- parStyleToTransform pPr
+                      transform <- parStyleToTransform pPr'
                       return $ transform $
-                        para $ ils'' <> insertMark
-                _ | otherwise -> do
-                      modify $ \s -> s {docxPrevPara = mempty}
-                      transform <- parStyleToTransform pPr
-                      return $ transform $ para ils''
+                        paraOrPlain $ ils'' <> insertMark
+                  | otherwise -> handleInsertion
 bodyPartToBlocks (ListItem pPr numId lvl (Just levelInfo) parparts) = do
   -- We check whether this current numId has previously been used,
   -- since Docx expects us to pick up where we left off.
@@ -652,13 +648,20 @@ bodyPartToBlocks (ListItem pPr numId lvl (Just levelInfo) parparts) = do
             , ("num-id", numId)
             , ("format", fmt)
             , ("text", txt)
-            , ("start", show start)
+            , ("start", tshow start)
             ]
-  modify $ \st -> st{ docxListState = M.insert (numId, lvl) start listState}
+  modify $ \st -> st{ docxListState =
+    -- expire all the continuation data for lists of level > this one:
+    -- a new level 1 list item resets continuation for level 2+
+    let expireKeys = [ (numid', lvl')
+                     |  (numid', lvl') <- M.keys listState
+                     , lvl' > lvl
+                     ]
+    in foldr M.delete (M.insert (numId, lvl) start listState) expireKeys }
   blks <- bodyPartToBlocks (Paragraph pPr parparts)
   return $ divWith ("", ["list-item"], kvs) blks
 bodyPartToBlocks (ListItem pPr _ _ _ parparts) =
-  let pPr' = pPr {pStyle = "ListParagraph": pStyle pPr}
+  let pPr' = pPr {pStyle = constructBogusParStyleData "list-paragraph": pStyle pPr}
   in
     bodyPartToBlocks $ Paragraph pPr' parparts
 bodyPartToBlocks (Tbl _ _ _ []) =
@@ -704,12 +707,12 @@ bodyPartToBlocks (OMathPara e) =
 
 -- replace targets with generated anchors.
 rewriteLink' :: PandocMonad m => Inline -> DocxContext m Inline
-rewriteLink' l@(Link attr ils ('#':target, title)) = do
+rewriteLink' l@(Link attr ils (T.uncons -> Just ('#',target), title)) = do
   anchorMap <- gets docxAnchorMap
   case M.lookup target anchorMap of
     Just newTarget -> do
       modify $ \s -> s{docxAnchorSet = Set.insert newTarget (docxAnchorSet s)}
-      return $ Link attr ils ('#':newTarget, title)
+      return $ Link attr ils ("#" <> newTarget, title)
     Nothing        -> do
       modify $ \s -> s{docxAnchorSet = Set.insert target (docxAnchorSet s)}
       return l

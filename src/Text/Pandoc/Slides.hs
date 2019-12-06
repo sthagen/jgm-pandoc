@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Slides
    Copyright   : Copyright (C) 2012-2019 John MacFarlane
@@ -22,13 +23,14 @@ getSlideLevel = go 6
   where go least (Header n _ _ : x : xs)
                  | n < least && nonHOrHR x = go n xs
                  | otherwise               = go least (x:xs)
+        go least (Div _ bs : xs) = min (go least bs) (go least xs)
         go least (_ : xs) = go least xs
         go least [] = least
         nonHOrHR Header{}       = False
         nonHOrHR HorizontalRule = False
         nonHOrHR _              = True
 
--- | Prepare a block list to be passed to hierarchicalize.
+-- | Prepare a block list to be passed to makeSections.
 prepSlides :: Int -> [Block] -> [Block]
 prepSlides slideLevel = ensureStartWithH . splitHrule . extractRefsHeader
   where splitHrule (HorizontalRule : Header n attr xs : ys)
@@ -44,5 +46,7 @@ prepSlides slideLevel = ensureStartWithH . splitHrule . extractRefsHeader
                                    Div ("refs",classes,kvs) ys]
                _ -> bs
         ensureStartWithH bs@(Header n _ _:_)
+                       | n <= slideLevel = bs
+        ensureStartWithH bs@(Div _ (Header n _ _:_) : _)
                        | n <= slideLevel = bs
         ensureStartWithH bs              = Header slideLevel nullAttr [Str "\0"] : bs

@@ -1,6 +1,7 @@
 {-# LANGUAGE MonoLocalBinds      #-}
 {-# LANGUAGE NoImplicitPrelude   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings   #-}
 {- |
    Module      : Text.Pandoc.Readers
    Copyright   : Copyright (C) 2006-2019 John MacFarlane
@@ -55,11 +56,12 @@ module Text.Pandoc.Readers
   ) where
 
 import Prelude
+import Control.Monad (unless)
 import Control.Monad.Except (throwError)
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BL
-import Data.List (intercalate)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Text.Pandoc.Class
 import Text.Pandoc.Definition
 import Text.Pandoc.Error
@@ -98,7 +100,7 @@ data Reader m = TextReader (ReaderOptions -> Text -> m Pandoc)
               | ByteStringReader (ReaderOptions -> BL.ByteString -> m Pandoc)
 
 -- | Association list of formats and readers.
-readers :: PandocMonad m => [(String, Reader m)]
+readers :: PandocMonad m => [(Text, Reader m)]
 readers = [ ("native"       , TextReader readNative)
            ,("json"         , TextReader readJSON)
            ,("markdown"     , TextReader readMarkdown)
@@ -134,15 +136,28 @@ readers = [ ("native"       , TextReader readNative)
            ]
 
 -- | Retrieve reader, extensions based on formatSpec (format+extensions).
-getReader :: PandocMonad m => String -> Either String (Reader m, Extensions)
+getReader :: PandocMonad m => Text -> m (Reader m, Extensions)
 getReader s =
   case parseFormatSpec s of
-       Left e  -> Left $ intercalate "\n" [m | Message m <- errorMessages e]
-       Right (readerName, setExts) ->
+       Left e  -> throwError $ PandocAppError
+                    $ T.intercalate "\n" [T.pack m | Message m <- errorMessages e]
+       Right (readerName, extsToEnable, extsToDisable) ->
            case lookup readerName readers of
-                   Nothing  -> Left $ "Unknown reader: " ++ readerName
-                   Just  r  -> Right (r, setExts $
-                                        getDefaultExtensions readerName)
+                   Nothing  -> throwError $ PandocUnknownReaderError
+                                             readerName
+                   Just  r  -> do
+                     let allExts = getAllExtensions readerName
+                     let exts = foldr disableExtension
+                           (foldr enableExtension
+                             (getDefaultExtensions readerName)
+                                   extsToEnable) extsToDisable
+                     mapM_ (\ext ->
+                              unless (extensionEnabled ext allExts) $
+                                throwError $
+                                   PandocUnsupportedExtensionError
+                                   (T.drop 4 $ T.pack $ show ext) readerName)
+                          (extsToEnable ++ extsToDisable)
+                     return (r, exts)
 
 -- | Read pandoc document from JSON format.
 readJSON :: PandocMonad m

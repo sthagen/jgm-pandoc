@@ -19,13 +19,14 @@ import Prelude
 import Control.Monad.State.Strict
 import Data.Default
 import Data.Text (Text)
+import qualified Data.Text as T
 import Text.Pandoc.Class (PandocMonad, report)
 import Text.Pandoc.Definition
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
-import Text.Pandoc.Pretty
+import Text.DocLayout
 import Text.Pandoc.Shared
-import Text.Pandoc.Templates (renderTemplate')
+import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Writers.Shared
 
 type Notes = [[Block]]
@@ -49,22 +50,20 @@ pandocToHaddock opts (Pandoc meta blocks) = do
   body <- blockListToHaddock opts blocks
   st <- get
   notes' <- notesToHaddock opts (reverse $ stNotes st)
-  let render' :: Doc -> Text
-      render' = render colwidth
-  let main = render' $ body <>
-               (if isEmpty notes' then empty else blankline <> notes')
-  metadata <- metaToJSON opts
-               (fmap render' . blockListToHaddock opts)
-               (fmap render' . inlineListToHaddock opts)
+  let main = body <> (if isEmpty notes' then empty else blankline <> notes')
+  metadata <- metaToContext opts
+               (blockListToHaddock opts)
+               (fmap chomp . inlineListToHaddock opts)
                meta
   let context  = defField "body" main metadata
-  case writerTemplate opts of
-          Nothing  -> return main
-          Just tpl -> renderTemplate' tpl context
+  return $ render colwidth $
+    case writerTemplate opts of
+          Nothing  -> main
+          Just tpl -> renderTemplate tpl context
 
 -- | Return haddock representation of notes.
 notesToHaddock :: PandocMonad m
-               => WriterOptions -> [[Block]] -> StateT WriterState m Doc
+               => WriterOptions -> [[Block]] -> StateT WriterState m (Doc Text)
 notesToHaddock opts notes =
   if null notes
      then return empty
@@ -73,7 +72,7 @@ notesToHaddock opts notes =
        return $ text "#notes#" <> blankline <> contents
 
 -- | Escape special characters for Haddock.
-escapeString :: String -> String
+escapeString :: Text -> Text
 escapeString = escapeStringUsing haddockEscapes
   where haddockEscapes = backslashEscapes "\\/'`\"@<"
 
@@ -81,7 +80,7 @@ escapeString = escapeStringUsing haddockEscapes
 blockToHaddock :: PandocMonad m
                => WriterOptions -- ^ Options
                -> Block         -- ^ Block element
-               -> StateT WriterState m Doc
+               -> StateT WriterState m (Doc Text)
 blockToHaddock _ Null = return empty
 blockToHaddock opts (Div _ ils) = do
   contents <- blockListToHaddock opts ils
@@ -90,8 +89,9 @@ blockToHaddock opts (Plain inlines) = do
   contents <- inlineListToHaddock opts inlines
   return $ contents <> cr
 -- title beginning with fig: indicates figure
-blockToHaddock opts (Para [Image attr alt (src,'f':'i':'g':':':tit)]) =
-  blockToHaddock opts (Para [Image attr alt (src,tit)])
+blockToHaddock opts (Para [Image attr alt (src,tgt)])
+  | Just tit <- T.stripPrefix "fig:" tgt
+  = blockToHaddock opts (Para [Image attr alt (src,tit)])
 blockToHaddock opts (Para inlines) =
   -- TODO:  if it contains linebreaks, we need to use a @...@ block
   (<> blankline) `fmap` blockToHaddock opts (Plain inlines)
@@ -99,7 +99,7 @@ blockToHaddock opts (LineBlock lns) =
   blockToHaddock opts $ linesToPara lns
 blockToHaddock _ b@(RawBlock f str)
   | f == "haddock" =
-      return $ text str <> text "\n"
+      return $ literal str <> text "\n"
   | otherwise = do
     report $ BlockNotRendered b
     return empty
@@ -107,13 +107,13 @@ blockToHaddock opts HorizontalRule =
   return $ blankline <> text (replicate (writerColumns opts) '_') <> blankline
 blockToHaddock opts (Header level (ident,_,_) inlines) = do
   contents <- inlineListToHaddock opts inlines
-  let attr' = if null ident
+  let attr' = if T.null ident
                  then empty
-                 else cr <> text "#" <> text ident <> text "#"
+                 else cr <> text "#" <> literal ident <> text "#"
   return $ nowrap (text (replicate level '=') <> space <> contents)
                  <> attr' <> blankline
 blockToHaddock _ (CodeBlock (_,_,_) str) =
-  return $ prefixed "> " (text str) <> blankline
+  return $ prefixed "> " (literal str) <> blankline
 -- Nothing in haddock corresponds to block quotes:
 blockToHaddock opts (BlockQuote blocks) =
   blockListToHaddock opts blocks
@@ -128,81 +128,84 @@ blockToHaddock opts (Table caption aligns widths headers rows) = do
   return $ prefixed "> " (tbl $$ blankline $$ caption'') $$ blankline
 blockToHaddock opts (BulletList items) = do
   contents <- mapM (bulletListItemToHaddock opts) items
-  return $ cat contents <> blankline
+  return $ (if isTightList items then vcat else vsep) contents <> blankline
 blockToHaddock opts (OrderedList (start,_,delim) items) = do
   let attribs = (start, Decimal, delim)
   let markers  = orderedListMarkers attribs
-  let markers' = map (\m -> if length m < 3
-                               then m ++ replicate (3 - length m) ' '
+  let markers' = map (\m -> if T.length m < 3
+                               then m <> T.replicate (3 - T.length m) " "
                                else m) markers
   contents <- zipWithM (orderedListItemToHaddock opts) markers' items
-  return $ cat contents <> blankline
+  return $ (if isTightList items then vcat else vsep) contents <> blankline
 blockToHaddock opts (DefinitionList items) = do
   contents <- mapM (definitionListItemToHaddock opts) items
-  return $ cat contents <> blankline
+  return $ vcat contents <> blankline
 
 -- | Convert bullet list item (list of blocks) to haddock
 bulletListItemToHaddock :: PandocMonad m
-                        => WriterOptions -> [Block] -> StateT WriterState m Doc
+                        => WriterOptions -> [Block] -> StateT WriterState m (Doc Text)
 bulletListItemToHaddock opts items = do
   contents <- blockListToHaddock opts items
   let sps = replicate (writerTabStop opts - 2) ' '
   let start = text ('-' : ' ' : sps)
-  -- remove trailing blank line if it is a tight list
-  let contents' = case reverse items of
-                       (BulletList xs:_) | isTightList xs ->
-                            chomp contents <> cr
-                       (OrderedList _ xs:_) | isTightList xs ->
-                            chomp contents <> cr
-                       _ -> contents
-  return $ hang (writerTabStop opts) start $ contents' <> cr
+  return $ hang (writerTabStop opts) start contents $$
+           if endsWithPlain items
+              then cr
+              else blankline
 
 -- | Convert ordered list item (a list of blocks) to haddock
 orderedListItemToHaddock :: PandocMonad m
                          => WriterOptions -- ^ options
-                         -> String        -- ^ list item marker
+                         -> Text        -- ^ list item marker
                          -> [Block]       -- ^ list item (list of blocks)
-                         -> StateT WriterState m Doc
+                         -> StateT WriterState m (Doc Text)
 orderedListItemToHaddock opts marker items = do
   contents <- blockListToHaddock opts items
-  let sps = case length marker - writerTabStop opts of
+  let sps = case T.length marker - writerTabStop opts of
                    n | n > 0 -> text $ replicate n ' '
                    _ -> text " "
-  let start = text marker <> sps
-  return $ hang (writerTabStop opts) start $ contents <> cr
+  let start = literal marker <> sps
+  return $ hang (writerTabStop opts) start contents $$
+           if endsWithPlain items
+              then cr
+              else blankline
 
 -- | Convert definition list item (label, list of blocks) to haddock
 definitionListItemToHaddock :: PandocMonad m
                             => WriterOptions
                             -> ([Inline],[[Block]])
-                            -> StateT WriterState m Doc
+                            -> StateT WriterState m (Doc Text)
 definitionListItemToHaddock opts (label, defs) = do
   labelText <- inlineListToHaddock opts label
   defs' <- mapM (mapM (blockToHaddock opts)) defs
-  let contents = vcat $ map (\d -> hang 4 empty $ vcat d <> cr) defs'
-  return $ nowrap (brackets labelText) <> cr <> contents <> cr
+  let contents = (if isTightList defs then vcat else vsep) $
+                 map (\d -> hang 4 empty $ vcat d <> cr) defs'
+  return $ nowrap (brackets labelText) $$ contents $$
+           if isTightList defs
+              then cr
+              else blankline
 
 -- | Convert list of Pandoc block elements to haddock
 blockListToHaddock :: PandocMonad m
                    => WriterOptions -- ^ Options
                    -> [Block]       -- ^ List of block elements
-                   -> StateT WriterState m Doc
+                   -> StateT WriterState m (Doc Text)
 blockListToHaddock opts blocks =
-  cat <$> mapM (blockToHaddock opts) blocks
+  mconcat <$> mapM (blockToHaddock opts) blocks
 
 -- | Convert list of Pandoc inline elements to haddock.
 inlineListToHaddock :: PandocMonad m
-                    => WriterOptions -> [Inline] -> StateT WriterState m Doc
+                    => WriterOptions -> [Inline] -> StateT WriterState m (Doc Text)
 inlineListToHaddock opts lst =
-  cat <$> mapM (inlineToHaddock opts) lst
+  mconcat <$> mapM (inlineToHaddock opts) lst
 
 -- | Convert Pandoc inline element to haddock.
 inlineToHaddock :: PandocMonad m
-                => WriterOptions -> Inline -> StateT WriterState m Doc
+                => WriterOptions -> Inline -> StateT WriterState m (Doc Text)
 inlineToHaddock opts (Span (ident,_,_) ils) = do
   contents <- inlineListToHaddock opts ils
-  if not (null ident) && null ils
-     then return $ "#" <> text ident <> "#"
+  if not (T.null ident) && null ils
+     then return $ "#" <> literal ident <> "#"
      else return contents
 inlineToHaddock opts (Emph lst) = do
   contents <- inlineListToHaddock opts lst
@@ -227,15 +230,15 @@ inlineToHaddock opts (Quoted DoubleQuote lst) = do
   contents <- inlineListToHaddock opts lst
   return $ "“" <> contents <> "”"
 inlineToHaddock _ (Code _ str) =
-  return $ "@" <> text (escapeString str) <> "@"
+  return $ "@" <> literal (escapeString str) <> "@"
 inlineToHaddock _ (Str str) =
-  return $ text $ escapeString str
+  return $ literal $ escapeString str
 inlineToHaddock _ (Math mt str) =
   return $ case mt of
-    DisplayMath -> cr <> "\\[" <> text str <> "\\]" <> cr
-    InlineMath  -> "\\(" <> text str <> "\\)"
+    DisplayMath -> cr <> "\\[" <> literal str <> "\\]" <> cr
+    InlineMath  -> "\\(" <> literal str <> "\\)"
 inlineToHaddock _ il@(RawInline f str)
-  | f == "haddock" = return $ text str
+  | f == "haddock" = return $ literal str
   | otherwise = do
     report $ InlineNotRendered il
     return empty
@@ -249,12 +252,12 @@ inlineToHaddock opts SoftBreak =
 inlineToHaddock _ Space = return space
 inlineToHaddock opts (Cite _ lst) = inlineListToHaddock opts lst
 inlineToHaddock _ (Link _ txt (src, _)) = do
-  let linktext = text $ escapeString $ stringify txt
+  let linktext = literal $ escapeString $ stringify txt
   let useAuto = isURI src &&
                 case txt of
                       [Str s] | escapeURI s == src -> True
                       _       -> False
-  return $ nowrap $ "<" <> text src <>
+  return $ nowrap $ "<" <> literal src <>
            (if useAuto then empty else space <> linktext) <> ">"
 inlineToHaddock opts (Image attr alternate (source, tit)) = do
   linkhaddock <- inlineToHaddock opts (Link attr alternate (source, tit))
@@ -263,5 +266,5 @@ inlineToHaddock opts (Image attr alternate (source, tit)) = do
 inlineToHaddock opts (Note contents) = do
   modify (\st -> st{ stNotes = contents : stNotes st })
   st <- get
-  let ref = text $ writerIdentifierPrefix opts ++ show (length $ stNotes st)
+  let ref = literal $ writerIdentifierPrefix opts <> tshow (length $ stNotes st)
   return $ "<#notes [" <> ref <> "]>"

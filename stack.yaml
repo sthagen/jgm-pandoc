@@ -2,6 +2,7 @@ flags:
   pandoc:
     trypandoc: false
     embed_data_files: true
+    static: false
   pandoc-citeproc:
     bibutils: true
     embed_data_files: true
@@ -11,14 +12,17 @@ flags:
 packages:
 - '.'
 extra-deps:
-- pandoc-citeproc-0.16.2
-- ipynb-0.1
-- cmark-gfm-0.2.0
-- hslua-1.0.3.1
-- hslua-module-system-0.2.0
-- tasty-lua-0.2.0
-- skylighting-core-0.8.1.1
-- skylighting-0.8.1.1
+- pandoc-types-1.20
+- texmath-0.12
+- haddock-library-1.8.0
+- skylighting-0.8.3
+- skylighting-core-0.8.3
+- regex-pcre-builtin-0.95.0.8.8.35
+- doclayout-0.2.0.1
+- HsYAML-0.2.0.0
+- HsYAML-aeson-0.2.0.0
+- doctemplates-0.7.2
+- pandoc-citeproc-0.16.4
 ghc-options:
-   "$locals": -Wall -fno-warn-unused-do-bind -Wincomplete-record-updates -Wnoncanonical-monad-instances -Wnoncanonical-monadfail-instances -Wincomplete-uni-patterns -Widentities -Wcpp-undef -fhide-source-paths -Wno-missing-home-modules
-resolver: lts-13.17
+   "$locals": -fhide-source-paths -Wno-missing-home-modules
+resolver: lts-14.6

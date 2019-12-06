@@ -86,6 +86,47 @@ return {
         assert.are_equal(count, 3)
       end)
     },
+    group 'HTML-like attribute tables' {
+      test('in element constructor', function ()
+        local html_attributes = {
+          id = 'the-id',
+          class = 'class1 class2',
+          width = '11',
+          height = '12'
+        }
+        local attr = pandoc.Span('test', html_attributes).attr
+        assert.are_equal(attr.identifier, 'the-id')
+        assert.are_equal(attr.classes[1], 'class1')
+        assert.are_equal(attr.classes[2], 'class2')
+        assert.are_equal(attr.attributes.width, '11')
+        assert.are_equal(attr.attributes.height, '12')
+      end),
+      test('element attr setter', function ()
+        local html_attributes = {
+          id = 'the-id',
+          class = 'class1 class2',
+          width = "11",
+          height = "12"
+        }
+        local span = pandoc.Span 'test'
+        span.attr = html_attributes
+        assert.are_equal(span.attr.identifier, 'the-id')
+        assert.are_equal(span.attr.classes[1], 'class1')
+        assert.are_equal(span.attr.classes[2], 'class2')
+        assert.are_equal(span.attr.attributes.width, '11')
+        assert.are_equal(span.attr.attributes.height, '12')
+      end),
+      test('element attrbutes setter', function ()
+        local attributes = {
+          width = "11",
+          height = "12"
+        }
+        local span = pandoc.Span 'test'
+        span.attributes = attributes
+        assert.are_equal(span.attr.attributes.width, '11')
+        assert.are_equal(span.attr.attributes.height, '12')
+      end)
+    }
   },
 
   group 'clone' {
@@ -171,4 +212,42 @@ return {
       )
     end)
   },
+
+  group 'walk_block' {
+    test('block walking order', function ()
+     local acc = {}
+     local nested_nums = pandoc.Div {
+       pandoc.Para{pandoc.Str'1'},
+       pandoc.Div{
+         pandoc.Para{pandoc.Str'2'},
+         pandoc.Para{pandoc.Str'3'}
+       },
+       pandoc.Para{pandoc.Str'4'}
+     }
+     pandoc.walk_block(
+       nested_nums,
+       {Para = function (p) table.insert(acc, p.content[1].text) end}
+     )
+     assert.are_equal('1234', table.concat(acc))
+    end)
+  },
+
+  group 'walk_inline' {
+    test('inline walking order', function ()
+      local acc = {}
+      local nested_nums = pandoc.Span {
+        pandoc.Str'1',
+        pandoc.Emph {
+          pandoc.Str'2',
+          pandoc.Str'3'
+        },
+        pandoc.Str'4'
+      }
+      pandoc.walk_inline(
+        nested_nums,
+        {Str = function (s) table.insert(acc, s.text) end}
+      )
+      assert.are_equal('1234', table.concat(acc))
+    end)
+  }
 }
