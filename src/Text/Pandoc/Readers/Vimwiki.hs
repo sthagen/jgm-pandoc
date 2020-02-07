@@ -147,7 +147,7 @@ header = try $ do
   contents <- trimInlines . mconcat <$> manyTill inline (try $ spaceChar
     >> string eqs >> many spaceChar >> newline)
   attr <- registerHeader (makeId contents,
-    if sp == "" then [] else ["justcenter"], []) contents
+    ["justcenter" | not (null sp)], []) contents
   return $ B.headerWith attr lev contents
 
 para :: PandocMonad m => VwParser m Blocks
@@ -546,21 +546,21 @@ link :: PandocMonad m => VwParser m Inlines
 link = try $ do
   string "[["
   contents <- lookAhead $ manyTillChar anyChar (string "]]")
-  case T.any (== '|') contents of
-                  False -> do
-                    manyTill anyChar (string "]]")
--- not using try here because [[hell]o]] is not rendered as a link in vimwiki
-                    let tit = if isURI contents
-                                 then ""
-                                 else "wikilink"
-                    return $ B.link (procLink contents) tit (B.str contents)
-                  True  -> do
+  if T.any (== '|') contents
+                  then do
                     url <- manyTillChar anyChar $ char '|'
                     lab <- mconcat <$> manyTill inline (string "]]")
                     let tit = if isURI url
                                  then ""
                                  else "wikilink"
                     return $ B.link (procLink url) tit lab
+                  else do
+                    manyTill anyChar (string "]]")
+-- not using try here because [[hell]o]] is not rendered as a link in vimwiki
+                    let tit = if isURI contents
+                                 then ""
+                                 else "wikilink"
+                    return $ B.link (procLink contents) tit (B.str contents)
 
 image :: PandocMonad m => VwParser m Inlines
 image = try $ do

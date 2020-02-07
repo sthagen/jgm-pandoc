@@ -88,8 +88,7 @@ notesToMan :: PandocMonad m => WriterOptions -> [[Block]] -> StateT WriterState 
 notesToMan opts notes =
   if null notes
      then return empty
-     else zipWithM (noteToMan opts) [1..] notes >>=
-          return . (text ".SH NOTES" $$) . vcat
+     else (text ".SH NOTES" $$) . vcat <$> zipWithM (noteToMan opts) [1..] notes
 
 -- | Return man representation of a note.
 noteToMan :: PandocMonad m => WriterOptions -> Int -> [Block] -> StateT WriterState m (Doc Text)
@@ -252,8 +251,8 @@ definitionListItemToMan opts (label, defs) = do
 
 makeCodeBold :: [Inline] -> [Inline]
 makeCodeBold = walk go
-  where go x@(Code{}) = Strong [x]
-        go x          = x
+  where go x@Code{} = Strong [x]
+        go x        = x
 
 -- | Convert list of Pandoc block elements to man.
 blockListToMan :: PandocMonad m

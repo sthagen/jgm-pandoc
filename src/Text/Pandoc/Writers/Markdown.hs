@@ -25,7 +25,7 @@ import Data.Char (isAlphaNum)
 import Data.Default
 import Data.List (find, intersperse, sortBy, transpose)
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, catMaybes)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (comparing)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -121,7 +121,7 @@ mmdTitleBlock (Context hashmap) =
                  | null xs        -> empty
                  | otherwise      -> k' <> ":" <> space <>
                                       hcat (intersperse "; " $
-                                          catMaybes $ map fromVal xs)
+                                            mapMaybe fromVal xs)
                (k', SimpleVal x)
                       | isEmpty x -> empty
                       | otherwise -> k' <> ":" <> space <>
@@ -256,7 +256,7 @@ keyToMarkdown opts (label', (src, tit), attr) = do
 notesToMarkdown :: PandocMonad m => WriterOptions -> [[Block]] -> MD m (Doc Text)
 notesToMarkdown opts notes = do
   n <- gets stNoteNum
-  notes' <- mapM (\(num, note) -> noteToMarkdown opts num note) (zip [n..] notes)
+  notes' <- zipWithM (noteToMarkdown opts) [n..] notes
   modify $ \st -> st { stNoteNum = stNoteNum st + length notes }
   return $ vsep notes'
 
@@ -490,7 +490,7 @@ blockToMarkdown' opts b@(RawBlock f str) = do
                 | isEnabled Ext_raw_attribute opts -> rawAttribBlock
                 | otherwise -> renderEmpty
       | otherwise -> renderEmpty
-blockToMarkdown' opts HorizontalRule = do
+blockToMarkdown' opts HorizontalRule =
   return $ blankline <> literal (T.replicate (writerColumns opts) "-") <> blankline
 blockToMarkdown' opts (Header level attr inlines) = do
   -- first, if we're putting references at the end of a section, we
@@ -632,7 +632,7 @@ blockToMarkdown' opts t@(Table caption aligns widths headers rows) =  do
             | isEnabled Ext_raw_html opts -> fmap (id,) $
                    literal <$>
                    (writeHtml5String opts{ writerTemplate = Nothing } $ Pandoc nullMeta [t])
-            | otherwise -> return $ (id, literal "[TABLE]")
+            | otherwise -> return (id, literal "[TABLE]")
   return $ nst (tbl $$ caption'') $$ blankline
 blockToMarkdown' opts (BulletList items) = do
   contents <- inList $ mapM (bulletListItemToMarkdown opts) items
@@ -647,8 +647,7 @@ blockToMarkdown' opts (OrderedList (start,sty,delim) items) = do
                                then m <> T.replicate (3 - T.length m) " "
                                else m) markers
   contents <- inList $
-              mapM (\(item, num) -> orderedListItemToMarkdown opts item num) $
-              zip markers' items
+              zipWithM (orderedListItemToMarkdown opts) markers' items
   return $ (if isTightList items then vcat else vsep) contents <> blankline
 blockToMarkdown' opts (DefinitionList items) = do
   contents <- inList $ mapM (definitionListItemToMarkdown opts) items
@@ -680,11 +679,11 @@ pipeTable headless aligns rawHeaders rawRows = do
                     hcat (intersperse (literal "|") $
                           zipWith3 blockFor aligns widths (map chomp cs))
                     <> literal "|"
-  let toborder (a, w) = literal $ case a of
-                             AlignLeft    -> ":" <> T.replicate (w + 1) "-"
-                             AlignCenter  -> ":" <> T.replicate w "-" <> ":"
-                             AlignRight   -> T.replicate (w + 1) "-" <> ":"
-                             AlignDefault -> T.replicate (w + 2) "-"
+  let toborder a w = literal $ case a of
+                          AlignLeft    -> ":" <> T.replicate (w + 1) "-"
+                          AlignCenter  -> ":" <> T.replicate w "-" <> ":"
+                          AlignRight   -> T.replicate (w + 1) "-" <> ":"
+                          AlignDefault -> T.replicate (w + 2) "-"
   -- note:  pipe tables can't completely lack a
   -- header; for a headerless table, we need a header of empty cells.
   -- see jgm/pandoc#1996.
@@ -692,7 +691,7 @@ pipeTable headless aligns rawHeaders rawRows = do
                   then torow (replicate (length aligns) empty)
                   else torow rawHeaders
   let border = nowrap $ literal "|" <> hcat (intersperse (literal "|") $
-                        map toborder $ zip aligns widths) <> literal "|"
+                        zipWith toborder aligns widths) <> literal "|"
   let body   = vcat $ map torow rawRows
   return $ header $$ border $$ body
 
@@ -768,7 +767,7 @@ bulletListItemToMarkdown opts bs = do
   let contents' = if itemEndsWithTightList bs
                      then chomp contents <> cr
                      else contents
-  return $ hang (writerTabStop opts) start $ contents'
+  return $ hang (writerTabStop opts) start contents'
 
 -- | Convert ordered list item (a list of blocks) to markdown.
 orderedListItemToMarkdown :: PandocMonad m
@@ -790,7 +789,7 @@ orderedListItemToMarkdown opts marker bs = do
   let contents' = if itemEndsWithTightList bs
                      then chomp contents <> cr
                      else contents
-  return $ hang ind start $ contents'
+  return $ hang ind start contents'
 
 -- | Convert definition list item (label, list of blocks) to markdown.
 definitionListItemToMarkdown :: PandocMonad m
@@ -822,7 +821,7 @@ definitionListItemToMarkdown opts (label, defs) = do
                             defs'
             return $ blankline <> nowrap labelText $$
                      (if isTight then empty else blankline) <> contents <> blankline
-     else do
+     else
        return $ nowrap (chomp labelText <> literal "  " <> cr) <>
                 vsep (map vsep defs') <> blankline
 
@@ -915,7 +914,7 @@ getReference attr label target = do
                                  (stKeys s) })
              return lab'
 
-           Just km -> do -- we have refs with this label
+           Just km ->    -- we have refs with this label
              case M.lookup (target, attr) km of
                   Just i -> do
                     let lab' = render Nothing $
@@ -1013,7 +1012,7 @@ isRight (Left  _) = False
 
 -- | Convert Pandoc inline element to markdown.
 inlineToMarkdown :: PandocMonad m => WriterOptions -> Inline -> MD m (Doc Text)
-inlineToMarkdown opts (Span ("",["emoji"],kvs) [Str s]) = do
+inlineToMarkdown opts (Span ("",["emoji"],kvs) [Str s]) =
   case lookup "data-emoji" kvs of
        Just emojiname | isEnabled Ext_emoji opts ->
             return $ ":" <> literal emojiname <> ":"
@@ -1188,7 +1187,7 @@ inlineToMarkdown opts il@(RawInline f str) = do
                 | isEnabled Ext_raw_attribute opts -> rawAttribInline
                 | otherwise -> renderEmpty
       | otherwise -> renderEmpty
-inlineToMarkdown opts (LineBreak) = do
+inlineToMarkdown opts LineBreak = do
   plain <- asks envPlain
   if plain || isEnabled Ext_hard_line_breaks opts
      then return cr

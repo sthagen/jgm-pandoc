@@ -1,7 +1,6 @@
 {-# LANGUAGE NoImplicitPrelude    #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE LambdaCase           #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {- |
    Module      : Text.Pandoc.Lua.Marshaling.Context
@@ -30,4 +29,3 @@ instance (TemplateTarget a, Pushable a) => Pushable (Val a) where
   push (MapVal ctx) = Lua.push ctx
   push (ListVal xs) = Lua.push xs
   push (SimpleVal d) = Lua.push $ render Nothing d
-

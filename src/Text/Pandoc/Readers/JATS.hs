@@ -226,7 +226,7 @@ parseBlock (Elem e) =
                      terms' <- mapM getInlines terms
                      items' <- mapM getBlocks items
                      return (mconcat $ intersperse (str "; ") terms', items')
-         parseFigure = do
+         parseFigure =
            -- if a simple caption and single graphic, we emit a standard
            -- implicit figure.  otherwise, we emit a div with the contents
            case filterChildren (named "graphic") e of
@@ -238,7 +238,7 @@ parseBlock (Elem e) =
                                              (filterChildren (const True) t)
                                            Nothing -> return mempty
                          img <- getGraphic (Just (caption, attrValue "id" e)) g
-                         return $ para $ img
+                         return $ para img
                   _   -> divWith (attrValue "id" e, ["fig"], []) <$> getBlocks e
          parseTable = do
                       let isCaption x = named "title" x || named "caption" x
@@ -443,7 +443,7 @@ elementToStr x = x
 parseInline :: PandocMonad m => Content -> JATS m Inlines
 parseInline (Text (CData _ s _)) = return $ text $ T.pack s
 parseInline (CRef ref) =
-  return $ maybe (text $ T.toUpper $ T.pack ref) text $ T.pack <$> lookupEntity ref
+  return . text . maybe (T.toUpper $ T.pack ref) T.pack $ lookupEntity ref
 parseInline (Elem e) =
   case qName (elName e) of
         "italic" -> emph <$> innerInlines

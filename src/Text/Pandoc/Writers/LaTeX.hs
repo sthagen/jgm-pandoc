@@ -644,9 +644,7 @@ blockToLaTeX (CodeBlock (identifier,classes,keyvalAttr) str) = do
                                 key `notElem` ["exports", "tangle", "results"]
                                 -- see #4889
                           ] ++
-                          (if identifier == ""
-                                then []
-                                else [ "label=" <> ref ])
+                          ["label=" <> ref | not (T.null identifier)]
 
                      else []
             printParams
@@ -749,7 +747,7 @@ blockToLaTeX (DefinitionList lst) = do
   beamer <- gets stBeamer
   let inc = if beamer && incremental then "[<+->]" else ""
   items <- mapM defListItemToLaTeX lst
-  let spacing = if all isTightList (map snd lst)
+  let spacing = if all (isTightList . snd) lst
                    then text "\\tightlist"
                    else empty
   return $ text ("\\begin{description}" <> inc) $$ spacing $$ vcat items $$
@@ -896,10 +894,10 @@ tableCellToLaTeX header (width, align, blocks) = do
                AlignRight   -> "\\raggedleft"
                AlignCenter  -> "\\centering"
                AlignDefault -> "\\raggedright"
-  return $ ("\\begin{minipage}" <> valign <>
-            braces (text (printf "%.2f\\columnwidth" width)) <>
-            (halign <> cr <> cellContents <> "\\strut" <> cr) <>
-            "\\end{minipage}")
+  return $ "\\begin{minipage}" <> valign <>
+           braces (text (printf "%.2f\\columnwidth" width)) <>
+           halign <> cr <> cellContents <> "\\strut" <> cr <>
+           "\\end{minipage}"
 
 notesToLaTeX :: [Doc Text] -> Doc Text
 notesToLaTeX [] = empty
@@ -1131,7 +1129,7 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
              ["LR" | ("dir", "ltr") `elem` kvs] ++
              (case lang of
                 Just lng -> let (l, o) = toPolyglossia lng
-                                ops = if T.null o then "" else ("[" <> o <> "]")
+                                ops = if T.null o then "" else "[" <> o <> "]"
                             in  ["text" <> l <> ops]
                 Nothing  -> [])
   contents <- inlineListToLaTeX ils
@@ -1686,4 +1684,3 @@ commonFromBcp47 (Lang l _ _ _) = fromIso l
     fromIso "ur"  = "urdu"
     fromIso "vi"  = "vietnamese"
     fromIso _     = ""
-

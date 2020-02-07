@@ -1,8 +1,7 @@
 {-# LANGUAGE NoImplicitPrelude   #-}
 {-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE OverloadedStrings   #-}
+
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Readers.RST
    Copyright   : Copyright (C) 2006-2019 John MacFarlane
@@ -31,7 +30,7 @@ readCSV :: PandocMonad m
         => ReaderOptions -- ^ Reader options
         -> Text          -- ^ Text to parse (assuming @'\n'@ line endings)
         -> m Pandoc
-readCSV _opts s = do
+readCSV _opts s =
   case parseCSV defaultCSVOptions (crFilter s) of
     Right (r:rs) -> return $ B.doc $ B.table capt (zip aligns widths) hdrs rows
        where capt = mempty
@@ -43,4 +42,3 @@ readCSV _opts s = do
              widths = replicate numcols 0
     Right []     -> return $ B.doc mempty
     Left e       -> throwError $ PandocParsecError s e
-

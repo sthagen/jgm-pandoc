@@ -28,6 +28,7 @@ import Control.Monad.Trans
 import Control.Monad.Except (throwError)
 import Data.Aeson.Encode.Pretty (encodePretty', Config(..), keyOrder,
          defConfig, Indent(..), NumberFormat(..))
+import Data.Bifunctor (second)
 import Data.Char (toLower)
 import Data.List (intercalate, sort)
 #ifdef _WINDOWS
@@ -36,13 +37,15 @@ import Data.List (isPrefixOf)
 #endif
 #endif
 import Data.Maybe (fromMaybe, isJust)
+import Data.Text (Text)
+import Safe (tailDef)
 import Skylighting (Style, Syntax (..), defaultSyntaxMap, parseTheme)
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
 import System.Exit (exitSuccess)
 import System.FilePath
 import System.IO (stdout)
-import Text.DocTemplates (Val(..))
+import Text.DocTemplates (Context (..), ToContext (toVal), Val (..))
 import Text.Pandoc
 import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), IpynbOutput (..), addMeta)
 import Text.Pandoc.Filter (Filter (..))
@@ -62,10 +65,8 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Data.Text (Text)
-import Text.DocTemplates (ToContext(toVal), Context(..))
-import qualified Text.Pandoc.UTF8 as UTF8
 import qualified Data.YAML as Y
+import qualified Text.Pandoc.UTF8 as UTF8
 
 parseOptions :: [OptDescr (Opt -> IO Opt)] -> Opt -> IO Opt
 parseOptions options' defaults = do
@@ -646,7 +647,7 @@ options =
                       "all" -> return opt{ optIpynbOutput = IpynbOutputAll }
                       "best" -> return opt{ optIpynbOutput = IpynbOutputBest }
                       "none" -> return opt{ optIpynbOutput = IpynbOutputNone }
-                      _ -> E.throwIO $ PandocOptionError $
+                      _ -> E.throwIO $ PandocOptionError
                              "ipynb-output must be all, none, or best")
                  "all|none|best")
                  "" -- "Starting number for sections, subsections, etc."
@@ -981,10 +982,7 @@ writersNames = sort
   ("pdf" : map (T.unpack . fst) (writers :: [(Text, Writer PandocIO)]))
 
 splitField :: String -> (String, String)
-splitField s =
-  case break (`elemText` ":=") s of
-       (k,_:v) -> (k,v)
-       (k,[])  -> (k,"true")
+splitField = second (tailDef "true") . break (`elemText` ":=")
 
 -- | Apply defaults from --defaults file.
 applyDefaults :: Opt -> FilePath -> IO Opt
@@ -994,10 +992,10 @@ applyDefaults opt file = runIOorExplode $ do
               else file
   setVerbosity $ optVerbosity opt
   dataDirs <- liftIO defaultUserDataDirs
-  let fps = case optDataDir opt of
-              Nothing -> (fp : map (</> ("defaults" </> fp))
-                               dataDirs)
-              Just dd -> [fp, dd </> "defaults" </> fp]
+  let fps = fp : case optDataDir opt of
+              Nothing -> map (</> ("defaults" </> fp))
+                               dataDirs
+              Just dd -> [dd </> "defaults" </> fp]
   fp' <- fromMaybe fp <$> findFile fps
   inp <- readFileLazy fp'
   case Y.decode1 inp of

@@ -45,9 +45,7 @@ writeCommonMark opts (Pandoc meta blocks) = do
             else return mempty
 
   let (blocks', notes) = runState (walkM processNotes blocks) []
-      notes' = if null notes
-               then []
-               else [OrderedList (1, Decimal, Period) $ reverse notes]
+      notes' = [OrderedList (1, Decimal, Period) $ reverse notes | not (null notes)]
   main <-  blocksToCommonMark opts (blocks' ++ notes')
   metadata <- metaToContext opts
               (fmap (literal . T.stripEnd) . blocksToCommonMark opts)
@@ -158,7 +156,7 @@ blockToNodes opts (DefinitionList items) ns =
           Plain (term ++ [LineBreak] ++ xs) : ys ++ concat zs
         dlToBullet (term, xs) =
           Para term : concat xs
-blockToNodes opts t@(Table capt aligns _widths headers rows) ns = do
+blockToNodes opts t@(Table capt aligns _widths headers rows) ns =
   if isEnabled Ext_pipe_tables opts && onlySimpleTableCells (headers:rows)
      then do
        -- We construct a table manually as a CUSTOM_BLOCK, for
@@ -241,13 +239,11 @@ inlineToNodes opts SoftBreak
   | otherwise                           = (node SOFTBREAK [] :)
 inlineToNodes opts (Emph xs) = (node EMPH (inlinesToNodes opts xs) :)
 inlineToNodes opts (Strong xs) = (node STRONG (inlinesToNodes opts xs) :)
-inlineToNodes opts (Strikeout xs) =
-  if isEnabled Ext_strikeout opts
-     then (node (CUSTOM_INLINE "~~" "~~") (inlinesToNodes opts xs) :)
-     else if isEnabled Ext_raw_html opts
-            then ((node (HTML_INLINE (T.pack "<s>")) [] : inlinesToNodes opts xs ++
-                  [node (HTML_INLINE (T.pack "</s>")) []]) ++ )
-            else (inlinesToNodes opts xs ++)
+inlineToNodes opts (Strikeout xs)
+  | isEnabled Ext_strikeout opts = (node (CUSTOM_INLINE "~~" "~~") (inlinesToNodes opts xs) :)
+  | isEnabled Ext_raw_html opts = ((node (HTML_INLINE (T.pack "<s>")) [] : inlinesToNodes opts xs ++
+        [node (HTML_INLINE (T.pack "</s>")) []]) ++ )
+  | otherwise = (inlinesToNodes opts xs ++)
 inlineToNodes opts (Superscript xs) =
   if isEnabled Ext_raw_html opts
     then ((node (HTML_INLINE (T.pack "<sup>")) [] : inlinesToNodes opts xs ++
@@ -319,7 +315,7 @@ inlineToNodes opts (Math mt str) =
               (node (HTML_INLINE ("\\(" <> str <> "\\)")) [] :)
             DisplayMath ->
               (node (HTML_INLINE ("\\[" <> str <> "\\]")) [] :)
-inlineToNodes opts (Span ("",["emoji"],kvs) [Str s]) = do
+inlineToNodes opts (Span ("",["emoji"],kvs) [Str s]) =
   case lookup "data-emoji" kvs of
        Just emojiname | isEnabled Ext_emoji opts ->
             (node (TEXT (":" <> emojiname <> ":")) [] :)

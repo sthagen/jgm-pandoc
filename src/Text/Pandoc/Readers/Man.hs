@@ -91,8 +91,8 @@ parseBlock = choice [ parseList
 parseTable :: PandocMonad m => ManParser m Blocks
 parseTable = do
   modifyState $ \st -> st { tableCellsPlain = True }
-  let isTbl (Tbl{}) = True
-      isTbl _          = False
+  let isTbl Tbl{} = True
+      isTbl _     = False
   Tbl _opts rows pos <- msatisfy isTbl
   case rows of
     ((as,_):_) -> try (do
@@ -234,22 +234,22 @@ linePartsToInlines = go False
   go mono (RoffStr s : xs)
     | mono      = code s <> go mono xs
     | otherwise = text s <> go mono xs
-  go mono (Font fs: xs) =
-    if litals > 0 && litals >= lbolds && litals >= lmonos
-       then emph (go mono (Font fs{ fontItalic = False } :
+  go mono (Font fs: xs)
+    | litals > 0 && litals >= lbolds && litals >= lmonos
+       = emph (go mono (Font fs{ fontItalic = False } :
                    map (adjustFontSpec (\s -> s{ fontItalic = False }))
                    itals)) <>
             go mono italsrest
-       else if lbolds > 0 && lbolds >= lmonos
-            then strong (go mono (Font fs{ fontBold = False } :
-                   map (adjustFontSpec (\s -> s{ fontBold = False }))
-                   bolds)) <>
-                 go mono boldsrest
-            else if lmonos > 0
-                 then go True (Font fs{ fontMonospace = False } :
-                    map (adjustFontSpec (\s -> s { fontMonospace = False }))
-                    monos) <> go mono monosrest
-                 else go mono xs
+    | lbolds > 0 && lbolds >= lmonos
+       = strong (go mono (Font fs{ fontBold = False } :
+              map (adjustFontSpec (\s -> s{ fontBold = False }))
+              bolds)) <>
+            go mono boldsrest
+    | lmonos > 0
+       = go True (Font fs{ fontMonospace = False } :
+          map (adjustFontSpec (\s -> s { fontMonospace = False }))
+          monos) <> go mono monosrest
+    | otherwise = go mono xs
     where
       adjustFontSpec f (Font fspec) = Font (f fspec)
       adjustFontSpec _ x            = x
@@ -287,7 +287,7 @@ parseInline = try $ do
 
 handleInlineMacro :: PandocMonad m
                   => T.Text -> [Arg] -> SourcePos -> ManParser m Inlines
-handleInlineMacro mname args _pos = do
+handleInlineMacro mname args _pos =
   case mname of
     "UR" -> parseLink args
     "MT" -> parseEmailLink args
@@ -366,7 +366,7 @@ parseCodeBlock = try $ do
     tok <- mtoken
     case tok of
       ControlLine "PP" _ _ -> return $ Just "" -- .PP sometimes used for blank line
-      ControlLine mname args pos -> do
+      ControlLine mname args pos ->
         (Just . query getText <$> handleInlineMacro mname args pos) <|>
           do report $ SkippedContent ("." <> mname) pos
              return Nothing

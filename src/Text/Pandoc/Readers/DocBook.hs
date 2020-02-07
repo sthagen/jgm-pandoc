@@ -741,7 +741,7 @@ parseBlock (Elem e) =
         "refsect2" -> sect 2
         "refsect3" -> sect 3
         "refsection" -> gets dbSectionLevel >>= sect . (+1)
-        l@_ | l `elem` admonitionTags -> parseAdmonition $ T.pack l
+        l | l `elem` admonitionTags -> parseAdmonition $ T.pack l
         "area" -> skip
         "areaset" -> skip
         "areaspec" -> skip
@@ -920,7 +920,7 @@ parseBlock (Elem e) =
            -- include the label and leave it to styling.
            title <- case filterChild (named "title") e of
                         Just t  -> divWith ("", ["title"], []) . plain <$> getInlines t
-                        Nothing -> return $ mempty
+                        Nothing -> return mempty
            -- this will ignore the title element if it is present
            b <- getBlocks e
            -- we also attach the label as a class, so it can be styled properly
@@ -941,7 +941,7 @@ elementToStr x = x
 parseInline :: PandocMonad m => Content -> DB m Inlines
 parseInline (Text (CData _ s _)) = return $ text $ T.pack s
 parseInline (CRef ref) =
-  return $ maybe (text $ T.toUpper $ T.pack ref) (text . T.pack) $ lookupEntity ref
+  return $ text $ maybe (T.toUpper $ T.pack ref) T.pack $ lookupEntity ref
 parseInline (Elem e) =
   case qName (elName e) of
         "equation" -> equation e displayMath
@@ -1106,9 +1106,8 @@ equation e constructor =
 
     readMath :: (Element -> Bool) -> (Element -> b) -> [b]
     readMath childPredicate fromElement =
-      ( map (fromElement . everywhere (mkT removePrefix))
+      map (fromElement . everywhere (mkT removePrefix))
       $ filterChildren childPredicate e
-      )
 
 -- | Get the actual text stored in a CData block. 'showContent'
 -- returns the text still surrounded by the [[CDATA]] tags.

@@ -19,7 +19,7 @@ import Prelude
 import Control.Arrow ((***), (>>>))
 import Control.Monad.State.Strict hiding (when)
 import Data.Char (chr)
-import Data.List (sortBy, foldl')
+import Data.List (sortOn, sortBy, foldl')
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
@@ -163,7 +163,7 @@ inTextStyle d = do
                        [("style:name", styleName)
                        ,("style:family", "text")]
                        $ selfClosingTag "style:text-properties"
-                          (sortBy (comparing fst) . Map.toList
+                          (sortOn fst . Map.toList
                                 $ foldl' textStyleAttr mempty (Set.toList at)))
               return $ inTags False
                   "text:span" [("text:style-name",styleName)] d
@@ -241,8 +241,8 @@ writeOpenDocument opts (Pandoc meta blocks) = do
   let listStyles  = map listStyle (stListStyles s)
   let automaticStyles = vcat $ reverse $ styles ++ listStyles
   let context = defField "body" body
-              $ defField "toc" (writerTableOfContents opts)
-              $ defField "automatic-styles" automaticStyles
+              . defField "toc" (writerTableOfContents opts)
+              . defField "automatic-styles" automaticStyles
               $ metadata
   return $ render colwidth $
     case writerTemplate opts of
