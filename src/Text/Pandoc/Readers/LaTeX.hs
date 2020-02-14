@@ -1402,10 +1402,18 @@ treatAsInline = Set.fromList
   , "pagebreak"
   ]
 
+label :: PandocMonad m => LP m ()
+label = do
+  controlSeq "label"
+  t <- braced
+  updateState $ \st -> st{ sLastLabel = Just $ untokenize t }
+
 dolabel :: PandocMonad m => LP m Inlines
 dolabel = do
   v <- braced
   let refstr = untokenize v
+  updateState $ \st ->
+    st{ sLastLabel = Just refstr }
   return $ spanWith (refstr,[],[("label", refstr)])
     $ inBrackets $ str $ untokenize v
 
@@ -1682,19 +1690,12 @@ bracketedNum = do
        Just i -> return i
        _      -> return 0
 
-setCaption :: PandocMonad m => LP m Blocks
-setCaption = do
+setCaption :: PandocMonad m => LP m ()
+setCaption = try $ do
+  skipopts
   ils <- tok
-  mblabel <- option Nothing $
-               try $ spaces >> controlSeq "label" >> (Just <$> tok)
-  let capt = case mblabel of
-                  Just lab -> let slab = stringify lab
-                                  ils' = ils <> spanWith
-                                    ("",[],[("label", slab)]) mempty
-                              in  (Just ils', Just slab)
-                  Nothing  -> (Just ils, Nothing)
-  updateState $ \st -> st{ sCaption = capt }
-  return mempty
+  optional $ try $ spaces *> label
+  updateState $ \st -> st{ sCaption = Just ils }
 
 looseItem :: PandocMonad m => LP m Blocks
 looseItem = do
@@ -1710,7 +1711,8 @@ epigraph = do
   return $ divWith ("", ["epigraph"], []) (p1 <> p2)
 
 resetCaption :: PandocMonad m => LP m ()
-resetCaption = updateState $ \st -> st{ sCaption = (Nothing, Nothing) }
+resetCaption = updateState $ \st -> st{ sCaption   = Nothing
+                                      , sLastLabel = Nothing }
 
 section :: PandocMonad m => Attr -> Int -> LP m Blocks
 section (ident, classes, kvs) lvl = do
@@ -1850,7 +1852,7 @@ blockCommands = M.fromList
    , ("item", looseItem)
    , ("documentclass", skipopts *> braced *> preamble)
    , ("centerline", (para . trimInlines) <$> (skipopts *> tok))
-   , ("caption", skipopts *> setCaption)
+   , ("caption", mempty <$ setCaption)
    , ("bibliography", mempty <$ (skipopts *> braced >>=
          addMeta "bibliography" . splitBibs . untokenize))
    , ("addbibresource", mempty <$ (skipopts *> braced >>=
@@ -1901,7 +1903,7 @@ environments = M.fromList
    , ("longtable",  env "longtable" $
           resetCaption *> simpTable "longtable" False >>= addTableCaption)
    , ("table",  env "table" $
-          resetCaption *> skipopts *> blocks >>= addTableCaption)
+          skipopts *> resetCaption *> blocks >>= addTableCaption)
    , ("tabular*", env "tabular*" $ simpTable "tabular*" True)
    , ("tabularx", env "tabularx" $ simpTable "tabularx" True)
    , ("tabular", env "tabular"  $ simpTable "tabular" False)
@@ -2068,18 +2070,18 @@ addImageCaption :: PandocMonad m => Blocks -> LP m Blocks
 addImageCaption = walkM go
   where go (Image attr@(_, cls, kvs) alt (src,tit))
             | not ("fig:" `T.isPrefixOf` tit) = do
-          (mbcapt, mblab) <- sCaption <$> getState
-          let (alt', tit') = case mbcapt of
+          st <- getState
+          let (alt', tit') = case sCaption st of
                                Just ils -> (toList ils, "fig:" <> tit)
                                Nothing  -> (alt, tit)
-              attr' = case mblab of
+              attr' = case sLastLabel st of
                         Just lab -> (lab, cls, kvs)
                         Nothing  -> attr
           case attr' of
                ("", _, _)    -> return ()
                (ident, _, _) -> do
                   num <- getNextNumber sLastFigureNum
-                  updateState $ \st ->
+                  setState
                     st{ sLastFigureNum = num
                       , sLabels = M.insert ident
                                  [Str (renderDottedNum num)] (sLabels st) }
@@ -2091,25 +2093,25 @@ getNextNumber :: Monad m
 getNextNumber getCurrentNum = do
   st <- getState
   let chapnum =
-        case (sHasChapters st, sLastHeaderNum st) of
-             (True, DottedNum (n:_)) -> Just n
-             _                       -> Nothing
-  return $
+        case sLastHeaderNum st of
+             DottedNum (n:_) | sHasChapters st -> Just n
+             _                                 -> Nothing
+  return . DottedNum $
     case getCurrentNum st of
        DottedNum [m,n]  ->
          case chapnum of
-              Just m' | m' == m   -> DottedNum [m, n+1]
-                      | otherwise -> DottedNum [m', 1]
-              Nothing             -> DottedNum [1]
+              Just m' | m' == m   -> [m, n+1]
+                      | otherwise -> [m', 1]
+              Nothing             -> [1]
                                       -- shouldn't happen
        DottedNum [n]   ->
          case chapnum of
-              Just m  -> DottedNum [m, 1]
-              Nothing -> DottedNum [n + 1]
+              Just m  -> [m, 1]
+              Nothing -> [n + 1]
        _               ->
          case chapnum of
-               Just n  -> DottedNum [n, 1]
-               Nothing -> DottedNum [1]
+               Just n  -> [n, 1]
+               Nothing -> [1]
 
 
 coloredBlock :: PandocMonad m => Text -> LP m Blocks
@@ -2363,7 +2365,10 @@ simpTable envname hasWidthParameter = try $ do
   colspecs <- parseAligns
   let (aligns, widths, prefsufs) = unzip3 colspecs
   let cols = length colspecs
-  optional $ controlSeq "caption" *> skipopts *> setCaption
+  optional $ controlSeq "caption" *> setCaption
+  spaces
+  optional label
+  spaces
   optional lbreak
   spaces
   skipMany hline
@@ -2374,7 +2379,10 @@ simpTable envname hasWidthParameter = try $ do
   rows <- sepEndBy (parseTableRow envname prefsufs)
                     (lbreak <* optional (skipMany hline))
   spaces
-  optional $ controlSeq "caption" *> skipopts *> setCaption
+  optional $ controlSeq "caption" *> setCaption
+  spaces
+  optional label
+  spaces
   optional lbreak
   spaces
   let header'' = if null header'
@@ -2386,19 +2394,21 @@ simpTable envname hasWidthParameter = try $ do
 addTableCaption :: PandocMonad m => Blocks -> LP m Blocks
 addTableCaption = walkM go
   where go (Table c als ws hs rs) = do
-          (mbcapt, mblabel) <- sCaption <$> getState
-          capt <- case (mbcapt, mblabel) of
+          st <- getState
+          let mblabel = sLastLabel st
+          capt <- case (sCaption st, mblabel) of
                    (Just ils, Nothing)  -> return $ toList ils
                    (Just ils, Just lab) -> do
                      num <- getNextNumber sLastTableNum
-                     updateState $ \st ->
+                     setState
                        st{ sLastTableNum = num
                          , sLabels = M.insert lab
                                     [Str (renderDottedNum num)]
                                     (sLabels st) }
                      return $ toList ils -- add number??
                    (Nothing, _)  -> return c
-          return $ Table capt als ws hs rs
+          return $ maybe id (\ident -> Div (ident, [], []) . (:[])) mblabel $
+                     Table capt als ws hs rs
         go x = return x
 
 
