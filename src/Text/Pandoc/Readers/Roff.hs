@@ -202,7 +202,7 @@ escapeNormal = do
     '*' -> escString
     ',' -> return mempty  -- to fix spacing after roman
     '-' -> return [RoffStr "-"]
-    '.' -> return [RoffStr "`"]
+    '.' -> return [RoffStr "."]
     '/' -> return mempty  -- to fix spacing before roman
     '0' -> return [RoffStr "\x2007"] -- digit-width space
     ':' -> return mempty  -- zero-width break
@@ -226,7 +226,7 @@ escapeNormal = do
     'X' -> escIgnore 'X' [quoteArg]
     'Y' -> escIgnore 'Y' [escapeArg, countChar 1 (satisfy (/='\n'))]
     'Z' -> escIgnore 'Z' [quoteArg]
-    '\'' -> return [RoffStr "`"]
+    '\'' -> return [RoffStr "'"]
     '\n' -> return mempty  -- line continuation
     '^' -> return [RoffStr "\x200A"] -- 1/12 em space
     '_' -> return [RoffStr "_"]
