@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Tests.Readers.Jira
-   Copyright   : © 2019 Albert Krewinel
+   Copyright   : © 2019-2020 Albert Krewinel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb@zeitkraut.de>
@@ -95,6 +95,10 @@ tests =
     , "sub- and superscript" =:
       "HCO ~3~^-^" =?>
       para ("HCO " <> subscript "3" <> superscript "-")
+
+    , "color" =:
+      "This is {color:red}red{color}." =?>
+      para ("This is " <> spanWith ("", [], [("color", "red")]) "red" <> ".")
 
     , "linebreak" =:
       "first\nsecond" =?>
