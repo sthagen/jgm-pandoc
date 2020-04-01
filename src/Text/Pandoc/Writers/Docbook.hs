@@ -19,7 +19,7 @@ import Data.Monoid (Any (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Text.Pandoc.Builder as B
-import Text.Pandoc.Class (PandocMonad, report)
+import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Definition
 import Text.Pandoc.Highlighting (languages, languagesByExtension)
 import Text.Pandoc.ImageSize
@@ -47,7 +47,8 @@ authorToDocbook opts name' = do
   let colwidth = if writerWrapText opts == WrapAuto
                     then Just $ writerColumns opts
                     else Nothing
-  return $ B.rawInline "docbook" $ render colwidth $
+  return $ B.rawInline "docbook" $
+    render colwidth $ inTags True "personname" [] $
       if T.any (== ',') name
          then -- last name first
               let (lastname, rest) = T.break (==',') name

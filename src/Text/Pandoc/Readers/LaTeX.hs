@@ -40,9 +40,10 @@ import qualified Data.Text as T
 import System.FilePath (addExtension, replaceExtension, takeExtension)
 import Text.Pandoc.BCP47 (Lang (..), renderLang)
 import Text.Pandoc.Builder
-import Text.Pandoc.Class (PandocMonad, PandocPure, getResourcePath, lookupEnv,
-                          readFileFromDirs, report, setResourcePath,
-                          setTranslations, translateTerm, trace, fileExists)
+import Text.Pandoc.Class.PandocPure (PandocPure)
+import Text.Pandoc.Class.PandocMonad (PandocMonad (..), getResourcePath,
+                                      readFileFromDirs, report, setResourcePath,
+                                      setTranslations, translateTerm)
 import Text.Pandoc.Error (PandocError (PandocParseError, PandocParsecError))
 import Text.Pandoc.Highlighting (fromListingsLanguage, languagesByExtension)
 import Text.Pandoc.ImageSize (numUnit, showFl)
@@ -64,7 +65,7 @@ import Safe
 
 -- for debugging:
 -- import Text.Pandoc.Extensions (getDefaultExtensions)
--- import Text.Pandoc.Class (runIOorExplode, PandocIO)
+-- import Text.Pandoc.Class.PandocIO (runIOorExplode, PandocIO)
 -- import Debug.Trace (traceShowId)
 
 -- | Parse LaTeX from string and return 'Pandoc' document.
@@ -1017,16 +1018,16 @@ inlineCommands = M.union inlineLanguageCommands $ M.fromList
   , ("lstinline", dolstinline)
   , ("mintinline", domintinline)
   , ("Verb", doverb)
-  , ("url", ((unescapeURL . untokenize) <$> bracedUrl) >>= \url ->
-                  pure (link url "" (str url)))
-  , ("nolinkurl", ((unescapeURL . untokenize) <$> bracedUrl) >>= \url ->
-                  pure (code url))
-  , ("href", (unescapeURL . untokenize <$>
-                 bracedUrl <* sp) >>= \url ->
-                   tok >>= \lab -> pure (link url "" lab))
+  , ("url", (\url -> link url "" (str url)) . unescapeURL . untokenize <$>
+                  bracedUrl)
+  , ("nolinkurl", code . unescapeURL . untokenize <$> bracedUrl)
+  , ("href", do url <- bracedUrl
+                sp
+                link (unescapeURL $ untokenize url) "" <$> tok)
   , ("includegraphics", do options <- option [] keyvals
-                           src <- unescapeURL . removeDoubleQuotes . untokenize <$> braced
-                           mkImage options src)
+                           src <- braced
+                           mkImage options . unescapeURL . removeDoubleQuotes $
+                               untokenize src)
   , ("enquote*", enquote True Nothing)
   , ("enquote", enquote False Nothing)
   -- foreignquote is supposed to use native quote marks

@@ -30,7 +30,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Network.HTTP (urlEncode)
 import Text.HTML.TagSoup (Tag (..), isTagText, parseTags)
-import Text.Pandoc.Class (PandocMonad, report)
+import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Definition
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
@@ -360,9 +360,9 @@ beginsWithOrderedListMarker str =
 
 notesAndRefs :: PandocMonad m => WriterOptions -> MD m (Doc Text)
 notesAndRefs opts = do
-  notes' <- reverse <$> gets stNotes >>= notesToMarkdown opts
+  notes' <- gets stNotes >>= notesToMarkdown opts . reverse
   modify $ \s -> s { stNotes = [] }
-  refs' <- reverse <$> gets stRefs >>= refsToMarkdown opts
+  refs' <- gets stRefs >>= refsToMarkdown opts . reverse
   modify $ \s -> s { stPrevRefs = stPrevRefs s ++ stRefs s
                    , stRefs = []}
 
@@ -669,8 +669,8 @@ pipeTable :: PandocMonad m
 pipeTable headless aligns rawHeaders rawRows = do
   let sp = literal " "
   let blockFor AlignLeft   x y = lblock (x + 2) (sp <> y) <> lblock 0 empty
-      blockFor AlignCenter x y = cblock (x + 2) (sp <> y) <> lblock 0 empty
-      blockFor AlignRight  x y = rblock (x + 2) (sp <> y) <> lblock 0 empty
+      blockFor AlignCenter x y = cblock (x + 2) (sp <> y <> sp) <> lblock 0 empty
+      blockFor AlignRight  x y = rblock (x + 2) (y <> sp) <> lblock 0 empty
       blockFor _           x y = lblock (x + 2) (sp <> y) <> lblock 0 empty
   let widths = map (max 3 . maximum . map offset) $ transpose (rawHeaders : rawRows)
   let torow cs = nowrap $ literal "|" <>

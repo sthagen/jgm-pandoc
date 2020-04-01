@@ -117,6 +117,19 @@ tests =
       "!https://example.com/image.jpg!" =?>
       para (image "https://example.com/image.jpg" "" mempty)
 
+    , "thumbnail image" =:
+      "!image.jpg|thumbnail!" =?>
+      para (imageWith ("", ["thumbnail"], []) "image.jpg" "" mempty)
+
+    , "image with attributes" =:
+      "!image.gif|align=right, vspace=4, title=Hello!" =?>
+      let attr = ("", [], [("align", "right"), ("vspace", "4")])
+      in para $ imageWith attr "image.gif" "Hello" mempty
+
+    , "inserted text" =:
+      "+the new version+" =?>
+      para (spanWith ("", ["underline"], []) "the new version")
+
     , "HTML entity" =:
       "me &amp; you" =?> para "me & you"
 

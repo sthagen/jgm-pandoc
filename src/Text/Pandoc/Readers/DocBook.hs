@@ -23,7 +23,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Text.HTML.TagSoup.Entity (lookupEntity)
 import Text.Pandoc.Builder
-import Text.Pandoc.Class (PandocMonad, report)
+import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Options
 import Text.Pandoc.Logging (LogMessage(..))
 import Text.Pandoc.Shared (crFilter, safeRead)
@@ -758,8 +758,8 @@ parseBlock (Elem e) =
                                "upperroman" -> UpperRoman
                                _            -> Decimal
           let start = fromMaybe 1 $
-                      (attrValue "override" <$> filterElement (named "listitem") e)
-                       >>= safeRead
+                      filterElement (named "listitem") e
+                       >>= safeRead . attrValue "override"
           orderedListWith (start,listStyle,DefaultDelim)
             <$> listitems
         "variablelist" -> definitionList <$> deflistitems

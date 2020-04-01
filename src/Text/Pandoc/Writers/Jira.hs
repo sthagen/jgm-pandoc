@@ -21,7 +21,7 @@ import Data.Foldable (find)
 import Data.Text (Text)
 import Text.Jira.Parser (plainText)
 import Text.Jira.Printer (prettyBlocks, prettyInlines)
-import Text.Pandoc.Class (PandocMonad)
+import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import Text.Pandoc.Definition
 import Text.Pandoc.Options (WriterOptions (writerTemplate, writerWrapText),
                             WrapOption (..))
@@ -191,7 +191,7 @@ toJiraInlines inlines = do
         Code _ cs          -> return . singleton $
                               Jira.Monospaced (escapeSpecialChars cs)
         Emph xs            -> styled Jira.Emphasis xs
-        Image _ _ (src, _) -> pure . singleton $ Jira.Image [] (Jira.URL src)
+        Image attr _ tgt   -> imageToJira attr (fst tgt) (snd tgt)
         LineBreak          -> pure . singleton $ Jira.Linebreak
         Link _ xs (tgt, _) -> singleton . flip Jira.Link (Jira.URL tgt)
                               <$> toJiraInlines xs
@@ -206,7 +206,7 @@ toJiraInlines inlines = do
                                   then Jira.Linebreak
                                   else Jira.Space
         Space              -> pure . singleton $ Jira.Space
-        Span _attr xs      -> toJiraInlines xs
+        Span attr xs       -> spanToJira attr xs
         Str s              -> pure $ escapeSpecialChars s
         Strikeout xs       -> styled Jira.Strikeout xs
         Strong xs          -> styled Jira.Strong xs
@@ -230,6 +230,18 @@ escapeSpecialChars t = case plainText t of
   Right xs -> xs
   Left _  -> singleton $ Jira.Str t
 
+imageToJira :: PandocMonad m
+            => Attr -> Text -> Text
+            -> JiraConverter m [Jira.Inline]
+imageToJira (_, classes, kvs) src title =
+  let imgParams = if "thumbnail" `elem` classes
+                  then [Jira.Parameter "thumbnail" ""]
+                  else map (uncurry Jira.Parameter) kvs
+      imgParams' = if T.null title
+                   then imgParams
+                   else Jira.Parameter "title" title : imgParams
+  in pure . singleton $ Jira.Image imgParams' (Jira.URL src)
+
 mathToJira :: PandocMonad m
            => MathType
            -> Text
@@ -250,6 +262,14 @@ quotedToJira qtype xs = do
                     SingleQuote -> "'"
   let surroundWithQuotes = (Jira.Str quoteChar :) . (++ [Jira.Str quoteChar])
   surroundWithQuotes <$> toJiraInlines xs
+
+spanToJira :: PandocMonad m
+           => Attr -> [Inline]
+           -> JiraConverter m [Jira.Inline]
+spanToJira (_, classes, _) =
+  if "underline" `elem` classes
+  then styled Jira.Insert
+  else toJiraInlines
 
 registerNotes :: PandocMonad m => [Block] -> JiraConverter m [Jira.Inline]
 registerNotes contents = do

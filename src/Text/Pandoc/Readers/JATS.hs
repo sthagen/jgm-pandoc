@@ -24,7 +24,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Text.HTML.TagSoup.Entity (lookupEntity)
 import Text.Pandoc.Builder
-import Text.Pandoc.Class (PandocMonad)
+import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import Text.Pandoc.Options
 import Text.Pandoc.Shared (underlineSpan, crFilter, safeRead)
 import Text.TeXMath (readMathML, writeTeX)
@@ -164,9 +164,9 @@ parseBlock (Elem e) =
                     "bullet" -> bulletList <$> listitems
                     listType -> do
                       let start = fromMaybe 1 $
-                                  (textContent <$> (filterElement (named "list-item") e
-                                               >>= filterElement (named "label")))
-                                   >>= safeRead
+                                  (filterElement (named "list-item") e
+                                               >>= filterElement (named "label"))
+                                   >>= safeRead . textContent
                       orderedListWith (start, parseListStyleType listType, DefaultDelim)
                         <$> listitems
         "def-list" -> definitionList <$> deflistitems

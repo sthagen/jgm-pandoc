@@ -15,8 +15,9 @@ module Text.Pandoc.Lua.Module.MediaBag
 
 import Control.Monad (zipWithM_)
 import Foreign.Lua (Lua, NumResults, Optional, liftIO)
-import Text.Pandoc.Class (CommonState (..), fetchItem, putCommonState,
-                          runIOorExplode, setMediaBag)
+import Text.Pandoc.Class.CommonState (CommonState (..))
+import Text.Pandoc.Class.PandocIO (runIOorExplode)
+import Text.Pandoc.Class.PandocMonad (fetchItem, putCommonState, setMediaBag)
 import Text.Pandoc.Lua.Marshaling ()
 import Text.Pandoc.Lua.Marshaling.MediaBag (pushIterator)
 import Text.Pandoc.Lua.Util (addFunction)
@@ -84,7 +85,7 @@ insertMediaFn fp optionalMime contents = do
 
 -- | Returns iterator values to be used with a Lua @for@ loop.
 items :: Lua NumResults
-items = stMediaBag <$> getCommonState >>= pushIterator
+items = getCommonState >>= pushIterator . stMediaBag
 
 lookupMediaFn :: FilePath
               -> Lua NumResults
