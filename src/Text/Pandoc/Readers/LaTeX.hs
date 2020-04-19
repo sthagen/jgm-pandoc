@@ -923,7 +923,7 @@ inlineCommands = M.union inlineLanguageCommands $ M.fromList
   , ("eqref", rawInlineOr "eqref" $ doref "eqref")   -- from amsmath.sty
   , ("mbox", rawInlineOr "mbox" $ processHBox <$> tok)
   , ("hbox", rawInlineOr "hbox" $ processHBox <$> tok)
-  , ("lettrine", optional opt >> extractSpaces (spanWith ("",["lettrine"],[])) <$> tok)
+  , ("lettrine", rawInlineOr "lettrine" $ lettrine)
   , ("(", mathInline . untokenize <$> manyTill anyTok (controlSeq ")"))
   , ("[", mathDisplay . untokenize <$> manyTill anyTok (controlSeq "]"))
   , ("ensuremath", mathInline . untokenize <$> braced)
@@ -1177,6 +1177,13 @@ inlineCommands = M.union inlineLanguageCommands $ M.fromList
   -- plain tex stuff that should just be passed through as raw tex
   , ("ifdim", ifdim)
   ]
+
+lettrine :: PandocMonad m => LP m Inlines
+lettrine = do
+  optional opt
+  x <- tok
+  y <- tok
+  return $ extractSpaces (spanWith ("",["lettrine"],[])) x <> smallcaps y
 
 ifdim :: PandocMonad m => LP m Inlines
 ifdim = do
@@ -2261,7 +2268,7 @@ splitWordTok = do
          setInput $ map (Tok spos Symbol . T.singleton) (T.unpack t) <> rest
        _ -> return ()
 
-parseAligns :: PandocMonad m => LP m [(Alignment, Double, ([Tok], [Tok]))]
+parseAligns :: PandocMonad m => LP m [(Alignment, ColWidth, ([Tok], [Tok]))]
 parseAligns = try $ do
   let maybeBar = skipMany
         (try $ sp *> (() <$ symbol '|' <|> () <$ (symbol '@' >> braced)))
@@ -2282,17 +2289,15 @@ parseAligns = try $ do
         ds <- trim . untokenize <$> manyTill anyTok (controlSeq "linewidth")
         spaces
         symbol '}'
-        case safeRead ds of
-              Just w  -> return w
-              Nothing -> return 0.0
+        return $ safeRead ds
   let alignSpec = do
         pref <- option [] alignPrefix
         spaces
         al <- alignChar
-        width <- colWidth <|> option 0.0 (do s <- untokenize <$> braced
-                                             pos <- getPosition
-                                             report $ SkippedContent s pos
-                                             return 0.0)
+        width <- colWidth <|> option Nothing (do s <- untokenize <$> braced
+                                                 pos <- getPosition
+                                                 report $ SkippedContent s pos
+                                                 return Nothing)
         spaces
         suff <- option [] alignSuffix
         return (al, width, (pref, suff))
@@ -2314,7 +2319,11 @@ parseAligns = try $ do
   spaces
   egroup
   spaces
-  return aligns'
+  return $ map toSpec aligns'
+  where
+    toColWidth (Just w) | w > 0 = ColWidth w
+    toColWidth _                = ColWidthDefault
+    toSpec (x, y, z) = (x, toColWidth y, z)
 
 parseTableRow :: PandocMonad m
               => Text   -- ^ table environment name
@@ -2363,7 +2372,6 @@ simpTable envname hasWidthParameter = try $ do
   skipopts
   colspecs <- parseAligns
   let (aligns, widths, prefsufs) = unzip3 colspecs
-  let cols = length colspecs
   optional $ controlSeq "caption" *> setCaption
   spaces
   optional label
@@ -2384,19 +2392,22 @@ simpTable envname hasWidthParameter = try $ do
   spaces
   optional lbreak
   spaces
-  let header'' = if null header'
-                    then replicate cols mempty
-                    else header'
   lookAhead $ controlSeq "end" -- make sure we're at end
-  return $ table mempty (zip aligns widths) header'' rows
+  let toRow = Row nullAttr . map simpleCell
+      toHeaderRow l = if null l then [] else [toRow l]
+  return $ table emptyCaption
+                 (zip aligns widths)
+                 (TableHead nullAttr $ toHeaderRow header')
+                 [TableBody nullAttr 0 [] $ map toRow rows]
+                 (TableFoot nullAttr [])
 
 addTableCaption :: PandocMonad m => Blocks -> LP m Blocks
 addTableCaption = walkM go
-  where go (Table c als ws hs rs) = do
+  where go (Table attr c spec th tb tf) = do
           st <- getState
           let mblabel = sLastLabel st
           capt <- case (sCaption st, mblabel) of
-                   (Just ils, Nothing)  -> return $ toList ils
+                   (Just ils, Nothing)  -> return $ caption Nothing (plain ils)
                    (Just ils, Just lab) -> do
                      num <- getNextNumber sLastTableNum
                      setState
@@ -2404,12 +2415,14 @@ addTableCaption = walkM go
                          , sLabels = M.insert lab
                                     [Str (renderDottedNum num)]
                                     (sLabels st) }
-                     return $ toList ils -- add number??
+                     return $ caption Nothing (plain ils) -- add number??
                    (Nothing, _)  -> return c
-          return $ maybe id (\ident -> Div (ident, [], []) . (:[])) mblabel $
-                     Table capt als ws hs rs
+          let attr' = case (attr, mblabel) of
+                        ((_,classes,kvs), Just ident) ->
+                           (ident,classes,kvs)
+                        _ -> attr
+          return $ Table attr' capt spec th tb tf
         go x = return x
-
 
 block :: PandocMonad m => LP m Blocks
 block = do

@@ -16,7 +16,7 @@ import Data.Text (Text, append, pack, singleton, unpack)
 import Text.HTML.TagSoup.Entity (lookupEntity)
 import Text.Jira.Parser (parse)
 import Text.Pandoc.Class.PandocMonad (PandocMonad (..))
-import Text.Pandoc.Builder
+import Text.Pandoc.Builder hiding (cell)
 import Text.Pandoc.Error (PandocError (PandocParseError))
 import Text.Pandoc.Options (ReaderOptions)
 import Text.Pandoc.Shared (stringify)
@@ -182,18 +182,18 @@ iconUnicode = \case
   Jira.IconThumbsUp        -> "👍"
   Jira.IconThumbsDown      -> "👎"
   Jira.IconInfo            -> "ℹ"
-  Jira.IconCheckmark       -> "✓"
-  Jira.IconX               -> "🅇"
-  Jira.IconAttention       -> "⚠"
-  Jira.IconPlus            -> "⊞"
-  Jira.IconMinus           -> "⊟"
-  Jira.IconQuestionmark    -> "﹖"
+  Jira.IconCheckmark       -> "✔"
+  Jira.IconX               -> "❌"
+  Jira.IconAttention       -> "❗"
+  Jira.IconPlus            -> "➕"
+  Jira.IconMinus           -> "➖"
+  Jira.IconQuestionmark    -> "❓"
   Jira.IconOn              -> "💡"
-  Jira.IconOff             -> "💡"
-  Jira.IconStar            -> "★"
-  Jira.IconStarRed         -> "★"
-  Jira.IconStarGreen       -> "★"
-  Jira.IconStarBlue        -> "★"
-  Jira.IconStarYellow      -> "★"
+  Jira.IconOff             -> "🌙"
+  Jira.IconStar            -> "⭐"
+  Jira.IconStarRed         -> "⭐"
+  Jira.IconStarGreen       -> "⭐"
+  Jira.IconStarBlue        -> "⭐"
+  Jira.IconStarYellow      -> "⭐"
   Jira.IconFlag            -> "⚑"
   Jira.IconFlagOff         -> "⚐"

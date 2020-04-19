@@ -19,9 +19,11 @@ module Text.Pandoc.Lua.Marshaling.AST
 import Control.Applicative ((<|>))
 import Foreign.Lua (Lua, Peekable, Pushable, StackIndex)
 import Text.Pandoc.Definition
+import Text.Pandoc.Error (PandocError)
 import Text.Pandoc.Lua.Util (defineHowTo, pushViaConstructor)
 import Text.Pandoc.Lua.Marshaling.CommonState ()
 
+import qualified Control.Monad.Catch as Catch
 import qualified Foreign.Lua as Lua
 import qualified Text.Pandoc.Lua.Util as LuaUtil
 
@@ -131,7 +133,7 @@ peekMetaValue idx = defineHowTo "get MetaValue" $ do
     Lua.TypeBoolean -> MetaBool <$> Lua.peek idx
     Lua.TypeString  -> MetaString <$> Lua.peek idx
     Lua.TypeTable   -> do
-      tag <- Lua.try $ LuaUtil.getTag idx
+      tag <- try $ LuaUtil.getTag idx
       case tag of
         Right "MetaBlocks"  -> MetaBlocks  <$> elementContent
         Right "MetaBool"    -> MetaBool    <$> elementContent
@@ -139,7 +141,7 @@ peekMetaValue idx = defineHowTo "get MetaValue" $ do
         Right "MetaInlines" -> MetaInlines <$> elementContent
         Right "MetaList"    -> MetaList    <$> elementContent
         Right "MetaString"  -> MetaString  <$> elementContent
-        Right t             -> Lua.throwException ("Unknown meta tag: " <> t)
+        Right t             -> Lua.throwMessage ("Unknown meta tag: " <> t)
         Left _ -> do
           -- no meta value tag given, try to guess.
           len <- Lua.rawlen idx
@@ -148,9 +150,9 @@ peekMetaValue idx = defineHowTo "get MetaValue" $ do
             else  (MetaInlines <$> Lua.peek idx)
                   <|> (MetaBlocks <$> Lua.peek idx)
                   <|> (MetaList <$> Lua.peek idx)
-    _        -> Lua.throwException "could not get meta value"
+    _        -> Lua.throwMessage "could not get meta value"
 
--- | Push an block element to the top of the lua stack.
+-- | Push a block element to the top of the Lua stack.
 pushBlock :: Block -> Lua ()
 pushBlock = \case
   BlockQuote blcks         -> pushViaConstructor "BlockQuote" blcks
@@ -167,8 +169,8 @@ pushBlock = \case
   Para blcks               -> pushViaConstructor "Para" blcks
   Plain blcks              -> pushViaConstructor "Plain" blcks
   RawBlock f cs            -> pushViaConstructor "RawBlock" f cs
-  Table capt aligns widths headers rows ->
-    pushViaConstructor "Table" capt aligns widths headers rows
+  Table attr blkCapt specs thead tbody tfoot ->
+    pushViaConstructor "Table" attr blkCapt specs thead tbody tfoot
 
 -- | Return the value at the given index as block if possible.
 peekBlock :: StackIndex -> Lua Block
@@ -191,14 +193,109 @@ peekBlock idx = defineHowTo "get Block value" $ do
       "Para"           -> Para <$> elementContent
       "Plain"          -> Plain <$> elementContent
       "RawBlock"       -> uncurry RawBlock <$> elementContent
-      "Table"          -> (\(capt, aligns, widths, headers, body) ->
-                                  Table capt aligns widths headers body)
+      "Table"          -> (\(attr, capt, colSpecs, thead, tbodies, tfoot) ->
+                              Table (fromLuaAttr attr)
+                                    capt
+                                    colSpecs
+                                    thead
+                                    tbodies
+                                    tfoot)
                           <$> elementContent
-      _ -> Lua.throwException ("Unknown block type: " <> tag)
+      _ -> Lua.throwMessage ("Unknown block type: " <> tag)
  where
    -- Get the contents of an AST element.
    elementContent :: Peekable a => Lua a
    elementContent = LuaUtil.rawField idx "c"
+
+instance Pushable Caption where
+  push = pushCaption
+
+instance Peekable Caption where
+  peek = peekCaption
+
+-- | Push Caption element
+pushCaption :: Caption -> Lua ()
+pushCaption (Caption shortCaption longCaption) = do
+  Lua.newtable
+  LuaUtil.addField "short" (Lua.Optional shortCaption)
+  LuaUtil.addField "long" longCaption
+
+-- | Peek Caption element
+peekCaption :: StackIndex -> Lua Caption
+peekCaption idx = do
+  short <- Lua.fromOptional <$> LuaUtil.rawField idx "short"
+  long  <- LuaUtil.rawField idx "long"
+  return $ Caption short long
+
+instance Peekable ColWidth where
+  peek idx = do
+    width <- Lua.fromOptional <$> Lua.peek idx
+    return $ case width of
+      Nothing -> ColWidthDefault
+      Just w  -> ColWidth w
+
+instance Pushable ColWidth where
+  push = \case
+    (ColWidth w)    -> Lua.push w
+    ColWidthDefault -> Lua.pushnil
+
+instance Pushable Row where
+  push (Row attr cells) = Lua.push (attr, cells)
+
+instance Peekable Row where
+  peek = fmap (uncurry Row) . Lua.peek
+
+instance Pushable TableBody where
+  push (TableBody attr (RowHeadColumns rowHeadColumns) head' body) = do
+    Lua.newtable
+    LuaUtil.addField "attr" attr
+    LuaUtil.addField "row_head_columns" rowHeadColumns
+    LuaUtil.addField "head" head'
+    LuaUtil.addField "body" body
+
+instance Peekable TableBody where
+  peek idx = do
+    attr <- LuaUtil.rawField idx "attr"
+    rowHeadColumns <- LuaUtil.rawField idx "row_head_columns"
+    head' <- LuaUtil.rawField idx "head"
+    body <- LuaUtil.rawField idx "body"
+    return $ TableBody attr (RowHeadColumns rowHeadColumns) head' body
+
+instance Pushable TableHead where
+  push (TableHead attr cells) = Lua.push (attr, cells)
+
+instance Peekable TableHead where
+  peek = fmap (uncurry TableHead) . Lua.peek
+
+instance Pushable TableFoot where
+  push (TableFoot attr cells) = Lua.push (attr, cells)
+
+instance Peekable TableFoot where
+  peek = fmap (uncurry TableFoot) . Lua.peek
+
+instance Pushable Cell where
+  push = pushCell
+
+instance Peekable Cell where
+  peek = peekCell
+
+pushCell :: Cell -> Lua ()
+pushCell (Cell attr align (RowSpan rowSpan) (ColSpan colSpan) contents) = do
+  Lua.newtable
+  LuaUtil.addField "attr" attr
+  LuaUtil.addField "alignment" align
+  LuaUtil.addField "row_span" rowSpan
+  LuaUtil.addField "col_span" colSpan
+  LuaUtil.addField "contents" contents
+
+peekCell :: StackIndex -> Lua Cell
+peekCell idx = do
+  attr <- fromLuaAttr <$> LuaUtil.rawField idx "attr"
+  align <- LuaUtil.rawField idx "alignment"
+  rowSpan <- LuaUtil.rawField idx "row_span"
+  colSpan <- LuaUtil.rawField idx "col_span"
+  contents <- LuaUtil.rawField idx "contents"
+  return $ Cell attr align (RowSpan rowSpan) (ColSpan colSpan) contents
 
 -- | Push an inline element to the top of the lua stack.
 pushInline :: Inline -> Lua ()
@@ -249,11 +346,14 @@ peekInline idx = defineHowTo "get Inline value" $ do
     "Strong"     -> Strong <$> elementContent
     "Subscript"  -> Subscript <$> elementContent
     "Superscript"-> Superscript <$> elementContent
-    _ -> Lua.throwException ("Unknown inline type: " <> tag)
+    _ -> Lua.throwMessage ("Unknown inline type: " <> tag)
  where
    -- Get the contents of an AST element.
    elementContent :: Peekable a => Lua a
    elementContent = LuaUtil.rawField idx "c"
+
+try :: Lua a -> Lua (Either PandocError a)
+try = Catch.try
 
 withAttr :: (Attr -> a -> b) -> (LuaAttr, a) -> b
 withAttr f (attributes, x) = f (fromLuaAttr attributes) x

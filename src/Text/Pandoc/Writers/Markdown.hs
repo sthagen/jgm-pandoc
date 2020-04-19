@@ -313,7 +313,12 @@ escapeText opts =
               case cs of
                    '.':'.':rest -> '\\':'.':'.':'.':go rest
                    _            -> '.':go cs
-       _   -> c : go cs
+       _   -> case cs of
+                '_':x:xs
+                  | isEnabled Ext_intraword_underscores opts
+                  , isAlphaNum c
+                  , isAlphaNum x -> c : '_' : x : go xs
+                _                -> c : go cs
 
 attrsToMarkdown :: Attr -> Doc Text
 attrsToMarkdown attribs = braces $ hsep [attribId, attribClasses, attribKeys]
@@ -574,14 +579,15 @@ blockToMarkdown' opts (BlockQuote blocks) = do
                   else if plain then "  " else "> "
   contents <- blockListToMarkdown opts blocks
   return $ (prefixed leader contents) <> blankline
-blockToMarkdown' opts t@(Table caption aligns widths headers rows) =  do
+blockToMarkdown' opts t@(Table _ blkCapt specs thead tbody tfoot) = do
+  let (caption, aligns, widths, headers, rows) = toLegacyTable blkCapt specs thead tbody tfoot
   let numcols = maximum (length aligns : length widths :
                            map length (headers:rows))
   caption' <- inlineListToMarkdown opts caption
   let caption'' = if null caption || not (isEnabled Ext_table_captions opts)
                      then blankline
                      else blankline $$ (": " <> caption') $$ blankline
-  let hasSimpleCells = onlySimpleTableCells $ headers:rows
+  let hasSimpleCells = onlySimpleTableCells $ headers : rows
   let isSimple = hasSimpleCells && all (==0) widths
   let isPlainBlock (Plain _) = True
       isPlainBlock _         = False

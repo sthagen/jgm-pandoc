@@ -903,6 +903,12 @@ header when requesting a document from a URL:
     downloaded). If you're behind a proxy, you also need to set
     the environment variable `http_proxy` to `http://...`.
 
+`--no-check-certificate
+
+:   Disable the certificate verification to allow access to 
+    unsecure HTTP resources (for example when the certificate
+    is no longer valid or self signed).
+
 ## Options affecting specific writers {.options}
 
 `--self-contained`
@@ -1265,7 +1271,9 @@ header when requesting a document from a URL:
     - `-t latex` or none: `pdflatex` (other options: `xelatex`, `lualatex`,
         `tectonic`, `latexmk`)
     - `-t context`: `context`
-    - `-t html`:  `wkhtmltopdf` (other options: `prince`, `weasyprint`)
+    - `-t html`:  `wkhtmltopdf` (other options: `prince`, `weasyprint`;
+        see [print-css.rocks](https://print-css.rocks) for a good
+        introduction to PDF generation from HTML/CSS.)
     - `-t ms`:  `pdfroff`
 
 `--pdf-engine-opt=`*STRING*
@@ -1966,6 +1974,22 @@ Currently the following pipes are predefined:
 
 - `reverse`:  Reverses a textual value or array,
   and has no effect on other values.
+
+- `first`: Returns the first value of an array, if
+  applied to a non-empty array; otherwise returns
+  the original value.
+
+- `last`: Returns the last value of an array, if
+  applied to a non-empty array; otherwise returns
+  the original value.
+
+- `rest`: Returns all but the first value of an array, if
+  applied to a non-empty array; otherwise returns
+  the original value.
+
+- `allbutlast`: Returns all but the last value of an array, if
+  applied to a non-empty array; otherwise returns
+  the original value.
 
 - `chomp`:  Removes trailing newlines (and breakable space).
 
@@ -2869,7 +2893,7 @@ This extension can be enabled/disabled for the following formats:
 output formats
 :  `odt`, `opendocument`
 
-#### Extension: `styles` #### {#ext-styles}
+#### Extension: `styles` {#ext-styles} ####
 
 When converting from docx, read all docx styles as divs (for
 paragraph styles) and spans (for character styles) regardless
@@ -3793,7 +3817,7 @@ legal (though ugly) pipe table:
 
 The cells of pipe tables cannot contain block elements like paragraphs
 and lists, and cannot span multiple lines.  If a pipe table contains a
-row whose printable content is wider than the column width (see
+row whose Markdown content is wider than the column width (see
 `--columns`), then the table will take up the full text width and
 the cell contents will wrap, with the relative cell widths determined
 by the number of dashes in the line separating the table header from
