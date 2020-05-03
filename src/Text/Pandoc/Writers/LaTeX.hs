@@ -1031,6 +1031,14 @@ sectionHeader classes ident level lst = do
                                 braces txtNoNotes
                          else empty
 
+mapAlignment :: Text -> Text
+mapAlignment a = case a of
+                   "top" -> "T"
+                   "top-baseline" -> "t"
+                   "bottom" -> "b"
+                   "center" -> "c"
+                   _ -> a 
+
 wrapDiv :: PandocMonad m => Attr -> Doc Text -> LW m (Doc Text)
 wrapDiv (_,classes,kvs) t = do
   beamer <- gets stBeamer
@@ -1038,14 +1046,25 @@ wrapDiv (_,classes,kvs) t = do
   lang <- toLang $ lookup "lang" kvs
   let wrapColumns = if beamer && "columns" `elem` classes
                     then \contents ->
-                           inCmd "begin" "columns" <> brackets "T"
-                           $$ contents
-                           $$ inCmd "end" "columns"
+                           let valign = maybe "T" mapAlignment (lookup "align" kvs)
+                               totalwidth = maybe [] (\x -> ["totalwidth=" <> x])
+                                 (lookup "totalwidth" kvs)
+                               onlytextwidth = filter ((==) "onlytextwidth") classes
+                               options = text $ T.unpack $ T.intercalate "," $
+                                 valign : totalwidth ++ onlytextwidth 
+                           in inCmd "begin" "columns" <> brackets options
+                              $$ contents
+                              $$ inCmd "end" "columns"
                     else id
       wrapColumn  = if beamer && "column" `elem` classes
                     then \contents ->
-                           let w = maybe "0.48" fromPct (lookup "width" kvs)
-                           in  inCmd "begin" "column" <>
+                           let valign =
+                                 maybe ""
+                                 (brackets . text . T.unpack . mapAlignment)
+                                 (lookup "align" kvs)
+                               w = maybe "0.48" fromPct (lookup "width" kvs) 
+                           in  inCmd "begin" "column" <> 
+                               valign <>
                                braces (literal w <> "\\textwidth")
                                $$ contents
                                $$ inCmd "end" "column"
@@ -1140,6 +1159,7 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
                then braces contents
                else foldr inCmd contents cmds)
 inlineToLaTeX (Emph lst) = inCmd "emph" <$> inlineListToLaTeX lst
+inlineToLaTeX (Underline lst) = inCmd "underline" <$> inlineListToLaTeX lst
 inlineToLaTeX (Strong lst) = inCmd "textbf" <$> inlineListToLaTeX lst
 inlineToLaTeX (Strikeout lst) = do
   -- we need to protect VERB in an mbox or we get an error
