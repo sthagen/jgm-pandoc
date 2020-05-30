@@ -2162,7 +2162,7 @@ To turn off boolean flags that default to true in reveal.js, use `0`.
 :   additional attributes for the title slide of reveal.js slide shows.
     See [background in reveal.js and beamer] for an example.
 
-[reveal.js configuration options]: https://github.com/hakimel/reveal.js#configuration
+[reveal.js configuration options]: https://revealjs.com/config/
 
 ### Variables for Beamer slides
 
@@ -4594,10 +4594,12 @@ For example:
 ![](file.jpg){ width=50% }
 ```
 
-- Dimensions are converted to inches for output in page-based formats like
-  LaTeX. Dimensions are converted to pixels for output in HTML-like
-  formats.  Use the `--dpi` option to specify the number of pixels per
-  inch.  The default is 96dpi.
+- Dimensions may be converted to a form that is compatible with
+  the output format (for example, dimensions given in pixels will
+  be converted to inches when converting HTML to LaTeX). Conversion
+  between pixels and physical measurements is affected by the
+  `--dpi` option (by default, 96 dpi is assumed, unless the image
+  itself contains dpi information).
 - The `%` unit is generally relative to some available space.
   For example the above example will render to the following.
   - HTML: `<img href="file.jpg" style="width: 50%;" />`
@@ -5458,9 +5460,8 @@ To add a background image to the automatically generated title slide, use the
 `title-slide-attributes` variable in the YAML metadata block. It must contain
 a map of attribute names and values.
 
-See the [reveal.js
-documentation](https://github.com/hakimel/reveal.js#slide-backgrounds)
-for more details.
+See the [reveal.js documentation](https://revealjs.com/backgrounds/) for more
+details.
 
 For example in reveal.js:
 

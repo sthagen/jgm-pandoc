@@ -28,6 +28,7 @@ import Text.Pandoc.BCP47 (Lang (..), parseBCP47)
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report, translateTerm,
                                       setTranslations, toLang)
 import Text.Pandoc.Definition
+import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.DocLayout
@@ -223,12 +224,18 @@ writeOpenDocument opts (Pandoc meta blocks) = do
   let colwidth = if writerWrapText opts == WrapAuto
                     then Just $ writerColumns opts
                     else Nothing
+  let meta' = case lookupMetaBlocks "abstract" meta of
+                [] -> meta
+                xs -> B.setMeta "abstract"
+                        (B.divWith ("",[],[("custom-style","Abstract")])
+                          (B.fromList xs))
+                        meta
   ((body, metadata),s) <- flip runStateT
         defaultWriterState $ do
            m <- metaToContext opts
                   (blocksToOpenDocument opts)
                   (fmap chomp . inlinesToOpenDocument opts)
-                  meta
+                  meta'
            b <- blocksToOpenDocument opts blocks
            return (b, m)
   let styles   = stTableStyles s ++ stParaStyles s ++ formulaStyles ++
@@ -349,8 +356,12 @@ blockToOpenDocument o bs
                                   then return empty
                                   else inParagraphTags =<< inlinesToOpenDocument o b
     | LineBlock      b <- bs = blockToOpenDocument o $ linesToPara b
-    | Div attr xs      <- bs = withLangFromAttr attr
-                                  (blocksToOpenDocument o xs)
+    | Div attr xs      <- bs = do
+        let (_,_,kvs) = attr
+        withLangFromAttr attr $
+          case lookup "custom-style" kvs of
+            Just sty -> withParagraphStyle o sty xs
+            _        -> blocksToOpenDocument o xs
     | Header     i (ident,_,_) b
                        <- bs = setFirstPara >> (inHeaderTags i ident
                                   =<< inlinesToOpenDocument o b)

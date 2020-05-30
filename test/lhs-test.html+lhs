@@ -74,6 +74,7 @@
     code span.va { color: #19177c; } /* Variable */
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
   </style>
   <!--[if lt IE 9]>
     <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
@@ -83,9 +84,9 @@
 <h1 id="lhs-test">lhs test</h1>
 <p><code>unsplit</code> is an arrow that takes a pair of values and combines them to
 return a single value:</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode literatehaskell literate"><code class="sourceCode literatehaskell"><span id="cb1-1"><a href="#cb1-1"></a><span class="ot">&gt; unsplit ::</span> (<span class="dt">Arrow</span> a) <span class="ot">=&gt;</span> (b <span class="ot">-&gt;</span> c <span class="ot">-&gt;</span> d) <span class="ot">-&gt;</span> a (b, c) d</span>
-<span id="cb1-2"><a href="#cb1-2"></a><span class="ot">&gt;</span> unsplit <span class="ot">=</span> arr <span class="op">.</span> <span class="fu">uncurry</span></span>
-<span id="cb1-3"><a href="#cb1-3"></a><span class="ot">&gt;</span>           <span class="co">-- arr (\op (x,y) -&gt; x `op` y)</span></span></code></pre></div>
+<div class="sourceCode" id="cb1"><pre class="sourceCode literatehaskell literate"><code class="sourceCode literatehaskell"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true"></a><span class="ot">&gt; unsplit ::</span> (<span class="dt">Arrow</span> a) <span class="ot">=&gt;</span> (b <span class="ot">-&gt;</span> c <span class="ot">-&gt;</span> d) <span class="ot">-&gt;</span> a (b, c) d</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true"></a><span class="ot">&gt;</span> unsplit <span class="ot">=</span> arr <span class="op">.</span> <span class="fu">uncurry</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true"></a><span class="ot">&gt;</span>           <span class="co">-- arr (\op (x,y) -&gt; x `op` y)</span></span></code></pre></div>
 <p><code>(***)</code> combines two arrows into a new arrow by running the two arrows on a
 pair of values (one arrow on the first item of the pair and one arrow on the
 second item of the pair).</p>

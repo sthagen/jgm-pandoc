@@ -281,12 +281,14 @@ pandocToHtml opts (Pandoc meta blocks) = do
           H.script $ text $ T.unlines [
               "document.addEventListener(\"DOMContentLoaded\", function () {"
             , " var mathElements = document.getElementsByClassName(\"math\");"
+            , " var macros = [];"
             , " for (var i = 0; i < mathElements.length; i++) {"
             , "  var texText = mathElements[i].firstChild;"
             , "  if (mathElements[i].tagName == \"SPAN\") {"
             , "   katex.render(texText.data, mathElements[i], {"
             , "    displayMode: mathElements[i].classList.contains('display'),"
             , "    throwOnError: false,"
+            , "    macros: macros,"
             , "    fleqn: " <> katexFlushLeft
             , "   });"
             , "}}});"
@@ -318,6 +320,10 @@ pandocToHtml opts (Pandoc meta blocks) = do
                                      defField "mathjaxurl"
                                        (T.takeWhile (/='?') u)
                         _         -> defField "mathjax" False) $
+                  (case writerHTMLMathMethod opts of
+                        PlainMath -> defField "displaymath-css" True
+                        WebTeX _  -> defField "displaymath-css" True
+                        _         -> id) $
                   defField "quotes" (stQuotes st) $
                   -- for backwards compatibility we populate toc
                   -- with the contents of the toc, rather than a
@@ -1108,14 +1114,11 @@ inlineToHtml opts inline = do
               let s = case t of
                            InlineMath  -> "\\textstyle "
                            DisplayMath -> "\\displaystyle "
-              let m = imtag ! A.style "vertical-align:middle"
-                            ! A.src (toValue $ url <> T.pack (urlEncode (T.unpack $ s <> str)))
-                            ! A.alt (toValue str)
-                            ! A.title (toValue str)
-              let brtag = if html5 then H5.br else H.br
-              return $ case t of
-                        InlineMath  -> m
-                        DisplayMath -> brtag >> m >> brtag
+              return $ imtag ! A.style "vertical-align:middle"
+                             ! A.src (toValue $ url <> T.pack (urlEncode (T.unpack $ s <> str)))
+                             ! A.alt (toValue str)
+                             ! A.title (toValue str)
+                             ! A.class_ mathClass
            GladTeX ->
               return $
                 customParent (textTag "eq") !
@@ -1142,11 +1145,7 @@ inlineToHtml opts inline = do
                 DisplayMath -> str
            PlainMath -> do
               x <- lift (texMathToInlines t str) >>= inlineListToHtml opts
-              let m = H.span ! A.class_ mathClass $ x
-              let brtag = if html5 then H5.br else H.br
-              return  $ case t of
-                         InlineMath  -> m
-                         DisplayMath -> brtag >> m >> brtag
+              return $ H.span ! A.class_ mathClass $ x
     (RawInline f str) -> do
       ishtml <- isRawHtml f
       if ishtml
