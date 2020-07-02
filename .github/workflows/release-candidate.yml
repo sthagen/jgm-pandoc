@@ -8,7 +8,7 @@ on:
 jobs:
   linux:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
     - uses: actions/checkout@v1
     - name: Create linux package
@@ -24,7 +24,7 @@ jobs:
 
   windows:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
     strategy:
       fail-fast: true
       matrix:
@@ -35,8 +35,9 @@ jobs:
             stack_opts: "-j1"
           - osarch: "windows-i386"
             arch: "x86"
-            choco_opts: "--x86"
+            choco_opts: "--x86 --version 2.1.3.20190715"
             stack_opts: "-j1 --flag hslua:lua_32bits"
+            # we use stack 2.1.3 because 2.3.1 doesn't support i386
 
     steps:
     - uses: actions/checkout@v1
@@ -94,7 +95,7 @@ jobs:
 
   macos:
 
-    runs-on: macOS-latest
+    runs-on: macOS-10.15
 
     steps:
     - uses: actions/checkout@v1

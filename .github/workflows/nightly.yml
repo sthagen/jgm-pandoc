@@ -7,19 +7,21 @@ on:
 jobs:
   linux:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
     - uses: actions/checkout@v1
     - name: Install dependencies
       run: |
-          export PATH=/opt/cabal/3.0/bin:/opt/ghc/8.8.1/bin:$PATH
+          export PATH=/opt/cabal/3.2/bin:/opt/ghc/8.8.3/bin:$PATH
+          ls /opt/cabal/*/bin
+          ls /opt/ghc/*/bin
           ghc --version
           cabal --version
           cabal v2-update
           cabal v2-build --dependencies-only . pandoc-citeproc
     - name: Build
       run: |
-          export PATH=/opt/cabal/3.0/bin:/opt/ghc/8.8.1/bin:$PATH
+          export PATH=/opt/cabal/3.2/bin:/opt/ghc/8.8.3/bin:$PATH
           cabal v2-install . pandoc-citeproc
           strip $HOME/.cabal/bin/pandoc
           strip $HOME/.cabal/bin/pandoc-citeproc
@@ -38,7 +40,7 @@ jobs:
 
   windows:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     steps:
     - uses: actions/checkout@v1
@@ -68,7 +70,7 @@ jobs:
 
   macos:
 
-    runs-on: macOS-latest
+    runs-on: macOS-10.15
 
     steps:
     - uses: actions/checkout@v1

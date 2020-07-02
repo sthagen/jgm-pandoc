@@ -1204,7 +1204,7 @@ inlineToLaTeX (Code (_,classes,kvs) str) = do
         let chr = case "!\"'()*,-./:;?@" \\ T.unpack str of
                        (c:_) -> c
                        []    -> '!'
-        let str' = escapeStringUsing (backslashEscapes "\\{}%~_&#") str
+        let str' = escapeStringUsing (backslashEscapes "\\{}%~_&#^") str
         -- we always put lstinline in a dummy 'passthrough' command
         -- (defined in the default template) so that we don't have
         -- to change the way we escape characters depending on whether
@@ -1234,7 +1234,9 @@ inlineToLaTeX (Quoted qt lst) = do
   csquotes <- liftM stCsquotes get
   opts <- gets stOptions
   if csquotes
-     then return $ "\\enquote" <> braces contents
+     then return $ case qt of
+               DoubleQuote -> "\\enquote" <> braces contents
+               SingleQuote -> "\\enquote*" <> braces contents
      else do
        let s1 = if not (null lst) && isQuoted (head lst)
                    then "\\,"

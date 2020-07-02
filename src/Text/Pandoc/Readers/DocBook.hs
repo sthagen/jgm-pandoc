@@ -139,7 +139,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [x] emphasis - Emphasized text
 [x] entry - A cell in a table
 [ ] entrytbl - A subtable appearing in place of an Entry in a table
-[ ] envar - A software environment variable
+[x] envar - A software environment variable
 [x] epigraph - A short inscription at the beginning of a document or component
     note:  also handle embedded attribution tag
 [x] equation - A displayed mathematical equation
@@ -305,7 +305,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [ ] personblurb - A short description or note about a person
 [ ] personname - The personal name of an individual
 [ ] phone - A telephone number
-[ ] phrase - A span of text
+[x] phrase - A span of text
 [ ] pob - A post office box in an address
 [ ] postcode - A postal code in an address
 [x] preface - Introductory matter preceding the first chapter of a book
@@ -314,7 +314,7 @@ List of all DocBook tags, with [x] indicating implemented,
     sorted
 [ ] primaryie - A primary term in an index entry, not in the text
 [ ] printhistory - The printing history of a document
-[ ] procedure - A list of operations to be performed in a well-defined sequence
+[x] procedure - A list of operations to be performed in a well-defined sequence
 [ ] production - A production in a set of EBNF productions
 [ ] productionrecap - A cross-reference to an EBNF production
 [ ] productionset - A set of EBNF productions
@@ -363,7 +363,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [x] releaseinfo - Information about a particular release of a document
 [ ] remark - A remark (or comment) intended for presentation in a draft
     manuscript
-[ ] replaceable - Content that may or must be replaced by the user
+[x] replaceable - Content that may or must be replaced by the user
 [ ] returnvalue - The value returned by a function
 [ ] revdescription - A extended description of a revision to a document
 [ ] revhistory - A history of the revisions to a document
@@ -419,10 +419,10 @@ List of all DocBook tags, with [x] indicating implemented,
     elements
 [x] simplelist - An undecorated list of single words or short phrases
 [ ] simplemsgentry - A wrapper for a simpler entry in a message set
-[ ] simplesect - A section of a document with no subdivisions
+[x] simplesect - A section of a document with no subdivisions
 [ ] spanspec - Formatting information for a spanned column in a table
 [ ] state - A state or province in an address
-[ ] step - A unit of action in a procedure
+[x] step - A unit of action in a procedure
 [ ] stepalternatives - Alternative steps in a procedure
 [ ] street - A street address in an address
 [ ] structfield - A field in a structure (in the programming language sense)
@@ -433,7 +433,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [ ] subjectterm - A term in a group of terms describing the subject matter of
     a document
 [x] subscript - A subscript (as in H2O, the molecular formula for water)
-[ ] substeps - A wrapper for steps that occur within steps in a procedure
+[x] substeps - A wrapper for steps that occur within steps in a procedure
 [x] subtitle - The subtitle of a document
 [x] superscript - A superscript (as in x2, the mathematical notation for x
     multiplied by itself)
@@ -445,7 +445,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [ ] synopfragmentref - A reference to a fragment of a command synopsis
 [ ] synopsis - A general-purpose element for representing the syntax of
     commands or functions
-[ ] systemitem - A system-related item or term
+[x] systemitem - A system-related item or term
 [ ] table - A formal table in a document
 [ ] task - A task to be completed
 [ ] taskprerequisites - The prerequisites for a task
@@ -630,12 +630,12 @@ blockTags :: [String]
 blockTags = ["toc","index","para","formalpara","simpara",
            "ackno","epigraph","blockquote","bibliography","bibliodiv",
            "biblioentry","glossee","glosseealso","glossary",
-           "glossdiv","glosslist","chapter","appendix","preface",
-           "bridgehead","sect1","sect2","sect3","sect4","sect5","section",
+           "glossdiv","glosslist","chapter","appendix","preface","bridgehead",
+           "sect1","sect2","sect3","sect4","sect5","section","simplesect",
            "refsect1","refsect2","refsect3","refsection", "qandadiv",
            "question","answer","abstract","itemizedlist","orderedlist",
            "variablelist","article","book","table","informaltable",
-           "informalexample", "linegroup",
+           "informalexample", "linegroup","procedure","substeps",
            "screen","programlisting","example","calloutlist"] ++ admonitionTags
 
 admonitionTags :: [String]
@@ -743,6 +743,9 @@ parseBlock (Elem e) =
         "sect4" -> sect 4
         "sect5" -> sect 5
         "section" -> gets dbSectionLevel >>= sect . (+1)
+        "simplesect" ->
+          gets dbSectionLevel >>=
+          sectWith (attrValue "id" e,["unnumbered"],[]) . (+1)
         "refsect1" -> sect 1
         "refsect2" -> sect 2
         "refsect3" -> sect 3
@@ -771,6 +774,7 @@ parseBlock (Elem e) =
           orderedListWith (start,listStyle,DefaultDelim)
             <$> listitems
         "variablelist" -> definitionList <$> deflistitems
+        "procedure" -> bulletList <$> steps
         "figure" -> getFigure e
         "mediaobject" -> para <$> getMediaobject e
         "caption" -> skip
@@ -838,6 +842,7 @@ parseBlock (Elem e) =
          callouts = mapM getBlocks $ filterChildren (named "callout") e
          deflistitems = mapM parseVarListEntry $ filterChildren
                      (named "varlistentry") e
+         steps = mapM getBlocks $ filterChildren (named "step") e
          parseVarListEntry e' = do
                      let terms = filterChildren (named "term") e'
                      let items = filterChildren (named "listitem") e'
@@ -904,18 +909,19 @@ parseBlock (Elem e) =
                                      (TableFoot nullAttr [])
          isEntry x  = named "entry" x || named "td" x || named "th" x
          parseRow = mapM (parseMixed plain . elContent) . filterChildren isEntry
-         sect n = do isbook <- gets dbBook
-                     let n' = if isbook || n == 0 then n + 1 else n
-                     headerText <- case filterChild (named "title") e `mplus`
-                                        (filterChild (named "info") e >>=
-                                            filterChild (named "title")) of
-                                      Just t  -> getInlines t
-                                      Nothing -> return mempty
-                     modify $ \st -> st{ dbSectionLevel = n }
-                     b <- getBlocks e
-                     let ident = attrValue "id" e
-                     modify $ \st -> st{ dbSectionLevel = n - 1 }
-                     return $ headerWith (ident,[],[]) n' headerText <> b
+         sect n = sectWith (attrValue "id" e,[],[]) n
+         sectWith attr n = do
+           isbook <- gets dbBook
+           let n' = if isbook || n == 0 then n + 1 else n
+           headerText <- case filterChild (named "title") e `mplus`
+                              (filterChild (named "info") e >>=
+                                  filterChild (named "title")) of
+                            Just t  -> getInlines t
+                            Nothing -> return mempty
+           modify $ \st -> st{ dbSectionLevel = n }
+           b <- getBlocks e
+           modify $ \st -> st{ dbSectionLevel = n - 1 }
+           return $ headerWith attr n' headerText <> b
          lineItems = mapM getInlines $ filterChildren (named "line") e
          -- | Admonitions are parsed into a div. Following other Docbook tools that output HTML,
          -- we parse the optional title as a div with the @title@ class, and give the
@@ -952,6 +958,12 @@ parseInline (CRef ref) =
   return $ text $ maybe (T.toUpper $ T.pack ref) T.pack $ lookupEntity ref
 parseInline (Elem e) =
   case qName (elName e) of
+        "phrase" -> do
+          let ident = attrValue "id" e
+          let classes = T.words $ attrValue "class" e
+          if ident /= "" || classes /= []
+            then spanWith (ident,classes,[]) <$> innerInlines
+            else innerInlines
         "equation" -> equation e displayMath
         "informalequation" -> equation e displayMath
         "inlineequation" -> equation e math
@@ -972,6 +984,7 @@ parseInline (Elem e) =
         "classname" -> codeWithLang
         "code" -> codeWithLang
         "filename" -> codeWithLang
+        "envar" -> codeWithLang
         "literal" -> codeWithLang
         "computeroutput" -> codeWithLang
         "prompt" -> codeWithLang
@@ -979,6 +992,8 @@ parseInline (Elem e) =
         "option" -> codeWithLang
         "optional" -> do x <- getInlines e
                          return $ str "[" <> x <> str "]"
+        "replaceable" -> do x <- getInlines e
+                            return $ str "<" <> x <> str ">"
         "markup" -> codeWithLang
         "wordasword" -> emph <$> innerInlines
         "command" -> codeWithLang
@@ -988,6 +1003,7 @@ parseInline (Elem e) =
         "symbol"  -> codeWithLang
         "constant" -> codeWithLang
         "userinput" -> codeWithLang
+        "systemitem" -> codeWithLang
         "varargs" -> return $ code "(...)"
         "keycap" -> return (str $ T.pack $ strContent e)
         "keycombo" -> keycombo <$>

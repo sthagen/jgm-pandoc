@@ -5,7 +5,7 @@ on:
     branches:
     - '*'
     - '!rc/*'
-    ignore-paths:
+    paths-ignore:
     - 'doc/**'
     - 'MANUAL.txt'
     - '*.md'
@@ -20,7 +20,7 @@ on:
     - 'windows/**'
     - 'man/**'
   pull_request:
-    ignore-paths:
+    paths-ignore:
     - 'doc/**'
     - 'MANUAL.txt'
     - '*.md'
@@ -38,7 +38,7 @@ on:
 jobs:
   linux:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     strategy:
       fail-fast: true
       matrix:
@@ -50,13 +50,27 @@ jobs:
           - ghc: '8.4.4'
             cabal: '2.4'
           - ghc: '8.6.5'
-            cabal: '2.4'
-          - ghc: '8.8.1'
-            cabal: '3.0'
+            cabal: '3.2'
+          - ghc: '8.8.3'
+            cabal: '3.2'
           - ghc: '8.10.1'
             cabal: '3.2'
     steps:
     - uses: actions/checkout@v1
+
+    # need to install older cabal/ghc versions from ppa repository
+
+    - name: Install recent cabal/ghc
+      run: |
+         if [[ ! -d /opt/ghc/${{ matrix.versions.ghc }} ]]
+         then
+           sudo add-apt-repository ppa:hvr/ghc
+           sudo apt-get update
+           sudo apt-get install ghc-${{ matrix.versions.ghc }} cabal-install-${{ matrix.versions.cabal }}
+         fi
+         # Use a GitHub workflow command to add folders to PATH.
+         echo "::add-path::/opt/ghc/${{ matrix.versions.ghc }}/bin"
+         echo "::add-path::/opt/cabal/${{ matrix.versions.cabal }}/bin"
 
     # declare/restore cached things
     # caching doesn't work for scheduled runs yet
@@ -78,12 +92,10 @@ jobs:
 
     - name: Install dependencies
       run: |
-          export PATH=/opt/cabal/${{ matrix.versions.cabal }}/bin:/opt/ghc/${{ matrix.versions.ghc }}/bin:$PATH
           cabal v2-update
           cabal v2-build --dependencies-only --enable-tests --disable-optimization
     - name: Build and test
       run: |
-          export PATH=/opt/cabal/${{ matrix.versions.cabal }}/bin:/opt/ghc/${{ matrix.versions.ghc }}/bin:$PATH
           cabal v2-build --enable-tests --disable-optimization 2>&1 | tee build.log
           # fail if warnings in local build
           ! grep -q ": *[Ww]arning:" build.log || exit 1
@@ -91,7 +103,7 @@ jobs:
 
   windows:
 
-    runs-on: windows-latest
+    runs-on: windows-2019
 
     steps:
     - uses: actions/checkout@v1
@@ -130,7 +142,7 @@ jobs:
 
   macos:
 
-    runs-on: macOS-latest
+    runs-on: macOS-10.15
 
     steps:
     - uses: actions/checkout@v1
