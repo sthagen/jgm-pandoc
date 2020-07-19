@@ -360,7 +360,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [x] refsectioninfo - Meta-information for a refsection
 [ ] refsynopsisdiv - A syntactic synopsis of the subject of the reference page
 [ ] refsynopsisdivinfo - Meta-information for a RefSynopsisDiv
-[x] releaseinfo - Information about a particular release of a document
+[ ] releaseinfo - Information about a particular release of a document
 [ ] remark - A remark (or comment) intended for presentation in a draft
     manuscript
 [x] replaceable - Content that may or must be replaced by the user
@@ -608,6 +608,7 @@ addMetadataFromElement e = do
     addMetaField "author" e
     addMetaField "date" e
     addMetaField "release" e
+    addMetaField "releaseinfo" e
     return mempty
   where addMetaField fieldname elt =
             case filterChildren (named fieldname) elt of

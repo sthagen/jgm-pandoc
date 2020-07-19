@@ -223,7 +223,8 @@ rawFieldListItem minIndent = try $ do
   first <- anyLine
   rest <- option "" $ try $ do lookAhead (count indent (char ' ') >> spaceChar)
                                indentedBlock
-  let raw = (if T.null first then "" else first <> "\n") <> rest <> "\n"
+  let raw = (if T.null first then "" else first <> "\n") <> rest <>
+            (if T.null first && T.null rest then "" else "\n")
   return (name, raw)
 
 fieldListItem :: PandocMonad m => Int -> RSTParser m (Inlines, [Blocks])
@@ -484,7 +485,7 @@ includeDirective top fields body = do
                              Just patt -> drop 1 .
                                             dropWhile (not . (patt `T.isInfixOf`))
                              Nothing   -> id) $ contentLines'
-  let contents' = T.unlines contentLines'' <> "\n"
+  let contents' = T.unlines contentLines''
   case lookup "code" fields of
        Just lang -> do
          let classes =  maybe [] T.words (lookup "class" fields)
@@ -494,7 +495,7 @@ includeDirective top fields body = do
                          Just _  -> return $ B.rawBlock "rst" contents'
                          Nothing -> do
                            setPosition $ newPos (T.unpack f) 1 1
-                           setInput contents'
+                           setInput $ contents' <> "\n"
                            bs <- optional blanklines >>
                                   (mconcat <$> many block)
                            setInput oldInput

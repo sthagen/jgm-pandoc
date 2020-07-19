@@ -204,7 +204,9 @@ blockToMs opts (CodeBlock attr str) = do
     literal ".IP" $$
     literal ".nf" $$
     literal "\\f[C]" $$
-    hlCode $$
+    ((case T.uncons str of
+      Just ('.',_) -> literal "\\&"
+      _            -> mempty) <> hlCode) $$
     literal "\\f[]" $$
     literal ".fi"
 blockToMs opts (LineBlock ls) = do
@@ -517,11 +519,11 @@ toMacro sty toktype =
 
 msFormatter :: WriterOptions -> FormatOptions -> [SourceLine] -> Doc Text
 msFormatter opts _fmtopts =
-  vcat . map fmtLine
-  where fmtLine = hcat . map fmtToken
-        fmtToken (toktype, tok) = literal "\\*" <>
-           brackets (literal (tshow toktype) <> literal " \""
-             <> literal (escapeStr opts tok) <> literal "\"")
+  literal . T.intercalate "\n" . map fmtLine
+ where
+  fmtLine = mconcat . map fmtToken
+  fmtToken (toktype, tok) =
+    "\\*[" <> (tshow toktype) <> " \"" <> (escapeStr opts tok) <> "\"]"
 
 highlightCode :: PandocMonad m => WriterOptions -> Attr -> Text -> MS m (Doc Text)
 highlightCode opts attr str =
