@@ -150,6 +150,7 @@ data Extension =
     | Ext_tex_math_single_backslash  -- ^ TeX math btw \(..\) \[..\]
     | Ext_yaml_metadata_block -- ^ YAML metadata block
     | Ext_gutenberg           -- ^ Use Project Gutenberg conventions for plain
+    | Ext_attributes          -- ^ Generic attribute syntax
     deriving (Show, Read, Enum, Eq, Ord, Bounded, Data, Typeable, Generic)
 
 -- | Extensions to be used with pandoc-flavored markdown.
@@ -242,21 +243,15 @@ phpMarkdownExtraExtensions = extensionsFromList
 -- | Extensions to be used with github-flavored markdown.
 githubMarkdownExtensions :: Extensions
 githubMarkdownExtensions = extensionsFromList
-  [ Ext_all_symbols_escapable
-  , Ext_pipe_tables
+  [ Ext_pipe_tables
   , Ext_raw_html
-  , Ext_fenced_code_blocks
+  , Ext_native_divs
   , Ext_auto_identifiers
   , Ext_gfm_auto_identifiers
-  , Ext_backtick_code_blocks
   , Ext_autolink_bare_uris
-  , Ext_space_in_atx_header
-  , Ext_intraword_underscores
   , Ext_strikeout
   , Ext_task_lists
   , Ext_emoji
-  , Ext_lists_without_preceding_blankline
-  , Ext_shortcut_reference_links
   ]
 
 -- | Extensions to be used with multimarkdown.
@@ -308,7 +303,16 @@ getDefaultExtensions :: T.Text -> Extensions
 getDefaultExtensions "markdown_strict"   = strictExtensions
 getDefaultExtensions "markdown_phpextra" = phpMarkdownExtraExtensions
 getDefaultExtensions "markdown_mmd"      = multimarkdownExtensions
-getDefaultExtensions "markdown_github"   = githubMarkdownExtensions
+getDefaultExtensions "markdown_github"   = githubMarkdownExtensions <>
+  extensionsFromList
+    [ Ext_all_symbols_escapable
+    , Ext_backtick_code_blocks
+    , Ext_fenced_code_blocks
+    , Ext_space_in_atx_header
+    , Ext_intraword_underscores
+    , Ext_lists_without_preceding_blankline
+    , Ext_shortcut_reference_links
+    ]
 getDefaultExtensions "markdown"          = pandocExtensions
 getDefaultExtensions "ipynb"             =
   extensionsFromList
@@ -335,6 +339,29 @@ getDefaultExtensions "plain"           = plainExtensions
 getDefaultExtensions "gfm"             = githubMarkdownExtensions
 getDefaultExtensions "commonmark"      = extensionsFromList
                                           [Ext_raw_html]
+getDefaultExtensions "commonmark_x"    = extensionsFromList
+  [ Ext_pipe_tables
+  , Ext_raw_html
+  , Ext_auto_identifiers
+  , Ext_strikeout
+  , Ext_task_lists
+  , Ext_emoji
+  , Ext_pipe_tables
+  , Ext_raw_html
+  , Ext_raw_tex            -- only supported in writer (for math)
+  , Ext_smart
+  , Ext_tex_math_dollars
+  , Ext_superscript
+  , Ext_subscript
+  , Ext_definition_lists
+  , Ext_footnotes
+  , Ext_fancy_lists
+  , Ext_fenced_divs
+  , Ext_bracketed_spans
+  , Ext_raw_attribute
+  , Ext_implicit_header_references
+  , Ext_attributes
+  ]
 getDefaultExtensions "org"             = extensionsFromList
                                           [Ext_citations,
                                            Ext_auto_identifiers]
@@ -430,16 +457,32 @@ getAllExtensions f = universalExtensions <> getAll f
     [ Ext_amuse ]
   getAll "asciidoc"        = autoIdExtensions
   getAll "plain"           = allMarkdownExtensions
-  getAll "gfm"             = githubMarkdownExtensions <>
+  getAll "gfm"             = getAll "commonmark"
+  getAll "commonmark"      =
     autoIdExtensions <>
     extensionsFromList
-    [ Ext_raw_html
+    [ Ext_pipe_tables
+    , Ext_autolink_bare_uris
+    , Ext_strikeout
+    , Ext_task_lists
+    , Ext_emoji
+    , Ext_raw_html
     , Ext_raw_tex            -- only supported in writer (for math)
     , Ext_implicit_figures
     , Ext_hard_line_breaks
     , Ext_smart
+    , Ext_tex_math_dollars
+    , Ext_superscript
+    , Ext_subscript
+    , Ext_definition_lists
+    , Ext_footnotes
+    , Ext_fancy_lists
+    , Ext_fenced_divs
+    , Ext_bracketed_spans
+    , Ext_raw_attribute
+    , Ext_implicit_header_references
+    , Ext_attributes
     ]
-  getAll "commonmark"      = getAll "gfm"
   getAll "org"             = autoIdExtensions <>
     extensionsFromList
     [ Ext_citations
