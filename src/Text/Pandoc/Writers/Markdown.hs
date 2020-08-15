@@ -47,6 +47,7 @@ import Text.Pandoc.Walk
 import Text.Pandoc.Writers.HTML (writeHtml5String)
 import Text.Pandoc.Writers.Math (texMathToInlines)
 import Text.Pandoc.XML (toHtml5Entities)
+import Data.Coerce (coerce)
 
 type Notes = [[Block]]
 type Ref   = (Text, Target, Attr)
@@ -483,10 +484,10 @@ blockToMarkdown' opts b@(RawBlock f str) = do
   let renderEmpty = mempty <$ report (BlockNotRendered b)
   case variant of
     PlainText -> renderEmpty
-    _ | isEnabled Ext_raw_attribute opts -> rawAttribBlock
-      | f `elem` ["markdown", "markdown_github", "markdown_phpextra",
+    _ | f `elem` ["markdown", "markdown_github", "markdown_phpextra",
                   "markdown_mmd", "markdown_strict"] ->
             return $ literal str <> literal "\n"
+      | isEnabled Ext_raw_attribute opts -> rawAttribBlock
       | f `elem` ["html", "html5", "html4"] ->
             case () of
               _ | isEnabled Ext_markdown_attribute opts -> return $
@@ -560,9 +561,12 @@ blockToMarkdown' opts (CodeBlock (_,classes,_) str)
   | "haskell" `elem` classes && "literate" `elem` classes &&
     isEnabled Ext_literate_haskell opts =
   return $ prefixed "> " (literal str) <> blankline
-blockToMarkdown' opts (CodeBlock attribs str) = return $
-  case attribs == nullAttr of
-     False | isEnabled Ext_backtick_code_blocks opts ->
+blockToMarkdown' opts (CodeBlock attribs str) = do
+  variant <- asks envVariant
+  return $
+   case attribs == nullAttr of
+     False | variant == Commonmark ||
+             isEnabled Ext_backtick_code_blocks opts ->
           backticks <> attrs <> cr <> literal str <> cr <> backticks <> blankline
            | isEnabled Ext_fenced_code_blocks opts ->
           tildes <> attrs <> cr <> literal str <> cr <> tildes <> blankline
@@ -855,9 +859,12 @@ blockListToMarkdown opts blocks = do
   -- b) change Plain to Para unless it's followed by a RawBlock
   -- or has a list as its parent (#3487)
   let fixBlocks (b : CodeBlock attr x : rest)
-         | (not (isEnabled Ext_fenced_code_blocks opts) || attr == nullAttr)
-             && isListBlock b = b : commentSep : CodeBlock attr x :
-                                fixBlocks rest
+       | (not (variant == Commonmark ||
+               isEnabled Ext_backtick_code_blocks opts ||
+                 isEnabled Ext_fenced_code_blocks opts) ||
+              attr == nullAttr)
+            && isListBlock b
+              = b : commentSep : CodeBlock attr x : fixBlocks rest
       fixBlocks (b1@(BulletList _) : b2@(BulletList _) : bs) =
            b1 : commentSep : fixBlocks (b2:bs)
       fixBlocks (b1@(OrderedList _ _) : b2@(OrderedList _ _) : bs) =
@@ -903,6 +910,7 @@ getNextIndex = do
   prevRefs <- gets stPrevRefs
   refs <- gets stRefs
   i <- (+ 1) <$> gets stLastIdx
+  modify $ \s -> s{ stLastIdx = i }
   let refLbls = map (\(r,_,_) -> r) $ prevRefs ++ refs
   return $ findUsableIndex refLbls i
 
@@ -915,12 +923,15 @@ getReference attr label target = do
     Just (ref, _, _) -> return ref
     Nothing       -> do
       keys <- gets stKeys
-      case M.lookup (getKey label) keys of
+      let key = getKey label
+      let rawkey = coerce key
+      case M.lookup key keys of
            Nothing -> do -- no other refs with this label
-             (lab', idx) <- if isEmpty label
+             (lab', idx) <- if T.null rawkey ||
+                                 T.length rawkey > 999 ||
+                                 T.any (\c -> c == '[' || c == ']') rawkey
                                then do
                                  i <- getNextIndex
-                                 modify $ \s -> s{ stLastIdx = i }
                                  return (tshow i, i)
                                else
                                  return (render Nothing label, 0)
@@ -947,11 +958,10 @@ getReference attr label target = do
                     return lab'
                   Nothing -> do -- but this one is to a new target
                     i <- getNextIndex
-                    modify $ \s -> s{ stLastIdx = i }
                     let lab' = tshow i
                     modify (\s -> s{
                        stRefs = (lab', target, attr) : refs,
-                       stKeys = M.insert (getKey label)
+                       stKeys = M.insert key
                                    (M.insert (target, attr) i km)
                                          (stKeys s) })
                     return lab'

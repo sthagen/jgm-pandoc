@@ -133,6 +133,7 @@ data Extension =
     | Ext_raw_attribute           -- ^ Allow explicit raw blocks/inlines
     | Ext_raw_html            -- ^ Allow raw HTML
     | Ext_raw_tex             -- ^ Allow raw TeX (other than math)
+    | Ext_raw_markdown        -- ^ Parse markdown in ipynb as raw markdown
     | Ext_shortcut_reference_links -- ^ Shortcut reference links
     | Ext_simple_tables       -- ^ Pandoc-style simple tables
     | Ext_smart               -- ^ "Smart" quotes, apostrophes, ellipses, dashes
@@ -252,6 +253,8 @@ githubMarkdownExtensions = extensionsFromList
   , Ext_strikeout
   , Ext_task_lists
   , Ext_emoji
+  , Ext_fenced_code_blocks
+  , Ext_backtick_code_blocks
   ]
 
 -- | Extensions to be used with multimarkdown.
@@ -336,7 +339,17 @@ getDefaultExtensions "muse"            = extensionsFromList
                                            [Ext_amuse,
                                             Ext_auto_identifiers]
 getDefaultExtensions "plain"           = plainExtensions
-getDefaultExtensions "gfm"             = githubMarkdownExtensions
+getDefaultExtensions "gfm"             = extensionsFromList
+  [ Ext_pipe_tables
+  , Ext_raw_html
+  , Ext_native_divs
+  , Ext_auto_identifiers
+  , Ext_gfm_auto_identifiers
+  , Ext_autolink_bare_uris
+  , Ext_strikeout
+  , Ext_task_lists
+  , Ext_emoji
+  ]
 getDefaultExtensions "commonmark"      = extensionsFromList
                                           [Ext_raw_html]
 getDefaultExtensions "commonmark_x"    = extensionsFromList
@@ -361,6 +374,7 @@ getDefaultExtensions "commonmark_x"    = extensionsFromList
   , Ext_raw_attribute
   , Ext_implicit_header_references
   , Ext_attributes
+  , Ext_fenced_code_attributes
   ]
 getDefaultExtensions "org"             = extensionsFromList
                                           [Ext_citations,
@@ -442,7 +456,8 @@ getAllExtensions f = universalExtensions <> getAll f
   getAll "markdown_mmd"      = allMarkdownExtensions
   getAll "markdown_github"   = allMarkdownExtensions
   getAll "markdown"          = allMarkdownExtensions
-  getAll "ipynb"             = allMarkdownExtensions
+  getAll "ipynb"             = allMarkdownExtensions <> extensionsFromList
+    [ Ext_raw_markdown ]
   getAll "docx"            = extensionsFromList
     [ Ext_empty_paragraphs
     , Ext_styles
@@ -482,7 +497,9 @@ getAllExtensions f = universalExtensions <> getAll f
     , Ext_raw_attribute
     , Ext_implicit_header_references
     , Ext_attributes
+    , Ext_fenced_code_attributes
     ]
+  getAll "commonmark_x"    = getAll "commonmark"
   getAll "org"             = autoIdExtensions <>
     extensionsFromList
     [ Ext_citations

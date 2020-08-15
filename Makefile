@@ -5,6 +5,7 @@ BRANCH?=master
 RESOLVER?=lts-13
 GHCOPTS=-fdiagnostics-color=always
 WEBSITE=../../web/pandoc.org
+REVISION?=1
 
 quick:
 	stack install --ghc-options='$(GHCOPTS)' --install-ghc --flag 'pandoc:embed_data_files' --fast --test --ghc-options='-j +RTS -A64m -RTS' --test-arguments='-j4 --hide-successes $(TESTARGS)'
@@ -70,8 +71,12 @@ checkdocs: README.md
 	! grep -n -e "\t" MANUAL.txt changelog
 
 debpkg: man/pandoc.1
-	make -C linux && \
-	cp linux/artifacts/pandoc-$(version)-*.* .
+	docker run -v `pwd`:/mnt \
+                   -v `pwd`/linux/artifacts:/artifacts \
+		   -e REVISION=$(REVISION) \
+		   -w /mnt \
+	           utdemir/ghc-musl:v12-libgmp-ghc8101 bash \
+		   /mnt/linux/make_artifacts.sh
 
 macospkg: man/pandoc.1
 	./macos/make_macos_package.sh
@@ -105,7 +110,7 @@ pandoc-windows-x86_64.msi:
 	wget "https://ci.appveyor.com/api/buildjobs/$$JOBID/artifacts/windows%2F$@" -O $@
 
 man/pandoc.1: MANUAL.txt man/pandoc.1.before man/pandoc.1.after
-	pandoc $< -f markdown-smart -t man -s \
+	pandoc $< -f markdown -t man -s \
 		--lua-filter man/manfilter.lua \
 		--include-before-body man/pandoc.1.before \
 		--include-after-body man/pandoc.1.after \
@@ -114,7 +119,7 @@ man/pandoc.1: MANUAL.txt man/pandoc.1.before man/pandoc.1.after
 		-o $@
 
 README.md: README.template MANUAL.txt tools/update-readme.lua
-	pandoc --lua-filter tools/update-readme.lua --reference-links \
+	pandoc --lua-filter tools/update-readme.lua \
 	      --reference-location=section -t gfm $< -o $@
 
 download_stats:
