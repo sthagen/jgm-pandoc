@@ -8,7 +8,7 @@
 
 # Specify additional command line arguments
 #
-- arguments: [--color, --cpp-ansi]
+- arguments: [--color=auto, --cpp-ansi]
 
 
 # Control which extensions/flags/modules/functions can be used
@@ -74,8 +74,11 @@
 - ignore:
     name: "Use camelCase"
     within:
+      - Tests.Writers.Docbook
+      - Tests.Writers.Native
       - Text.Pandoc.Extensions
-      - Text.Pandoc.Lua.Marshalling.Version
+      - Text.Pandoc.Lua.Marshaling.Version
+      - Text.Pandoc.Lua.Module.Utils
       - Text.Pandoc.Readers.Odt.ContentReader
       - Text.Pandoc.Readers.Odt.Namespaces
 

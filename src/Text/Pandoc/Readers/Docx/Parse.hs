@@ -213,7 +213,7 @@ data ParIndentation = ParIndentation { leftParIndent    :: Maybe Integer
 data ChangeType = Insertion | Deletion
                 deriving Show
 
-data ChangeInfo = ChangeInfo ChangeId Author ChangeDate
+data ChangeInfo = ChangeInfo ChangeId Author (Maybe ChangeDate)
                 deriving Show
 
 data TrackedChange = TrackedChange ChangeType ChangeInfo
@@ -276,7 +276,7 @@ type Extent = Maybe (Double, Double)
 
 data ParPart = PlainRun Run
              | ChangedRuns TrackedChange [Run]
-             | CommentStart CommentId Author CommentDate [BodyPart]
+             | CommentStart CommentId Author (Maybe CommentDate) [BodyPart]
              | CommentEnd CommentId
              | BookMark BookMarkId Anchor
              | InternalHyperLink Anchor [Run]
@@ -404,12 +404,8 @@ archiveToNotes zf =
                >>= (parseXMLDoc . UTF8.toStringLazy . fromEntry)
       enElem = findEntryByPath "word/endnotes.xml" zf
                >>= (parseXMLDoc . UTF8.toStringLazy . fromEntry)
-      fn_namespaces = case fnElem of
-        Just e  -> elemToNameSpaces e
-        Nothing -> []
-      en_namespaces = case enElem of
-        Just e  -> elemToNameSpaces e
-        Nothing -> []
+      fn_namespaces = maybe [] elemToNameSpaces fnElem
+      en_namespaces = maybe [] elemToNameSpaces enElem
       ns = unionBy (\x y -> fst x == fst y) fn_namespaces en_namespaces
       fn = fnElem >>= walkDocument ns >>= elemToNotes ns "footnote"
       en = enElem >>= walkDocument ns >>= elemToNotes ns "endnote"
@@ -420,9 +416,7 @@ archiveToComments :: Archive -> Comments
 archiveToComments zf =
   let cmtsElem = findEntryByPath "word/comments.xml" zf
                >>= (parseXMLDoc . UTF8.toStringLazy . fromEntry)
-      cmts_namespaces = case cmtsElem of
-        Just e  -> elemToNameSpaces e
-        Nothing -> []
+      cmts_namespaces = maybe [] elemToNameSpaces cmtsElem
       cmts = elemToComments cmts_namespaces <$> (cmtsElem >>= walkDocument cmts_namespaces)
   in
     case cmts of
@@ -858,7 +852,7 @@ elemToCommentStart ns element
   | isElem ns "w" "comment" element
   , Just cmtId <- findAttrTextByName ns "w" "id" element
   , Just cmtAuthor <- findAttrTextByName ns "w" "author" element
-  , Just cmtDate <- findAttrTextByName ns "w" "date" element = do
+  , cmtDate <- findAttrTextByName ns "w" "date" element = do
       bps <- mapD (elemToBodyPart ns) (elChildren element)
       return $ CommentStart cmtId cmtAuthor cmtDate bps
 elemToCommentStart _ _ = throwError WrongElem
@@ -964,14 +958,14 @@ getTrackedChange ns element
   | isElem ns "w" "ins" element || isElem ns "w" "moveTo" element
   , Just cId <- findAttrTextByName ns "w" "id" element
   , Just cAuthor <- findAttrTextByName ns "w" "author" element
-  , Just cDate <- findAttrTextByName ns "w" "date" element =
-      Just $ TrackedChange Insertion (ChangeInfo cId cAuthor cDate)
+  , mcDate <- findAttrTextByName ns "w" "date" element =
+      Just $ TrackedChange Insertion (ChangeInfo cId cAuthor mcDate)
 getTrackedChange ns element
   | isElem ns "w" "del" element || isElem ns "w" "moveFrom" element
   , Just cId <- findAttrTextByName ns "w" "id" element
   , Just cAuthor <- findAttrTextByName ns "w" "author" element
-  , Just cDate <- findAttrTextByName ns "w" "date" element =
-      Just $ TrackedChange Deletion (ChangeInfo cId cAuthor cDate)
+  , mcDate <- findAttrTextByName ns "w" "date" element =
+      Just $ TrackedChange Deletion (ChangeInfo cId cAuthor mcDate)
 getTrackedChange _ _ = Nothing
 
 elemToParagraphStyle :: NameSpaces -> Element -> ParStyleMap -> ParagraphStyle

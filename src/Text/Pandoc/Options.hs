@@ -1,8 +1,9 @@
 {-# LANGUAGE CPP                #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
-{-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE OverloadedStrings  #-}
+{-# LANGUAGE TemplateHaskell    #-}
 {- |
    Module      : Text.Pandoc.Options
    Copyright   : Copyright (C) 2012-2020 John MacFarlane
@@ -308,7 +309,7 @@ isEnabled :: HasSyntaxExtensions a => Extension -> a -> Bool
 isEnabled ext opts = ext `extensionEnabled` getExtensions opts
 
 defaultMathJaxURL :: Text
-defaultMathJaxURL = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+defaultMathJaxURL = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
 
 defaultKaTeXURL :: Text
 defaultKaTeXURL = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/"
@@ -327,7 +328,7 @@ $(deriveJSON defaultOptions{ constructorTagModifier =
                            } ''CiteMethod)
 
 $(deriveJSON defaultOptions{ constructorTagModifier =
-                            \t -> case t of
+                            \case
                                     "NoObfuscation"         -> "none"
                                     "ReferenceObfuscation"  -> "references"
                                     "JavascriptObfuscation" -> "javascript"

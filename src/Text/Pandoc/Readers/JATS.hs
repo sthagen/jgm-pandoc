@@ -26,7 +26,7 @@ import Text.HTML.TagSoup.Entity (lookupEntity)
 import Text.Pandoc.Builder
 import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import Text.Pandoc.Options
-import Text.Pandoc.Shared (crFilter, safeRead)
+import Text.Pandoc.Shared (crFilter, safeRead, extractSpaces)
 import Text.TeXMath (readMathML, writeTeX)
 import Text.XML.Light
 import qualified Data.Set as S (fromList, member)
@@ -189,7 +189,7 @@ parseBlock (Elem e) =
         _       -> getBlocks e
    where parseMixed container conts = do
            let (ils,rest) = break isBlockElement conts
-           ils' <- (trimInlines . mconcat) <$> mapM parseInline ils
+           ils' <- trimInlines . mconcat <$> mapM parseInline ils
            let p = if ils' == mempty then mempty else container ils'
            case rest of
                  []     -> return p
@@ -206,7 +206,7 @@ parseBlock (Elem e) =
          parseBlockquote = do
             attrib <- case filterChild (named "attribution") e of
                              Nothing  -> return mempty
-                             Just z   -> (para . (str "— " <>) . mconcat)
+                             Just z   -> para . (str "— " <>) . mconcat
                                          <$>
                                               mapM parseInline (elContent z)
             contents <- getBlocks e
@@ -281,7 +281,7 @@ parseBlock (Elem e) =
                                                             in  ColWidth . (/ tot) <$> ws'
                                                 Nothing  -> replicate numrows ColWidthDefault
                       let toRow = Row nullAttr . map simpleCell
-                          toHeaderRow l = if null l then [] else [toRow l]
+                          toHeaderRow l = [toRow l | not (null l)]
                       return $ table (simpleCaption $ plain capt)
                                      (zip aligns widths)
                                      (TableHead nullAttr $ toHeaderRow headrows)
@@ -309,7 +309,7 @@ parseBlock (Elem e) =
                      return $ headerWith (ident,[],[]) n' headerText <> b
 
 getInlines :: PandocMonad m => Element -> JATS m Inlines
-getInlines e' = (trimInlines . mconcat) <$>
+getInlines e' = trimInlines . mconcat <$>
                  mapM parseInline (elContent e')
 
 parseMetadata :: PandocMonad m => Element -> JATS m Blocks
@@ -460,14 +460,14 @@ parseInline (CRef ref) =
   return . text . maybe (T.toUpper $ T.pack ref) T.pack $ lookupEntity ref
 parseInline (Elem e) =
   case qName (elName e) of
-        "italic" -> emph <$> innerInlines
-        "bold" -> strong <$> innerInlines
-        "strike" -> strikeout <$> innerInlines
-        "sub" -> subscript <$> innerInlines
-        "sup" -> superscript <$> innerInlines
-        "underline" -> underline <$> innerInlines
+        "italic" -> innerInlines emph
+        "bold" -> innerInlines strong
+        "strike" -> innerInlines strikeout
+        "sub" -> innerInlines subscript
+        "sup" -> innerInlines superscript
+        "underline" -> innerInlines underline
         "break" -> return linebreak
-        "sc" -> smallcaps <$> innerInlines
+        "sc" -> innerInlines smallcaps
 
         "code" -> codeWithLang
         "monospace" -> codeWithLang
@@ -477,14 +477,14 @@ parseInline (Elem e) =
             qt <- gets jatsQuoteType
             let qt' = if qt == SingleQuote then DoubleQuote else SingleQuote
             modify $ \st -> st{ jatsQuoteType = qt' }
-            contents <- innerInlines
+            contents <- innerInlines id
             modify $ \st -> st{ jatsQuoteType = qt }
             return $ if qt == SingleQuote
                         then singleQuoted contents
                         else doubleQuoted contents
 
         "xref" -> do
-            ils <- innerInlines
+            ils <- innerInlines id
             let rid = attrValue "rid" e
             let rids = T.words rid
             let refType = ("ref-type",) <$> maybeAttrValue "ref-type" e
@@ -501,7 +501,7 @@ parseInline (Elem e) =
                              ils
                         else linkWith attr ("#" <> rid) "" ils
         "ext-link" -> do
-             ils <- innerInlines
+             ils <- innerInlines id
              let title = fromMaybe "" $ findAttrText (QName "title" (Just "http://www.w3.org/1999/xlink") Nothing) e
              let href = case findAttr (QName "href" (Just "http://www.w3.org/1999/xlink") Nothing) e of
                                Just h -> T.pack h
@@ -518,10 +518,10 @@ parseInline (Elem e) =
         "email" -> return $ link ("mailto:" <> textContent e) ""
                           $ str $ textContent e
         "uri" -> return $ link (textContent e) "" $ str $ textContent e
-        "fn" -> (note . mconcat) <$>
+        "fn" -> note . mconcat <$>
                          mapM parseBlock (elContent e)
-        _          -> innerInlines
-   where innerInlines = (trimInlines . mconcat) <$>
+        _          -> innerInlines id
+   where innerInlines f = extractSpaces f . mconcat <$>
                           mapM parseInline (elContent e)
          mathML x =
             case readMathML . T.pack . showElement $ everywhere (mkT removePrefix) x of

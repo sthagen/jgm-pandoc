@@ -13,7 +13,10 @@
 
 Conversion of markdown-formatted plain text to 'Pandoc' document.
 -}
-module Text.Pandoc.Readers.Markdown ( readMarkdown, yamlToMeta ) where
+module Text.Pandoc.Readers.Markdown (
+  readMarkdown,
+  yamlToMeta,
+  yamlToRefs ) where
 
 import Control.Monad
 import Control.Monad.Except (throwError)
@@ -36,6 +39,7 @@ import Text.Pandoc.Emoji (emojiToInline)
 import Text.Pandoc.Error
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
+import Text.Pandoc.Walk (walk)
 import Text.Pandoc.Parsing hiding (tableWith)
 import Text.Pandoc.Readers.HTML (htmlInBalanced, htmlTag, isBlockTag,
                                  isCommentTag, isInlineTag, isTextTag)
@@ -43,7 +47,7 @@ import Text.Pandoc.Readers.LaTeX (applyMacros, rawLaTeXBlock, rawLaTeXInline)
 import Text.Pandoc.Shared
 import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.XML (fromEntities)
-import Text.Pandoc.Readers.Metadata (yamlBsToMeta)
+import Text.Pandoc.Readers.Metadata (yamlBsToMeta, yamlBsToRefs)
 
 type MarkdownParser m = ParserT Text ParserState m
 
@@ -63,16 +67,48 @@ readMarkdown opts s = do
 -- String scalars in the YAML are parsed as Markdown.
 yamlToMeta :: PandocMonad m
            => ReaderOptions
+           -> Maybe FilePath
            -> BL.ByteString
            -> m Meta
-yamlToMeta opts bstr = do
+yamlToMeta opts mbfp bstr = do
   let parser = do
+        oldPos <- getPosition
+        case mbfp of
+          Nothing -> return ()
+          Just fp -> setPosition $ initialPos fp
         meta <- yamlBsToMeta (fmap B.toMetaValue <$> parseBlocks) bstr
+        setPosition oldPos
         return $ runF meta defaultParserState
   parsed <- readWithM parser def{ stateOptions = opts } ""
   case parsed of
     Right result -> return result
     Left e       -> throwError e
+
+-- | Read a YAML string and extract references from the
+-- 'references' field, filter using an id predicate and
+-- parsing fields as Markdown.
+yamlToRefs :: PandocMonad m
+           => (Text -> Bool)
+           -> ReaderOptions
+           -> Maybe FilePath
+           -> BL.ByteString
+           -> m [MetaValue]
+yamlToRefs idpred opts mbfp bstr = do
+  let parser = do
+        oldPos <- getPosition
+        case mbfp of
+          Nothing -> return ()
+          Just fp -> setPosition $ initialPos fp
+        refs <- yamlBsToRefs (fmap B.toMetaValue <$> parseBlocks) idpred bstr
+        setPosition oldPos
+        return $ runF refs defaultParserState
+  parsed <- readWithM parser def{ stateOptions = opts } ""
+  case parsed of
+    Right result -> return result
+    Left e       -> throwError e
+
+
+
 
 --
 -- Constants and data structure definitions
@@ -222,9 +258,9 @@ pandocTitleBlock = try $ do
                  author' <- author
                  date' <- date
                  return $
-                     (if B.isNull title' then id else B.setMeta "title" title')
+                     (if null title' then id else B.setMeta "title" title')
                    . (if null author' then id else B.setMeta "author" author')
-                   . (if B.isNull date' then id else B.setMeta "date" date')
+                   . (if null date' then id else B.setMeta "date" date')
                    $ nullMeta
   updateState $ \st -> st{ stateMeta' = stateMeta' st <> meta' }
 
@@ -380,6 +416,7 @@ noteBlock = do
      char ':'
      optional blankline
      optional indentSpaces
+     updateState $ \st -> st{ stateInNote = True }
      first <- rawLines
      rest <- many $ try $ blanklines >> indentSpaces >> rawLines
      let raw = T.unlines (first:rest) <> "\n"
@@ -390,7 +427,8 @@ noteBlock = do
        Just _  -> logMessage $ DuplicateNoteReference ref pos
        Nothing -> return ()
      updateState $ \s -> s { stateNotes' =
-       M.insert ref (pos, parsed) oldnotes }
+       M.insert ref (pos, parsed) oldnotes,
+                             stateInNote = False }
      return mempty
 
 --
@@ -1025,7 +1063,7 @@ htmlBlock = do
   guardEnabled Ext_raw_html
   try (do
       (TagOpen _ attrs) <- lookAhead $ fst <$> htmlTag isBlockTag
-      (return . B.rawBlock "html") <$> rawVerbatimBlock
+      return . B.rawBlock "html" <$> rawVerbatimBlock
         <|> (do guardEnabled Ext_markdown_attribute
                 oldMarkdownAttribute <- stateMarkdownAttribute <$> getState
                 markdownAttribute <-
@@ -1582,7 +1620,7 @@ ender c n = try $ do
 three :: PandocMonad m => Char -> MarkdownParser m (F Inlines)
 three c = do
   contents <- mconcat <$> many (notFollowedBy (ender c 1) >> inline)
-  (ender c 3 >> updateLastStrPos >> return ((B.strong . B.emph) <$> contents))
+  (ender c 3 >> updateLastStrPos >> return (B.strong . B.emph <$> contents))
     <|> (ender c 2 >> updateLastStrPos >> one c (B.strong <$> contents))
     <|> (ender c 1 >> updateLastStrPos >> two c (B.emph <$> contents))
     <|> return (return (B.str $ T.pack [c,c,c]) <> contents)
@@ -1617,7 +1655,7 @@ inlinesBetween :: PandocMonad m
                -> MarkdownParser m b
                -> MarkdownParser m (F Inlines)
 inlinesBetween start end =
-  (trimInlinesF . mconcat) <$> try (start >> many1Till inner end)
+  trimInlinesF . mconcat <$> try (start >> many1Till inner end)
     where inner      = innerSpace <|> (notFollowedBy' (() <$ whitespace) >> inline)
           innerSpace = try $ whitespace <* notFollowedBy' end
 
@@ -1662,6 +1700,7 @@ str = do
       abbrevs <- getOption readerAbbreviations
       if not (T.null result) && T.last result == '.' && result `Set.member` abbrevs
          then try (do ils <- whitespace
+                      notFollowedBy (() <$ cite <|> () <$ note)
                       -- ?? lookAhead alphaNum
                       -- replace space after with nonbreaking space
                       -- if softbreak, move before abbrev if possible (#4635)
@@ -1720,7 +1759,7 @@ source = do
             try parenthesizedChars
         <|> (notFollowedBy (oneOf " )") >> countChar 1 litChar)
         <|> try (many1Char spaceChar <* notFollowedBy (oneOf "\"')"))
-  let sourceURL = (T.unwords . T.words . T.concat) <$> many urlChunk
+  let sourceURL = T.unwords . T.words . T.concat <$> many urlChunk
   let betweenAngles = try $
          char '<' >> manyTillChar litChar (char '>')
   src <- try betweenAngles <|> sourceURL
@@ -1866,7 +1905,9 @@ note :: PandocMonad m => MarkdownParser m (F Inlines)
 note = try $ do
   guardEnabled Ext_footnotes
   ref <- noteMarker
-  updateState $ \st -> st{ stateNoteRefs = Set.insert ref (stateNoteRefs st) }
+  updateState $ \st -> st{ stateNoteRefs = Set.insert ref (stateNoteRefs st)
+                         , stateNoteNumber = stateNoteNumber st + 1 }
+  noteNum <- stateNoteNumber <$> getState
   return $ do
     notes <- asksF stateNotes'
     case M.lookup ref notes of
@@ -1877,13 +1918,21 @@ note = try $ do
           -- notes, to avoid infinite looping with notes inside
           -- notes:
           let contents' = runF contents st{ stateNotes' = M.empty }
-          return $ B.note contents'
+          let addCitationNoteNum (c@Citation{}) =
+                c{ citationNoteNum = noteNum }
+          let adjustCite (Cite cs ils) =
+                Cite (map addCitationNoteNum cs) ils
+              adjustCite x = x
+          return $ B.note $ walk adjustCite contents'
 
 inlineNote :: PandocMonad m => MarkdownParser m (F Inlines)
 inlineNote = try $ do
   guardEnabled Ext_inline_notes
   char '^'
+  updateState $ \st -> st{ stateInNote = True
+                         , stateNoteNumber = stateNoteNumber st + 1 }
   contents <- inlinesInBalancedBrackets
+  updateState $ \st -> st{ stateInNote = False }
   return $ B.note . B.para <$> contents
 
 rawLaTeXInline' :: PandocMonad m => MarkdownParser m (F Inlines)
@@ -2004,6 +2053,12 @@ emoji = try $ do
 cite :: PandocMonad m => MarkdownParser m (F Inlines)
 cite = do
   guardEnabled Ext_citations
+  -- We only use stateNoteNumber for assigning citationNoteNum,
+  -- so we just assume that all citations produce notes.
+  -- citationNoteNum doesn't affect non-note styles.
+  inNote <- stateInNote <$> getState
+  unless inNote $
+    updateState $ \st -> st{ stateNoteNumber = stateNoteNumber st + 1 }
   textualCite
             <|> do (cs, raw) <- withRaw normalCite
                    return $ flip B.cite (B.text raw) <$> cs
@@ -2011,19 +2066,20 @@ cite = do
 textualCite :: PandocMonad m => MarkdownParser m (F Inlines)
 textualCite = try $ do
   (suppressAuthor, key) <- citeKey
+  noteNum <- stateNoteNumber <$> getState
   let first = Citation{ citationId      = key
                       , citationPrefix  = []
                       , citationSuffix  = []
                       , citationMode    = if suppressAuthor
                                              then SuppressAuthor
                                              else AuthorInText
-                      , citationNoteNum = 0
+                      , citationNoteNum = noteNum
                       , citationHash    = 0
                       }
   mbrest <- option Nothing $ try $ spnl >> Just <$> withRaw normalCite
   case mbrest of
        Just (rest, raw) ->
-         return $ (flip B.cite (B.text $ "@" <> key <> " " <> raw) . (first:))
+         return $ flip B.cite (B.text $ "@" <> key <> " " <> raw) . (first:)
                <$> rest
        Nothing   ->
          (do
@@ -2090,6 +2146,7 @@ citation = try $ do
   pref <- prefix
   (suppress_author, key) <- citeKey
   suff <- suffix
+  noteNum <- stateNoteNumber <$> getState
   return $ do
     x <- pref
     y <- suff
@@ -2099,7 +2156,7 @@ citation = try $ do
                    , citationMode    = if suppress_author
                                           then SuppressAuthor
                                           else NormalCitation
-                   , citationNoteNum = 0
+                   , citationNoteNum = noteNum
                    , citationHash    = 0
                    }
 
@@ -2130,4 +2187,4 @@ toRow :: [Blocks] -> Row
 toRow = Row nullAttr . map B.simpleCell
 
 toHeaderRow :: [Blocks] -> [Row]
-toHeaderRow l = if null l then [] else [toRow l]
+toHeaderRow l = [toRow l | not (null l)]

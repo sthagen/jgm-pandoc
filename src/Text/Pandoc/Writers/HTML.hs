@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -30,6 +31,7 @@ module Text.Pandoc.Writers.HTML (
 import Control.Monad.State.Strict
 import Data.Char (ord)
 import Data.List (intercalate, intersperse, partition, delete, (\\))
+import Data.List.NonEmpty (NonEmpty((:|)))
 import Data.Maybe (fromMaybe, isJust, isNothing, mapMaybe)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -53,6 +55,7 @@ import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Walk
 import Text.Pandoc.Writers.Math
 import Text.Pandoc.Writers.Shared
+import qualified Text.Pandoc.Writers.AnnotatedTable as Ann
 import Text.Pandoc.XML (escapeStringForXML, fromEntities, toEntities,
                         html5Attributes, html4Attributes, rdfaAttributes)
 import qualified Text.Blaze.XHtml5 as H5
@@ -83,6 +86,8 @@ data WriterState = WriterState
     , stSlideLevel   :: Int     -- ^ Slide level
     , stInSection    :: Bool    -- ^ Content is in a section (revealjs)
     , stCodeBlockNum :: Int     -- ^ Number of code block
+    , stCsl          :: Bool    -- ^ Has CSL references
+    , stCslEntrySpacing :: Maybe Int  -- ^ CSL entry spacing
     }
 
 defaultWriterState :: WriterState
@@ -93,7 +98,9 @@ defaultWriterState = WriterState {stNotes= [], stMath = False, stQuotes = False,
                                   stSlideVariant = NoSlides,
                                   stSlideLevel = 1,
                                   stInSection = False,
-                                  stCodeBlockNum = 0}
+                                  stCodeBlockNum = 0,
+                                  stCsl = False,
+                                  stCslEntrySpacing = Nothing}
 
 -- Helpers to render HTML with the appropriate function.
 
@@ -307,43 +314,54 @@ pandocToHtml opts (Pandoc meta blocks) = do
                           "/*]]>*/\n")
                           | otherwise -> mempty
                     Nothing -> mempty
+  let mCss :: Maybe [Text] = lookupContext "css" $ metadata
   let context =   (if stHighlighting st
                       then case writerHighlightStyle opts of
                                 Just sty -> defField "highlighting-css"
                                               (T.pack $ styleToCss sty)
                                 Nothing  -> id
-                      else id) $
+                      else id) .
+                  (if stCsl st
+                      then defField "csl-css" True .
+                           (case stCslEntrySpacing st of
+                              Nothing -> id
+                              Just 0  -> id
+                              Just n  ->
+                                defField "csl-entry-spacing"
+                                  (tshow n <> "em"))
+                      else id) .
                   (if stMath st
                       then defField "math" (renderHtml' math)
-                      else id) $
+                      else id) .
                   (case writerHTMLMathMethod opts of
                         MathJax u -> defField "mathjax" True .
                                      defField "mathjaxurl"
                                        (T.takeWhile (/='?') u)
-                        _         -> defField "mathjax" False) $
+                        _         -> defField "mathjax" False) .
                   (case writerHTMLMathMethod opts of
                         PlainMath -> defField "displaymath-css" True
                         WebTeX _  -> defField "displaymath-css" True
-                        _         -> id) $
-                  defField "quotes" (stQuotes st) $
+                        _         -> id) .
+                  defField "document-css" (isNothing mCss && slideVariant == NoSlides) .
+                  defField "quotes" (stQuotes st) .
                   -- for backwards compatibility we populate toc
                   -- with the contents of the toc, rather than a
                   -- boolean:
-                  maybe id (defField "toc") toc $
-                  maybe id (defField "table-of-contents") toc $
-                  defField "author-meta" authsMeta $
+                  maybe id (defField "toc") toc .
+                  maybe id (defField "table-of-contents") toc .
+                  defField "author-meta" authsMeta .
                   maybe id (defField "date-meta")
-                    (normalizeDate dateMeta) $
+                    (normalizeDate dateMeta) .
                   defField "pagetitle"
-                      (stringifyHTML . docTitle $ meta) $
-                  defField "idprefix" (writerIdentifierPrefix opts) $
+                      (stringifyHTML . docTitle $ meta) .
+                  defField "idprefix" (writerIdentifierPrefix opts) .
                   -- these should maybe be set in pandoc.hs
                   defField "slidy-url"
-                    ("https://www.w3.org/Talks/Tools/Slidy2" :: Text) $
-                  defField "slideous-url" ("slideous" :: Text) $
+                    ("https://www.w3.org/Talks/Tools/Slidy2" :: Text) .
+                  defField "slideous-url" ("slideous" :: Text) .
                   defField "revealjs-url" ("https://unpkg.com/reveal.js@^4/" :: Text) $
-                  defField "s5-url" ("s5/default" :: Text) $
-                  defField "html5" (stHtml5 st)
+                  defField "s5-url" ("s5/default" :: Text) .
+                  defField "html5" (stHtml5 st) $
                   metadata
   return (thebody, context)
 
@@ -738,12 +756,17 @@ blockToHtml opts (Div (ident, "section":dclasses, dkvs)
 blockToHtml opts (Div attr@(ident, classes, kvs') bs) = do
   html5 <- gets stHtml5
   slideVariant <- gets stSlideVariant
+  let isCslBibBody = ident == "refs" || "csl-bib-body" `elem` classes
+  when isCslBibBody $ modify $ \st -> st{ stCsl = True
+                                        , stCslEntrySpacing =
+                                           lookup "entry-spacing" kvs' >>=
+                                           safeRead }
+  let isCslBibEntry = "csl-entry" `elem` classes
   let kvs = [(k,v) | (k,v) <- kvs', k /= "width"] ++
             [("style", "width:" <> w <> ";") | "column" `elem` classes,
              ("width", w) <- kvs'] ++
-            [("role", "doc-bibliography") | ident == "refs" && html5] ++
-            [("role", "doc-biblioentry")
-              | "ref-item" `T.isPrefixOf` ident && html5]
+            [("role", "doc-bibliography") | isCslBibBody && html5] ++
+            [("role", "doc-biblioentry") | isCslBibEntry && html5]
   let speakerNotes = "notes" `elem` classes
   -- we don't want incremental output inside speaker notes, see #1394
   let opts' = if | speakerNotes -> opts{ writerIncremental = False }
@@ -760,7 +783,9 @@ blockToHtml opts (Div attr@(ident, classes, kvs') bs) = do
                       -- a newline between the column divs, which throws
                       -- off widths! see #4028
                       mconcat <$> mapM (blockToHtml opts) bs
-                 else blockListToHtml opts' bs
+                 else if isCslBibEntry
+                         then mconcat <$> mapM (cslEntryToHtml opts') bs
+                         else blockListToHtml opts' bs
   let contents' = nl opts >> contents >> nl opts
   let (divtag, classes'') = if html5 && "section" `elem` classes'
                             then (H5.section, filter (/= "section") classes')
@@ -899,96 +924,251 @@ blockToHtml opts (DefinitionList lst) = do
                      return $ mconcat $ nl opts : term' : nl opts :
                                         intersperse (nl opts) defs') lst
   defList opts contents
-blockToHtml opts (Table attr blkCapt specs thead tbody tfoot) = do
-  let (capt, aligns, widths, headers, rows') = toLegacyTable blkCapt specs thead tbody tfoot
-  captionDoc <- if null capt
-                   then return mempty
-                   else do
-                     cs <- inlineListToHtml opts capt
-                     return $ H.caption cs >> nl opts
-  html5 <- gets stHtml5
-  let percent w = show (truncate (100*w) :: Integer) <> "%"
-  let coltags = if all (== 0.0) widths
-                   then mempty
-                   else do
-                     H.colgroup $ do
-                       nl opts
-                       mapM_ (\w -> do
-                            if html5
-                               then H.col ! A.style (toValue $ "width: " <>
-                                                      percent w)
-                               else H.col ! A.width (toValue $ percent w)
-                            nl opts) widths
-                     nl opts
-  head' <- if all null headers
-              then return mempty
-              else do
-                contents <- tableRowToHtml opts aligns 0 headers
-                return $ H.thead (nl opts >> contents) >> nl opts
-  body' <- liftM (\x -> H.tbody (nl opts >> mconcat x)) $
-               zipWithM (tableRowToHtml opts aligns) [1..] rows'
+blockToHtml opts (Table attr caption colspecs thead tbody tfoot) =
+  tableToHtml opts (Ann.toTable attr caption colspecs thead tbody tfoot)
+
+tableToHtml :: PandocMonad m
+            => WriterOptions
+            -> Ann.Table
+            -> StateT WriterState m Html
+tableToHtml opts (Ann.Table attr caption colspecs thead tbodies tfoot) = do
+  captionDoc <- case caption of
+    Caption _ [] -> return mempty
+    Caption _ longCapt -> do
+      cs <- blockListToHtml opts longCapt
+      return $ do
+        H.caption cs
+        nl opts
+  coltags <- colSpecListToHtml opts colspecs
+  head' <- tableHeadToHtml opts thead
+  bodies <- intersperse (nl opts) <$> mapM (tableBodyToHtml opts) tbodies
+  foot' <- tableFootToHtml opts tfoot
   let (ident,classes,kvs) = attr
   -- When widths of columns are < 100%, we need to set width for the whole
   -- table, or some browsers give us skinny columns with lots of space
   -- between:
-  let totalWidth = sum widths
+  let colWidth = \case
+        ColWidth d -> d
+        ColWidthDefault -> 0
+  let totalWidth = sum . map (colWidth . snd) $ colspecs
   let attr' = case lookup "style" kvs of
                 Nothing | totalWidth < 1 && totalWidth > 0
                   -> (ident,classes, ("style","width:" <>
                          T.pack (show (round (totalWidth * 100) :: Int))
                          <> "%;"):kvs)
                 _ -> attr
-  addAttrs opts attr' $ H.table $
-    nl opts >> captionDoc >> coltags >> head' >> body' >> nl opts
+  addAttrs opts attr' $ H.table $ do
+    nl opts
+    captionDoc
+    coltags
+    head'
+    mconcat bodies
+    foot'
+    nl opts
+
+tableBodyToHtml :: PandocMonad m
+                => WriterOptions
+                -> Ann.TableBody
+                -> StateT WriterState m Html
+tableBodyToHtml opts (Ann.TableBody attr _rowHeadCols inthead rows) =
+  addAttrs opts attr . H.tbody =<< do
+    intermediateHead <-
+      if null inthead
+      then return mempty
+      else headerRowsToHtml opts Thead inthead
+    bodyRows <- bodyRowsToHtml opts rows
+    return $ intermediateHead <> bodyRows
+
+tableHeadToHtml :: PandocMonad m
+                => WriterOptions
+                -> Ann.TableHead
+                -> StateT WriterState m Html
+tableHeadToHtml opts (Ann.TableHead attr rows) =
+  tablePartToHtml opts Thead attr rows
+
+tableFootToHtml :: PandocMonad m
+                => WriterOptions
+                -> Ann.TableFoot
+                -> StateT WriterState m Html
+tableFootToHtml opts (Ann.TableFoot attr rows) =
+  tablePartToHtml opts Tfoot attr rows
+
+tablePartToHtml :: PandocMonad m
+                => WriterOptions
+                -> TablePart
+                -> Attr
+                -> [Ann.HeaderRow]
+                -> StateT WriterState m Html
+tablePartToHtml opts tblpart attr rows =
+  if null rows || all isEmptyRow rows
+  then return mempty
+  else do
+    let tag' = case tblpart of
+                 Thead -> H.thead
+                 Tfoot -> H.tfoot
+                 Tbody -> H.tbody -- this would be unexpected
+    contents <- headerRowsToHtml opts tblpart rows
+    tablePartElement <- addAttrs opts attr $ tag' contents
+    return $ do
+      tablePartElement
+      nl opts
+  where
+    isEmptyRow (Ann.HeaderRow _attr _rownum cells) = all isEmptyCell cells
+    isEmptyCell (Ann.Cell _colspecs _colnum cell) =
+      cell == Cell nullAttr AlignDefault (RowSpan 1) (ColSpan 1) []
+
+-- | The part of a table; header, footer, or body.
+data TablePart = Thead | Tfoot | Tbody
+  deriving (Eq)
+
+data CellType = HeaderCell | BodyCell
+
+data TableRow = TableRow TablePart Attr Ann.RowNumber Ann.RowHead Ann.RowBody
+
+headerRowsToHtml :: PandocMonad m
+                 => WriterOptions
+                 -> TablePart
+                 -> [Ann.HeaderRow]
+                 -> StateT WriterState m Html
+headerRowsToHtml opts tablepart =
+  rowListToHtml opts . map toTableRow
+  where
+    toTableRow (Ann.HeaderRow attr rownum rowbody) =
+      TableRow tablepart attr rownum [] rowbody
+
+bodyRowsToHtml :: PandocMonad m
+               => WriterOptions
+               -> [Ann.BodyRow]
+               -> StateT WriterState m Html
+bodyRowsToHtml opts =
+  rowListToHtml opts . zipWith toTableRow [1..]
+  where
+    toTableRow rownum (Ann.BodyRow attr _rownum rowhead rowbody) =
+      TableRow Tbody attr rownum rowhead rowbody
+
+
+rowListToHtml :: PandocMonad m
+              => WriterOptions
+              -> [TableRow]
+              -> StateT WriterState m Html
+rowListToHtml opts rows =
+  (\x -> nl opts *> mconcat x) <$>
+     mapM (tableRowToHtml opts) rows
+
+colSpecListToHtml :: PandocMonad m
+                  => WriterOptions
+                  -> [ColSpec]
+                  -> StateT WriterState m Html
+colSpecListToHtml opts colspecs = do
+  html5 <- gets stHtml5
+  let hasDefaultWidth (_, ColWidthDefault) = True
+      hasDefaultWidth _                    = False
+
+  let percent w = show (truncate (100*w) :: Integer) <> "%"
+
+  let col :: ColWidth -> Html
+      col cw = do
+        H.col ! case cw of
+          ColWidthDefault -> mempty
+          ColWidth w -> if html5
+                        then A.style (toValue $ "width: " <> percent w)
+                        else A.width (toValue $ percent w)
+        nl opts
+
+  return $
+    if all hasDefaultWidth colspecs
+    then mempty
+    else do
+      H.colgroup $ do
+        nl opts
+        mapM_ (col . snd) colspecs
+      nl opts
 
 tableRowToHtml :: PandocMonad m
                => WriterOptions
-               -> [Alignment]
-               -> Int
-               -> [[Block]]
+               -> TableRow
                -> StateT WriterState m Html
-tableRowToHtml opts aligns rownum cols' = do
-  let mkcell = if rownum == 0 then H.th else H.td
-  let rowclass = case rownum of
-                      0                  -> "header"
-                      x | x `rem` 2 == 1 -> "odd"
-                      _                  -> "even"
-  cols'' <- zipWithM
-            (\alignment item -> tableItemToHtml opts mkcell alignment item)
-            aligns cols'
-  return $ (H.tr ! A.class_ rowclass $ nl opts >> mconcat cols'')
-          >> nl opts
+tableRowToHtml opts (TableRow tblpart attr rownum rowhead rowbody) = do
+  let rowclass = A.class_ $ case rownum of
+        Ann.RowNumber x | x `rem` 2 == 1   -> "odd"
+        _               | tblpart /= Thead -> "even"
+        _                                  -> "header"
+  let celltype = case tblpart of
+                   Thead -> HeaderCell
+                   _     -> BodyCell
+  headcells <- mapM (cellToHtml opts HeaderCell) rowhead
+  bodycells <- mapM (cellToHtml opts celltype) rowbody
+  rowHtml <- addAttrs opts attr $ H.tr ! rowclass $ do
+    nl opts
+    mconcat headcells
+    mconcat bodycells
+  return $ do
+    rowHtml
+    nl opts
 
-alignmentToString :: Alignment -> [Char]
-alignmentToString alignment = case alignment of
-                                 AlignLeft    -> "left"
-                                 AlignRight   -> "right"
-                                 AlignCenter  -> "center"
-                                 AlignDefault -> ""
+alignmentToString :: Alignment -> Maybe Text
+alignmentToString = \case
+  AlignLeft    -> Just "left"
+  AlignRight   -> Just "right"
+  AlignCenter  -> Just "center"
+  AlignDefault -> Nothing
 
-tableItemToHtml :: PandocMonad m
+colspanAttrib :: ColSpan -> Attribute
+colspanAttrib = \case
+  ColSpan 1 -> mempty
+  ColSpan n -> A.colspan (toValue n)
+
+rowspanAttrib :: RowSpan -> Attribute
+rowspanAttrib = \case
+  RowSpan 1 -> mempty
+  RowSpan n -> A.rowspan (toValue n)
+
+cellToHtml :: PandocMonad m
+           => WriterOptions
+           -> CellType
+           -> Ann.Cell
+           -> StateT WriterState m Html
+cellToHtml opts celltype (Ann.Cell (colspec :| _) _colNum cell) =
+  let align = fst colspec
+  in tableCellToHtml opts celltype align cell
+
+tableCellToHtml :: PandocMonad m
                 => WriterOptions
-                -> (Html -> Html)
+                -> CellType
                 -> Alignment
-                -> [Block]
+                -> Cell
                 -> StateT WriterState m Html
-tableItemToHtml opts tag' align' item = do
+tableCellToHtml opts ctype colAlign (Cell attr align rowspan colspan item) = do
   contents <- blockListToHtml opts item
   html5 <- gets stHtml5
-  let alignStr = alignmentToString align'
-  let attribs = if html5
-                   then A.style (toValue $ "text-align: " <> alignStr <> ";")
-                   else A.align (toValue alignStr)
-  let tag'' = if null alignStr
-                 then tag'
-                 else tag' ! attribs
-  return $ tag'' contents >> nl opts
+  let tag' = case ctype of
+        BodyCell   -> H.td
+        HeaderCell -> H.th
+  let align' = case align of
+        AlignDefault -> colAlign
+        _            -> align
+  let alignAttribs = case alignmentToString align' of
+        Nothing ->
+          mempty
+        Just alignStr ->
+          if html5
+          then A.style (toValue $ "text-align: " <> alignStr <> ";")
+          else A.align (toValue alignStr)
+  otherAttribs <- attrsToHtml opts attr
+  let attribs = mconcat
+              $ alignAttribs
+              : colspanAttrib colspan
+              : rowspanAttrib rowspan
+              : otherAttribs
+  return $ do
+    tag' ! attribs $ contents
+    nl opts
 
 toListItems :: WriterOptions -> [Html] -> [Html]
 toListItems opts items = map (toListItem opts) items ++ [nl opts]
 
 toListItem :: WriterOptions -> Html -> Html
-toListItem opts item = nl opts >> H.li item
+toListItem opts item = nl opts *> H.li item
 
 blockListToHtml :: PandocMonad m
                 => WriterOptions -> [Block] -> StateT WriterState m Html
@@ -1278,6 +1458,23 @@ blockListToNote opts ref blocks = do
                                        customAttribute "role" "doc-endnote"
                        _          -> noteItem
   return $ nl opts >> noteItem'
+
+cslEntryToHtml :: PandocMonad m
+               => WriterOptions
+               -> Block
+               -> StateT WriterState m Html
+cslEntryToHtml opts (Para xs) = do
+  html5 <- gets stHtml5
+  let inDiv :: Text -> Html -> Html
+      inDiv cls x = ((if html5 then H5.div else H.div)
+                      x ! A.class_ (toValue cls))
+  let go (Span ("",[cls],[]) ils)
+        | cls == "csl-block" || cls == "csl-left-margin" ||
+          cls == "csl-right-inline" || cls == "csl-indent"
+        = inDiv cls <$> inlineListToHtml opts ils
+      go il = inlineToHtml opts il
+  mconcat <$> mapM go xs
+cslEntryToHtml opts x = blockToHtml opts x
 
 isMathEnvironment :: Text -> Bool
 isMathEnvironment s = "\\begin{" `T.isPrefixOf` s &&

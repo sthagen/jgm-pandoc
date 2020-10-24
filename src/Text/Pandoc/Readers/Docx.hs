@@ -91,9 +91,9 @@ readDocx :: PandocMonad m
          => ReaderOptions
          -> B.ByteString
          -> m Pandoc
-readDocx opts bytes = do
+readDocx opts bytes =
   case toArchiveOrFail bytes of
-    Right archive -> do
+    Right archive ->
       case archiveToDocxWithWarnings archive of
         Right (docx, parserWarnings) -> do
           mapM_ (P.report . DocxParserWarning) parserWarnings
@@ -291,9 +291,9 @@ runStyleToTransform rPr' = do
             spanWith ("",[],[("dir","ltr")]) . go rPr{isRTL = Nothing}
         | Just SupScrpt <- rVertAlign rPr =
             superscript . go rPr{rVertAlign = Nothing}
-        | Just SubScrpt <- rVertAlign rPr = do
+        | Just SubScrpt <- rVertAlign rPr =
             subscript . go rPr{rVertAlign = Nothing}
-        | Just "single" <- rUnderline rPr = do
+        | Just "single" <- rUnderline rPr =
             Pandoc.underline . go rPr{rUnderline = Nothing}
         | otherwise = id
   return $ go rPr'
@@ -365,7 +365,7 @@ parPartToInlines' (ChangedRuns (TrackedChange Insertion (ChangeInfo _ author dat
     RejectChanges -> return mempty
     AllChanges    -> do
       ils <- smushInlines <$> mapM runToInlines runs
-      let attr = ("", ["insertion"], [("author", author), ("date", date)])
+      let attr = ("", ["insertion"], addAuthorAndDate author date)
       return $ spanWith attr ils
 parPartToInlines' (ChangedRuns (TrackedChange Deletion (ChangeInfo _ author date)) runs) = do
   opts <- asks docxOptions
@@ -374,7 +374,7 @@ parPartToInlines' (ChangedRuns (TrackedChange Deletion (ChangeInfo _ author date
     RejectChanges -> smushInlines <$> mapM runToInlines runs
     AllChanges    -> do
       ils <- smushInlines <$> mapM runToInlines runs
-      let attr = ("", ["deletion"], [("author", author), ("date", date)])
+      let attr = ("", ["deletion"], addAuthorAndDate author date)
       return $ spanWith attr ils
 parPartToInlines' (CommentStart cmtId author date bodyParts) = do
   opts <- asks docxOptions
@@ -382,7 +382,7 @@ parPartToInlines' (CommentStart cmtId author date bodyParts) = do
     AllChanges -> do
       blks <- smushBlocks <$> mapM bodyPartToBlocks bodyParts
       ils <- blocksToInlinesWarn cmtId blks
-      let attr = ("", ["comment-start"], [("id", cmtId), ("author", author), ("date", date)])
+      let attr = ("", ["comment-start"], ("id", cmtId) : addAuthorAndDate author date)
       return $ spanWith attr ils
     _ -> return mempty
 parPartToInlines' (CommentEnd cmtId) = do
@@ -576,7 +576,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
       then do modify $ \s -> s { docxDropCap = ils' }
               return mempty
       else do modify $ \s -> s { docxDropCap = mempty }
-              let ils'' = (if isNull prevParaIls then mempty
+              let ils'' = (if null prevParaIls then mempty
                           else prevParaIls <> space) <> ils'
                   handleInsertion = do
                     modify $ \s -> s {docxPrevPara = mempty}
@@ -584,7 +584,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
                     return $ transform $ paraOrPlain ils''
               opts <- asks docxOptions
               case (pChange pPr', readerTrackChanges opts) of
-                  _ | isNull ils'', not (isEnabled Ext_empty_paragraphs opts) ->
+                  _ | null ils'', not (isEnabled Ext_empty_paragraphs opts) ->
                     return mempty
                   (Just (TrackedChange Insertion _), AcceptChanges) ->
                       handleInsertion
@@ -593,7 +593,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
                       return mempty
                   (Just (TrackedChange Insertion (ChangeInfo _ cAuthor cDate))
                    , AllChanges) -> do
-                      let attr = ("", ["paragraph-insertion"], [("author", cAuthor), ("date", cDate)])
+                      let attr = ("", ["paragraph-insertion"], addAuthorAndDate cAuthor cDate)
                           insertMark = spanWith attr mempty
                       transform <- parStyleToTransform pPr'
                       return $ transform $
@@ -605,7 +605,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
                       handleInsertion
                   (Just (TrackedChange Deletion (ChangeInfo _ cAuthor cDate))
                    , AllChanges) -> do
-                      let attr = ("", ["paragraph-deletion"], [("author", cAuthor), ("date", cDate)])
+                      let attr = ("", ["paragraph-deletion"], addAuthorAndDate cAuthor cDate)
                           insertMark = spanWith attr mempty
                       transform <- parStyleToTransform pPr'
                       return $ transform $
@@ -658,7 +658,7 @@ bodyPartToBlocks (Tbl cap _ look parts@(r:rs)) = do
       rowLength (Docx.Row c) = length c
 
   let toRow = Pandoc.Row nullAttr . map simpleCell
-      toHeaderRow l = if null l then [] else [toRow l]
+      toHeaderRow l = [toRow l | not (null l)]
 
   -- pad cells.  New Text.Pandoc.Builder will do that for us,
   -- so this is for compatibility while we switch over.
@@ -732,3 +732,8 @@ docxToOutput :: PandocMonad m
 docxToOutput opts (Docx (Document _ body)) =
   let dEnv   = def { docxOptions  = opts} in
    evalDocxContext (bodyToOutput body) dEnv def
+
+addAuthorAndDate :: T.Text -> Maybe T.Text -> [(T.Text, T.Text)]
+addAuthorAndDate author mdate =
+  ("author", author) : maybe [] (\date -> [("date", date)]) mdate
+

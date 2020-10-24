@@ -164,7 +164,7 @@ parseRST = do
                         , stateIdentifiers = mempty }
   -- now parse it for real...
   blocks <- B.toList <$> parseBlocks
-  citations <- (sort . M.toList . stateCitations) <$> getState
+  citations <- sort . M.toList . stateCitations <$> getState
   citationItems <- mapM parseCitation citations
   let refBlock = [Div ("citations",[],[]) $
                  B.toList $ B.definitionList citationItems | not (null citationItems)]
@@ -758,7 +758,12 @@ directive' = do
             children <- case body of
                 "" -> block
                 _  -> parseFromString' parseBlocks  body'
-            return $ B.divWith attrs children
+            return $
+              case B.toList children of
+                [Header lev attrs' ils]
+                  | T.null body -> -- # see #6699
+                     B.headerWith (attrs' <> attrs) lev (B.fromList ils)
+                _ -> B.divWith attrs children
         other     -> do
             pos <- getPosition
             logMessage $ SkippedContent (".. " <> other) pos
@@ -823,7 +828,7 @@ listTableDirective top fields body = do
                            splitTextBy (`elem` (" ," :: String)) specs
         _ -> replicate numOfCols ColWidthDefault
       toRow = Row nullAttr . map B.simpleCell
-      toHeaderRow l = if null l then [] else [toRow l]
+      toHeaderRow l = [toRow l | not (null l)]
   return $ B.table (B.simpleCaption $ B.plain title)
              (zip (replicate numOfCols AlignDefault) widths)
              (TableHead nullAttr $ toHeaderRow headerRow)
@@ -906,7 +911,7 @@ csvTableDirective top fields rawcsv = do
                                $ splitTextBy (`elem` (" ," :: String)) specs
                  _ -> replicate numOfCols ColWidthDefault
          let toRow = Row nullAttr . map B.simpleCell
-             toHeaderRow l = if null l then [] else [toRow l]
+             toHeaderRow l = [toRow l | not (null l)]
          return $ B.table (B.simpleCaption $ B.plain title)
                           (zip (replicate numOfCols AlignDefault) widths)
                           (TableHead nullAttr $ toHeaderRow headerRow)
@@ -1014,7 +1019,7 @@ toChunks = dropWhile T.null
 
 codeblock :: Text -> [Text] -> [(Text, Text)] -> Text -> Text -> Bool
           -> RSTParser m Blocks
-codeblock ident classes fields lang body rmTrailingNewlines = do
+codeblock ident classes fields lang body rmTrailingNewlines =
   return $ B.codeBlockWith attribs $ stripTrailingNewlines' body
     where stripTrailingNewlines' = if rmTrailingNewlines
                                      then stripTrailingNewlines

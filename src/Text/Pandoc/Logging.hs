@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE OverloadedStrings  #-}
 {- |
    Module      : Text.Pandoc.Logging
@@ -51,8 +52,7 @@ instance FromJSON Verbosity where
   parseJSON _      =  mzero
 
 instance FromYAML Verbosity where
-  parseYAML = withStr "Verbosity" $ \t ->
-    case t of
+  parseYAML = withStr "Verbosity" $ \case
          "ERROR"   -> return ERROR
          "WARNING" -> return WARNING
          "INFO"    -> return INFO
@@ -61,7 +61,6 @@ instance FromYAML Verbosity where
 data LogMessage =
     SkippedContent Text.Text SourcePos
   | IgnoredElement Text.Text
-  | CouldNotParseYamlMetadata Text.Text SourcePos
   | DuplicateLinkReference Text.Text SourcePos
   | DuplicateNoteReference Text.Text SourcePos
   | NoteDefinedButNotUsed Text.Text SourcePos
@@ -98,6 +97,7 @@ data LogMessage =
   | CouldNotDeduceFormat [Text.Text] Text.Text
   | RunningFilter FilePath
   | FilterCompleted FilePath Integer
+  | CiteprocWarning Text.Text
   deriving (Show, Eq, Data, Ord, Typeable, Generic)
 
 instance ToJSON LogMessage where
@@ -112,11 +112,6 @@ instance ToJSON LogMessage where
             "column" .= sourceColumn pos]
       IgnoredElement s ->
            ["contents" .= s]
-      CouldNotParseYamlMetadata s pos ->
-           ["message" .= s,
-            "source" .= sourceName pos,
-            "line" .= toJSON (sourceLine pos),
-            "column" .= toJSON (sourceColumn pos)]
       DuplicateLinkReference s pos ->
            ["contents" .= s,
             "source" .= sourceName pos,
@@ -227,6 +222,8 @@ instance ToJSON LogMessage where
       FilterCompleted fp ms ->
            ["path" .= Text.pack fp
            ,"milliseconds" .= Text.pack (show ms) ]
+      CiteprocWarning msg ->
+           ["message" .= msg]
 
 showPos :: SourcePos -> Text.Text
 showPos pos = Text.pack $ sn ++ "line " ++
@@ -248,9 +245,6 @@ showLogMessage msg =
          "Skipped '" <> s <> "' at " <> showPos pos
        IgnoredElement s ->
          "Ignored element " <> s
-       CouldNotParseYamlMetadata s pos ->
-         "Could not parse YAML metadata at " <> showPos pos <>
-           if Text.null s then "" else ": " <> s
        DuplicateLinkReference s pos ->
          "Duplicate link reference '" <> s <> "' at " <> showPos pos
        DuplicateNoteReference s pos ->
@@ -338,13 +332,13 @@ showLogMessage msg =
        RunningFilter fp -> "Running filter " <> Text.pack fp
        FilterCompleted fp ms -> "Completed filter " <> Text.pack fp <>
           " in " <> Text.pack (show ms) <> " ms"
+       CiteprocWarning ms -> "Citeproc: " <> ms
 
 messageVerbosity :: LogMessage -> Verbosity
 messageVerbosity msg =
   case msg of
        SkippedContent{}              -> INFO
        IgnoredElement{}              -> INFO
-       CouldNotParseYamlMetadata{}   -> WARNING
        DuplicateLinkReference{}      -> WARNING
        DuplicateNoteReference{}      -> WARNING
        NoteDefinedButNotUsed{}       -> WARNING
@@ -383,3 +377,4 @@ messageVerbosity msg =
        CouldNotDeduceFormat{}        -> WARNING
        RunningFilter{}               -> INFO
        FilterCompleted{}             -> INFO
+       CiteprocWarning{}             -> WARNING

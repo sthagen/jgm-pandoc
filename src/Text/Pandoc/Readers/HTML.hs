@@ -47,6 +47,7 @@ import Text.Pandoc.Builder (Blocks, HasMeta (..), Inlines, trimInlines)
 import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Class.PandocMonad (PandocMonad (..))
 import Text.Pandoc.CSS (foldOrElse, pickStyleAttrProps)
+import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.Definition
 import Text.Pandoc.Readers.LaTeX (rawLaTeXInline)
 import Text.Pandoc.Readers.LaTeX.Types (Macro)
@@ -65,6 +66,7 @@ import Text.Pandoc.Shared (addMetaField, blocksToInlines', crFilter, escapeURI,
 import Text.Pandoc.Walk
 import Text.Parsec.Error
 import Text.TeXMath (readMathML, writeTeX)
+import Data.ByteString.Base64 (encode)
 
 -- | Convert HTML-formatted string to 'Pandoc' document.
 readHtml :: PandocMonad m
@@ -87,7 +89,7 @@ readHtml opts inp = do
   result <- flip runReaderT def $
        runParserT parseDoc
        (HTMLState def{ stateOptions = opts }
-         [] Nothing Set.empty [] M.empty)
+         [] Nothing Set.empty [] M.empty opts)
        "source" tags
   case result of
     Right doc -> return doc
@@ -110,7 +112,8 @@ data HTMLState =
      baseHref    :: Maybe URI,
      identifiers :: Set.Set Text,
      logMessages :: [LogMessage],
-     macros      :: M.Map Text Macro
+     macros      :: M.Map Text Macro,
+     readerOpts  :: ReaderOptions
   }
 
 data HTMLLocal = HTMLLocal { quoteContext :: QuoteContext
@@ -183,6 +186,7 @@ block = do
             , pDiv
             , pPlain
             , pFigure
+            , pIframe
             , pRawHtmlBlock
             ]
   trace (T.take 60 $ tshow $ B.toList res)
@@ -399,6 +403,18 @@ pDiv = try $ do
                else kvs
   return $ B.divWith (ident, classes', kvs') contents
 
+pIframe :: PandocMonad m => TagParser m Blocks
+pIframe = try $ do
+  guardDisabled Ext_raw_html
+  tag <- pSatisfy (tagOpen (=="iframe") (isJust . lookup "src"))
+  pCloses "iframe" <|> eof
+  url <- canonicalizeUrl $ fromAttrib "src" tag
+  (bs, _) <- openURL url
+  let inp = UTF8.toText bs
+  opts <- readerOpts <$> getState
+  Pandoc _ contents <- readHtml opts inp
+  return $ B.divWith ("",["iframe"],[]) $ B.fromList contents
+
 pRawHtmlBlock :: PandocMonad m => TagParser m Blocks
 pRawHtmlBlock = do
   raw <- pHtmlBlock "script" <|> pHtmlBlock "style" <|> pHtmlBlock "textarea"
@@ -517,7 +533,7 @@ pTable = try $ do
                        else replicate cols (ColWidth (1.0 / fromIntegral cols))
                   else widths'
   let toRow = Row nullAttr . map B.simpleCell
-      toHeaderRow l = if null l then [] else [toRow l]
+      toHeaderRow l = [toRow l | not (null l)]
   return $ B.tableWith attribs
                    (B.simpleCaption $ B.plain caption)
                    (zip aligns widths)
@@ -585,7 +601,7 @@ pBlockQuote = do
 pPlain :: PandocMonad m => TagParser m Blocks
 pPlain = do
   contents <- setInPlain $ trimInlines . mconcat <$> many1 inline
-  if B.isNull contents
+  if null contents
      then return mempty
      else return $ B.plain contents
 
@@ -593,7 +609,7 @@ pPara :: PandocMonad m => TagParser m Blocks
 pPara = do
   contents <- trimInlines <$> pInTags "p" inline
   (do guardDisabled Ext_empty_paragraphs
-      guard (B.isNull contents)
+      guard (null contents)
       return mempty)
     <|> return (B.para contents)
 
@@ -655,6 +671,7 @@ inline = choice
            , pLineBreak
            , pLink
            , pImage
+           , pSvg
            , pBdo
            , pCode
            , pCodeWithClass [("samp","sample"),("var","variable")]
@@ -792,6 +809,19 @@ pImage = do
                    v  -> [(k, v)]
   let kvs = concatMap getAtt ["width", "height", "sizes", "srcset"]
   return $ B.imageWith (uid, cls, kvs) (escapeURI url) title (B.text alt)
+
+pSvg :: PandocMonad m => TagParser m Inlines
+pSvg = do
+  guardDisabled Ext_raw_html
+  -- if raw_html enabled, parse svg tag as raw
+  opent@(TagOpen _ attr') <- pSatisfy (matchTagOpen "svg" [])
+  let (ident,cls,_) = toAttr attr'
+  contents <- many (notFollowedBy (pCloses "svg") >> pAny)
+  closet <- TagClose "svg" <$ (pCloses "svg" <|> eof)
+  let rawText = T.strip $ renderTags' (opent : contents ++ [closet])
+  let svgData = "data:image/svg+xml;base64," <>
+                   UTF8.toText (encode $ UTF8.fromText rawText)
+  return $ B.imageWith (ident,cls,[]) svgData mempty mempty
 
 pCodeWithClass :: PandocMonad m => [(T.Text,Text)] -> TagParser m Inlines
 pCodeWithClass elemToClass = try $ do

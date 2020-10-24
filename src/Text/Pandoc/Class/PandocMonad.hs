@@ -160,7 +160,7 @@ setVerbosity verbosity =
 getVerbosity :: PandocMonad m => m Verbosity
 getVerbosity = getsCommonState stVerbosity
 
--- | Get the accomulated log messages (in temporal order).
+-- | Get the accumulated log messages (in temporal order).
 getLog :: PandocMonad m => m [LogMessage]
 getLog = reverse <$> getsCommonState stLog
 
@@ -433,7 +433,7 @@ getDefaultReferenceDocx = do
                "word/theme/theme1.xml"]
   let toLazy = BL.fromChunks . (:[])
   let pathToEntry path = do
-        epochtime <- (floor . utcTimeToPOSIXSeconds) <$> getCurrentTime
+        epochtime <- floor . utcTimeToPOSIXSeconds <$> getCurrentTime
         contents <- toLazy <$> readDataFile ("docx/" ++ path)
         return $ toEntry path epochtime contents
   datadir <- getUserDataDir
@@ -536,7 +536,7 @@ getDefaultReferencePptx = do
               ]
   let toLazy = BL.fromChunks . (:[])
   let pathToEntry path = do
-        epochtime <- (floor . utcTimeToPOSIXSeconds) <$> getCurrentTime
+        epochtime <- floor . utcTimeToPOSIXSeconds <$> getCurrentTime
         contents <- toLazy <$> readDataFile ("pptx/" ++ path)
         return $ toEntry path epochtime contents
   datadir <- getUserDataDir
@@ -553,7 +553,7 @@ getDefaultReferencePptx = do
                      mapM pathToEntry paths
 
 -- | Read file from user data directory or,
--- if not found there, from Cabal data directory.
+-- if not found there, from the default data files.
 readDataFile :: PandocMonad m => FilePath -> m B.ByteString
 readDataFile fname = do
   datadir <- getUserDataDir
@@ -565,14 +565,14 @@ readDataFile fname = do
             then readFileStrict (userDir </> fname)
             else readDefaultDataFile fname
 
--- | Read file from from Cabal data directory.
+-- | Read file from from the default data files.
 readDefaultDataFile :: PandocMonad m => FilePath -> m B.ByteString
 readDefaultDataFile "reference.docx" =
-  (B.concat . BL.toChunks . fromArchive) <$> getDefaultReferenceDocx
+  B.concat . BL.toChunks . fromArchive <$> getDefaultReferenceDocx
 readDefaultDataFile "reference.pptx" =
-  (B.concat . BL.toChunks . fromArchive) <$> getDefaultReferencePptx
+  B.concat . BL.toChunks . fromArchive <$> getDefaultReferencePptx
 readDefaultDataFile "reference.odt" =
-  (B.concat . BL.toChunks . fromArchive) <$> getDefaultReferenceODT
+  B.concat . BL.toChunks . fromArchive <$> getDefaultReferenceODT
 readDefaultDataFile fname =
 #ifdef EMBED_DATA_FILES
   case lookup (makeCanonical fname) dataFiles of
@@ -600,7 +600,7 @@ makeCanonical = Posix.joinPath . transformPathParts . splitDirectories
         go (_:as) ".." = as
         go as     x    = x : as
 
--- | Trys to run an action on a file: for each directory given, a
+-- | Tries to run an action on a file: for each directory given, a
 -- filepath is created from the given filename, and the action is run on
 -- that filepath. Returns the result of the first successful execution
 -- of the action, or throws a @PandocResourceNotFound@ exception if the

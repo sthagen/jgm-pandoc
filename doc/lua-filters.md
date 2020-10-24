@@ -32,7 +32,7 @@ Starting with version 2.0, pandoc makes it possible to write
 filters in Lua without any external dependencies at all. A Lua
 interpreter (version 5.3) and a Lua library for creating pandoc
 filters is built into the pandoc executable. Pandoc data types
-are marshalled to Lua directly, avoiding the overhead of writing
+are marshaled to Lua directly, avoiding the overhead of writing
 JSON to stdout and reading it from stdin.
 
 Here is an example of a Lua filter that converts strong emphasis
@@ -75,7 +75,7 @@ Python (`smallcaps.py`):
   `pandoc --lua-filter ./smallcaps.lua`   1.03s
 
 As you can see, the Lua filter avoids the substantial overhead
-associated with marshalling to and from JSON over a pipe.
+associated with marshaling to and from JSON over a pipe.
 
 # Lua filter structure
 
@@ -292,7 +292,7 @@ use-case would be to load additional modules, or even to alter
 default modules.
 
 The following snippet is an example of code that might be useful
-when added to `init.lua`. The snippet adds all unicode-aware
+when added to `init.lua`. The snippet adds all Unicode-aware
 functions defined in the [`text` module](#module-text) to the
 default `string` module, prefixed with the string `uc_`.
 
@@ -304,6 +304,29 @@ end
 
 This makes it possible to apply these functions on strings using
 colon syntax (`mystring:uc_upper()`).
+
+# Debugging Lua filters
+
+It is possible to use a debugging interface to halt execution and
+step through a Lua filter line by line as it is run inside Pandoc.
+This is accomplished using the remote-debugging interface of the
+package [`mobdebug`](https://github.com/pkulchenko/MobDebug).
+Although mobdebug can be run from the terminal, it is more useful
+run within the donation-ware Lua editor and IDE,
+[ZeroBrane](https://studio.zerobrane.com/). ZeroBrane offers a
+REPL console and UI to step-through and view all variables and
+state.
+
+If you already have Lua 5.3 installed, you can add
+[`mobdebug`](https://luarocks.org/modules/paulclinger/mobdebug)
+and its dependency
+[`luasocket`](https://luarocks.org/modules/luasocket/luasocket)
+using [`luarocks`](https://luarocks.org), which should then be
+available on the path. ZeroBrane also includes both of these in
+its package, so if you don't want to install Lua separately, you
+should add/modify your `LUA_PATH` and `LUA_CPATH` to include the
+correct locations; [see detailed instructions
+here](https://studio.zerobrane.com/doc-remote-debugging).
 
 # Examples
 
@@ -362,12 +385,14 @@ end
 ## Setting the date in the metadata
 
 This filter sets the date in the document's metadata to the
-current date:
+current date, if a date isn't already set:
 
 ``` lua
 function Meta(m)
-  m.date = os.date("%B %e, %Y")
-  return m
+  if m.date == nil then
+    m.date = os.date("%B %e, %Y")
+    return m
+  end
 end
 ```
 
@@ -1463,6 +1488,22 @@ Fields:
 `tag`, `t`
 :   the literal `Superscript` (string)
 
+### Underline {#type-underline}
+
+Underlined text
+
+Values of this type can be created with the
+[`pandoc.Underline`](#pandoc.underline) constructor.
+
+Fields:
+
+`content`
+:   inline content ([List] of [Inlines])
+
+`tag`, `t`
+:   the literal `Underline` (string)
+
+
 ## Element components
 
 ### Attr {#type-attr}
@@ -1728,7 +1769,7 @@ A list is any Lua table with integer indices. Indices start at
 one, so if `alist = {'value'}` then `alist[1] == 'value'`.
 
 Lists, when part of an element, or when generated during
-marshalling, are made instances of the `pandoc.List` type for
+marshaling, are made instances of the `pandoc.List` type for
 convenience. The `pandoc.List` type is defined in the
 [*pandoc.List*](#module-pandoc.list) module. See there for
 available methods.
@@ -1741,6 +1782,36 @@ table into a List.
 
 A pandoc log message. Objects have no fields, but can be
 converted to a string via `tostring`.
+
+## SimpleTable {#type-simpletable}
+
+A simple table is a table structure which resembles the old (pre
+pandoc 2.10) Table type. Bi-directional conversion from and to
+[Tables](#type-table) is possible with the
+[`pandoc.utils.to_simple_table`](#pandoc.utils.to_simple_table)
+and
+[`pandoc.utils.from_simple_table`](#pandoc.utils.from_simple_table)
+function, respectively. Instances of this type can also be created
+directly with the [`pandoc.SimpleTable`](#pandoc.simpletable)
+constructor.
+
+Fields:
+
+`caption`:
+:   [List] of [Inlines]
+
+`aligns`:
+:   column alignments ([List] of [Alignments](#type-alignment))
+
+`widths`:
+:   column widths; a  ([List] of numbers)
+
+`headers`:
+:   table header row ([List] of lists of [Blocks])
+
+`rows`:
+:   table rows ([List] of rows, where a row is a list of lists of
+    [Blocks])
 
 ## Version {#type-version}
 
@@ -1814,6 +1885,8 @@ Usage:
 [Pandoc]: #type-pandoc
 [Para]: #type-para
 [Rows]: #type-row
+[SimpleTable]: #type-simpletable
+[Table]: #type-table
 [TableBody]: #type-tablebody
 [TableFoot]: #type-tablefoot
 [TableHead]: #type-tablehead
@@ -2181,7 +2254,7 @@ format, and functions to filter and modify a subtree.
 
 [`Emph (content)`]{#pandoc.emph}
 
-:   Creates an inline element representing emphasised text.
+:   Creates an inline element representing emphasized text.
 
     Parameters:
 
@@ -2384,7 +2457,7 @@ format, and functions to filter and modify a subtree.
 
 [`Strikeout (content)`]{#pandoc.strikeout}
 
-:   Creates text which is striked out.
+:   Creates text which is struck out.
 
     Parameters:
 
@@ -2426,6 +2499,17 @@ format, and functions to filter and modify a subtree.
     :   inline content
 
     Returns: [Superscript](#type-superscript) object
+
+[`Underline (content)`]{#pandoc.underline}
+
+:   Creates an Underline inline element
+
+    Parameters:
+
+    `content`:
+    :   inline content
+
+    Returns: [Underline](#type-underline) object
 
 ## Element components
 
@@ -2488,6 +2572,51 @@ format, and functions to filter and modify a subtree.
     :   delimiter of list numbers
 
     Returns: [ListAttributes](#type-listattributes) object
+
+## Legacy types
+
+[`SimpleTable (caption, aligns, widths, headers, rows)`]{#pandoc.simpletable}
+
+:   Creates a simple table resembling the old (pre pandoc 2.10)
+    table type.
+
+    Parameters:
+
+    `caption`:
+    :   [List] of [Inlines]
+
+    `aligns`:
+    :   column alignments ([List] of [Alignments](#type-alignment))
+
+    `widths`:
+    :   column widths; a  ([List] of numbers)
+
+    `headers`:
+    :   table header row ([List] of lists of [Blocks])
+
+    `rows`:
+    :   table rows ([List] of rows, where a row is a list of lists
+        of [Blocks])
+
+    Returns: [SimpleTable] object
+
+    Usage:
+
+        local caption = "Overview"
+        local aligns = {pandoc.AlignDefault, pandoc.AlignDefault}
+        local widths = {0, 0} -- let pandoc determine col widths
+        local headers = {"Language", "Typing"}
+        local rows = {
+          {{pandoc.Plain "Haskell"}, {pandoc.Plain "static"}},
+          {{pandoc.Plain "Lua"}, {pandoc.Plain "Dynamic"}},
+        }
+        simple_table = pandoc.SimpleTable(
+          caption,
+          aligns,
+          widths,
+          headers,
+          rows
+        )
 
 ## Constants
 
@@ -2613,9 +2742,21 @@ format, and functions to filter and modify a subtree.
 Runs command with arguments, passing it some input, and returns
 the output.
 
+Parameters:
+
+`command`
+:   program to run; the executable will be resolved using default
+    system methods (string).
+
+`args`
+:   list of arguments to pass to the program (list of strings).
+
+`input`
+:   data which is piped into the program via stdin (string).
+
 Returns:
 
--   Output of command.
+-   Output of command, i.e. data printed to stdout (string)
 
 Raises:
 
@@ -2751,11 +2892,31 @@ Returns:
 
 -   Whether the two objects represent the same element (boolean)
 
+### from\_simple\_table {#pandoc.utils.from_simple_table}
+
+`from_simple_table (table)`
+
+Creates a [Table] block element from a [SimpleTable]. This is
+useful for dealing with legacy code which was written for pandoc
+versions older than 2.10.
+
+Returns:
+
+-   table block element ([Table])
+
+Usage:
+
+    local simple = pandoc.SimpleTable(table)
+    -- modify, using pre pandoc 2.10 methods
+    simple.caption = pandoc.SmallCaps(simple.caption)
+    -- create normal table block again
+    table = pandoc.utils.from_simple_table(simple)
+
 ### make\_sections {#pandoc.utils.make_sections}
 
 `make_sections (number_sections, base_level, blocks)`
 
-Converst list of [Blocks](#type-block) into sections.
+Converts list of [Blocks](#type-block) into sections.
 `Div`s will be created beginning at each `Header`
 and containing following content until the next `Header`
 of comparable level.  If `number_sections` is true,
@@ -2869,6 +3030,24 @@ Usage:
     local to_roman_numeral = pandoc.utils.to_roman_numeral
     local pandoc_birth_year = to_roman_numeral(2006)
     -- pandoc_birth_year == 'MMVI'
+
+### to\_simple\_table {#pandoc.utils.to_simple_table}
+
+`to_simple_table (table)`
+
+Creates a [SimpleTable] out of a [Table] block.
+
+Returns:
+
+-   a simple table object ([SimpleTable])
+
+Usage:
+
+    local simple = pandoc.utils.to_simple_table(table)
+    -- modify, using pre pandoc 2.10 methods
+    simple.caption = pandoc.SmallCaps(simple.caption)
+    -- create normal table block again
+    table = pandoc.utils.from_simple_table(simple)
 
 # Module pandoc.mediabag
 

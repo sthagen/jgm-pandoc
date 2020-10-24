@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.Readers.Metadata
    Copyright   : Copyright (C) 2006-2020 John MacFarlane
@@ -10,12 +11,16 @@
 
 Parse YAML/JSON metadata to 'Pandoc' 'Meta'.
 -}
-module Text.Pandoc.Readers.Metadata ( yamlBsToMeta, yamlMap ) where
+module Text.Pandoc.Readers.Metadata (
+  yamlBsToMeta,
+  yamlBsToRefs,
+  yamlMap ) where
 
 import Control.Monad
 import Control.Monad.Except (throwError)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map as M
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.YAML as YAML
@@ -23,7 +28,6 @@ import qualified Data.YAML.Event as YE
 import Text.Pandoc.Class.PandocMonad (PandocMonad (..))
 import Text.Pandoc.Definition
 import Text.Pandoc.Error
-import Text.Pandoc.Logging
 import Text.Pandoc.Parsing hiding (tableWith)
 import Text.Pandoc.Shared
 
@@ -32,28 +36,73 @@ yamlBsToMeta :: PandocMonad m
              -> BL.ByteString
              -> ParserT Text ParserState m (F Meta)
 yamlBsToMeta pMetaValue bstr = do
-  pos <- getPosition
   case YAML.decodeNode' YAML.failsafeSchemaResolver False False bstr of
        Right (YAML.Doc (YAML.Mapping _ _ o):_)
                 -> fmap Meta <$> yamlMap pMetaValue o
        Right [] -> return . return $ mempty
        Right [YAML.Doc (YAML.Scalar _ YAML.SNull)]
                 -> return . return $ mempty
-       Right _  -> do logMessage $ CouldNotParseYamlMetadata "not an object"
-                                   pos
-                      return . return $ mempty
-       Left (_pos, err')
-                -> do logMessage $ CouldNotParseYamlMetadata
-                                   (T.pack err') pos
-                      return . return $ mempty
+       Right _  -> Prelude.fail "expected YAML object"
+       Left (yamlpos, err')
+                -> do pos <- getPosition
+                      setPosition $ incSourceLine
+                            (setSourceColumn pos (YE.posColumn yamlpos))
+                            (YE.posLine yamlpos - 1)
+                      Prelude.fail err'
 
-nodeToKey :: PandocMonad m
-          => YAML.Node YE.Pos
-          -> m Text
-nodeToKey (YAML.Scalar _ (YAML.SStr t))       = return t
-nodeToKey (YAML.Scalar _ (YAML.SUnknown _ t)) = return t
-nodeToKey _  = throwError $ PandocParseError
-                              "Non-string key in YAML mapping"
+fakePos :: YAML.Pos
+fakePos = YAML.Pos (-1) (-1) 1 0
+
+lookupYAML :: Text
+           -> YAML.Node YE.Pos
+           -> Maybe (YAML.Node YE.Pos)
+lookupYAML t (YAML.Mapping _ _ m) =
+  M.lookup (YAML.Scalar fakePos (YAML.SUnknown YE.untagged t)) m
+    `mplus`
+    M.lookup (YAML.Scalar fakePos (YAML.SStr t)) m
+lookupYAML _ _ = Nothing
+
+-- Returns filtered list of references.
+yamlBsToRefs :: PandocMonad m
+             => ParserT Text ParserState m (F MetaValue)
+             -> (Text -> Bool) -- ^ Filter for id
+             -> BL.ByteString
+             -> ParserT Text ParserState m (F [MetaValue])
+yamlBsToRefs pMetaValue idpred bstr =
+  case YAML.decodeNode' YAML.failsafeSchemaResolver False False bstr of
+       Right (YAML.Doc o@(YAML.Mapping _ _ _):_)
+                -> case lookupYAML "references" o of
+                     Just (YAML.Sequence _ _ ns) -> do
+                       let g n = case lookupYAML "id" n of
+                                    Just n' ->
+                                      case nodeToKey n' of
+                                        Nothing -> False
+                                        Just t -> idpred t ||
+                                          case lookupYAML "other-ids" n of
+                                            Just (YAML.Sequence _ _ ns') ->
+                                              let ts' = mapMaybe nodeToKey ns'
+                                               in any idpred ts'
+                                            _ -> False
+                                    Nothing   -> False
+                       sequence <$>
+                         mapM (yamlToMetaValue pMetaValue) (filter g ns)
+                     Just _ ->
+                       Prelude.fail "expecting sequence in 'references' field"
+                     Nothing ->
+                       Prelude.fail "expecting 'references' field"
+
+       Right [] -> return . return $ mempty
+       Right [YAML.Doc (YAML.Scalar _ YAML.SNull)]
+                -> return . return $ mempty
+       Right _  -> Prelude.fail "expecting YAML object"
+       Left (_pos, err')
+                -> Prelude.fail err'
+
+
+nodeToKey :: YAML.Node YE.Pos -> Maybe Text
+nodeToKey (YAML.Scalar _ (YAML.SStr t))       = Just t
+nodeToKey (YAML.Scalar _ (YAML.SUnknown _ t)) = Just t
+nodeToKey _                                   = Nothing
 
 normalizeMetaValue :: PandocMonad m
                    => ParserT Text ParserState m (F MetaValue)
@@ -106,7 +155,9 @@ yamlMap :: PandocMonad m
         -> ParserT Text ParserState m (F (M.Map Text MetaValue))
 yamlMap pMetaValue o = do
     kvs <- forM (M.toList o) $ \(key, v) -> do
-             k <- nodeToKey key
+             k <- maybe (throwError $ PandocParseError
+                            "Non-string key in YAML mapping")
+                        return $ nodeToKey key
              return (k, v)
     let kvs' = filter (not . ignorable . fst) kvs
     fmap M.fromList . sequence <$> mapM toMeta kvs'

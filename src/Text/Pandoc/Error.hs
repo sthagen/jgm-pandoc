@@ -10,8 +10,8 @@
    Stability   : alpha
    Portability : portable
 
-This module provides a standard way to deal with possible errors encounted
-during parsing.
+This module provides a standard way to deal with possible errors
+encountered during parsing.
 
 -}
 module Text.Pandoc.Error (
@@ -31,6 +31,8 @@ import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Printf (printf)
 import Text.Parsec.Error
 import Text.Parsec.Pos hiding (Line)
+import Text.Pandoc.Shared (tshow)
+import Citeproc (CiteprocError, prettyCiteprocError)
 
 type Input = Text
 
@@ -59,6 +61,7 @@ data PandocError = PandocIOError Text IOError
                  | PandocUnknownReaderError Text
                  | PandocUnknownWriterError Text
                  | PandocUnsupportedExtensionError Text Text
+                 | PandocCiteprocError CiteprocError
                  deriving (Show, Typeable, Generic)
 
 instance Exception PandocError
@@ -138,12 +141,11 @@ handleError (Left e) =
     PandocUnsupportedExtensionError ext f -> err 23 $
       "The extension " <> ext <> " is not supported " <>
       "for " <> f
+    PandocCiteprocError e' -> err 24 $
+      prettyCiteprocError e'
 
 err :: Int -> Text -> IO a
 err exitCode msg = do
   UTF8.hPutStrLn stderr (T.unpack msg)
   exitWith $ ExitFailure exitCode
   return undefined
-
-tshow :: Show a => a -> Text
-tshow = T.pack . show
