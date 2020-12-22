@@ -65,6 +65,7 @@ data ReaderOptions = ReaderOptions{
        , readerDefaultImageExtension :: Text -- ^ Default extension for images
        , readerTrackChanges          :: TrackChanges -- ^ Track changes setting for docx
        , readerStripComments         :: Bool -- ^ Strip HTML comments instead of parsing as raw HTML
+                                             -- (only implemented in commonmark)
 } deriving (Show, Read, Data, Typeable, Generic)
 
 instance HasSyntaxExtensions ReaderOptions where
@@ -289,7 +290,7 @@ instance Default WriterOptions where
                       , writerTopLevelDivision = TopLevelDefault
                       , writerListings         = False
                       , writerHighlightStyle   = Just pygments
-                      , writerSetextHeaders    = True
+                      , writerSetextHeaders    = False
                       , writerEpubSubdirectory = "EPUB"
                       , writerEpubMetadata     = Nothing
                       , writerEpubFonts        = []
@@ -314,6 +315,7 @@ defaultMathJaxURL = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.j
 defaultKaTeXURL :: Text
 defaultKaTeXURL = "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/"
 
+-- Update documentation in doc/filters.md if this is changed.
 $(deriveJSON defaultOptions ''ReaderOptions)
 
 $(deriveJSON defaultOptions{
@@ -337,6 +339,7 @@ $(deriveJSON defaultOptions{ constructorTagModifier =
 
 $(deriveJSON defaultOptions ''HTMLSlideVariant)
 
+-- Update documentation in doc/filters.md if this is changed.
 $(deriveJSON defaultOptions{ constructorTagModifier =
                                camelCaseStrToHyphenated
                            } ''TrackChanges)

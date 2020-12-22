@@ -174,6 +174,8 @@ valToYaml :: Val Text -> Doc Text
 valToYaml (ListVal xs) =
   vcat $ map (\v -> hang 2 "- " (valToYaml v)) xs
 valToYaml (MapVal c) = contextToYaml c
+valToYaml (BoolVal True) = "true"
+valToYaml (BoolVal False) = "false"
 valToYaml (SimpleVal x)
   | isEmpty x = empty
   | otherwise =
@@ -514,6 +516,7 @@ blockToMarkdown' opts b@(RawBlock f str) = do
 blockToMarkdown' opts HorizontalRule =
   return $ blankline <> literal (T.replicate (writerColumns opts) "-") <> blankline
 blockToMarkdown' opts (Header level attr inlines) = do
+
   -- first, if we're putting references at the end of a section, we
   -- put them here.
   blkLevel <- asks envBlockLevel
@@ -543,8 +546,12 @@ blockToMarkdown' opts (Header level attr inlines) = do
                       isEnabled Ext_gutenberg opts
                       then capitalize inlines
                       else inlines
+
   let setext = writerSetextHeaders opts
-      hdr = nowrap $ case level of
+  when (not setext && isEnabled Ext_literate_haskell opts) $
+    report $ ATXHeadingInLHS level (render Nothing contents)
+
+  let hdr = nowrap $ case level of
             1 | variant == PlainText ->
                 if isEnabled Ext_gutenberg opts
                    then blanklines 3 <> contents <> blanklines 2
@@ -1053,7 +1060,12 @@ inlineToMarkdown opts (Span ("",["emoji"],kvs) [Str s]) =
 inlineToMarkdown opts (Span attrs ils) = do
   variant <- asks envVariant
   contents <- inlineListToMarkdown opts ils
-  return $ case variant of
+  return $ case attrs of
+             (_,["csl-block"],_) -> (cr <>)
+             (_,["csl-left-margin"],_) -> (cr <>)
+             (_,["csl-indent"],_) -> (cr <>)
+             _ -> id
+         $ case variant of
                 PlainText -> contents
                 _     | attrs == nullAttr -> contents
                       | isEnabled Ext_bracketed_spans opts ->

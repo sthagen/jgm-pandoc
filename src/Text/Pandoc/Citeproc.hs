@@ -1,18 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
 module Text.Pandoc.Citeproc
   ( processCitations )
 where
 
-import Citeproc as Citeproc
+import Citeproc
 import Citeproc.Pandoc ()
 import Text.Pandoc.Citeproc.Locator (parseLocator)
 import Text.Pandoc.Citeproc.CslJson (cslJsonToReferences)
@@ -20,6 +16,7 @@ import Text.Pandoc.Citeproc.BibTeX (readBibtexString, Variant(..))
 import Text.Pandoc.Citeproc.MetaValue (metaValueToReference, metaValueToText)
 import Text.Pandoc.Readers.Markdown (yamlToRefs)
 import Text.Pandoc.Class (setResourcePath, getResourcePath, getUserDataDir)
+import qualified Text.Pandoc.BCP47 as BCP47
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as L
 import Text.Pandoc.Definition as Pandoc
@@ -28,14 +25,14 @@ import Text.Pandoc.Builder as B
 import Text.Pandoc (PandocMonad(..), PandocError(..),
                     readDataFile, ReaderOptions(..), pandocExtensions,
                     report, LogMessage(..), fetchItem)
-import Text.Pandoc.Shared (stringify, ordNub, blocksToInlines)
+import Text.Pandoc.Shared (stringify, ordNub, blocksToInlines, tshow)
 import qualified Text.Pandoc.UTF8 as UTF8
 import Data.Aeson (eitherDecode)
 import Data.Default
 import Data.Ord ()
 import qualified Data.Map as M
 import qualified Data.Set as Set
-import Data.Char (isPunctuation)
+import Data.Char (isPunctuation, isUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Control.Monad.State
@@ -60,7 +57,7 @@ processCitations (Pandoc meta bs) = do
         setResourcePath $ oldRp ++ maybe []
                                    (\u -> [u <> "/csl",
                                            u <> "/csl/dependent"]) mbUdd
-        let fp' = if T.any (=='.') fp
+        let fp' = if T.any (=='.') fp || "data:" `T.isPrefixOf` fp
                      then fp
                      else fp <> defaultExtension
         (result, _) <- fetchItem fp'
@@ -90,14 +87,14 @@ processCitations (Pandoc meta bs) = do
         UTF8.toText <$>
           catchError (getFile ".csl" basename) (\_ -> fst <$> fetchItem url)
 
-  -- TODO check .csl directory if not found
   styleRes <- Citeproc.parseStyle getParentStyle cslContents
   style <-
     case styleRes of
        Left err    -> throwError $ PandocAppError $ prettyCiteprocError err
        Right style -> return style{ styleAbbreviations = mbAbbrevs }
-  let mblang = parseLang <$>
-         ((lookupMeta "lang" meta <|> lookupMeta "locale" meta) >>= metaValueToText)
+  mblang <- maybe (return Nothing) bcp47LangToIETF
+               ((lookupMeta "lang" meta <|> lookupMeta "locale" meta) >>=
+                 metaValueToText)
   let locale = Citeproc.mergeLocales mblang style
   let getCiteId (Cite cs _) = Set.fromList $ map B.citationId cs
       getCiteId _ = mempty
@@ -107,22 +104,23 @@ processCitations (Pandoc meta bs) = do
   let citeIds = query getCiteId (Pandoc meta bs)
   let idpred = if "*" `Set.member` nocites
                   then const True
-                  else (\c -> c `Set.member` citeIds ||
-                              c `Set.member` nocites)
-  refs <- map (linkifyVariables . legacyDateRanges) <$>
-          case lookupMeta "references" meta of
-            Just (MetaList rs) -> return $ mapMaybe metaValueToReference rs
-            _                  ->
-              case lookupMeta "bibliography" meta of
-                 Just (MetaList xs) ->
-                   mconcat <$>
-                     mapM (getRefsFromBib locale idpred)
-                       (mapMaybe metaValueToText xs)
-                 Just x ->
-                   case metaValueToText x of
-                     Just fp -> getRefsFromBib locale idpred fp
-                     Nothing -> return []
-                 Nothing -> return []
+                  else (`Set.member` citeIds)
+  let inlineRefs = case lookupMeta "references" meta of
+                    Just (MetaList rs) -> mapMaybe metaValueToReference rs
+                    _                  -> []
+  externalRefs <- case lookupMeta "bibliography" meta of
+                    Just (MetaList xs) ->
+                      mconcat <$>
+                        mapM (getRefsFromBib locale idpred)
+                          (mapMaybe metaValueToText xs)
+                    Just x ->
+                      case metaValueToText x of
+                        Just fp -> getRefsFromBib locale idpred fp
+                        Nothing -> return []
+                    Nothing -> return []
+  let refs = map (linkifyVariables . legacyDateRanges)
+                 (externalRefs ++ inlineRefs)
+                 -- note that inlineRefs can override externalRefs
   let otherIdsMap = foldr (\ref m ->
                              case T.words . extractText <$>
                                   M.lookup "other-ids"
@@ -164,8 +162,10 @@ processCitations (Pandoc meta bs) = do
                     _ -> id
 
   let Pandoc meta'' bs' =
-         maybe id (setMeta "nocite") metanocites $
-         walk (fixQuotes .  mvPunct moveNotes locale) $ walk deNote $
+         maybe id (setMeta "nocite") metanocites .
+         walk (map capitalizeNoteCitation .
+                fixQuotes .  mvPunct moveNotes locale) .
+         walk deNote .
          evalState (walkM insertResolvedCitations $ Pandoc meta' bs)
          $ cits
   return $ Pandoc meta''
@@ -191,37 +191,38 @@ insertSpace ils =
 
 getRefsFromBib :: PandocMonad m
                => Locale -> (Text -> Bool) -> Text -> m [Reference Inlines]
-getRefsFromBib locale idpred t = do
-  let fp = T.unpack t
-  raw <- readFileStrict fp
-  case formatFromExtension fp of
+getRefsFromBib locale idpred fp = do
+  (raw, _) <- fetchItem fp
+  case formatFromExtension (T.unpack fp) of
     Just f -> getRefs locale f idpred (Just fp) raw
     Nothing -> throwError $ PandocAppError $
-                 "Could not determine bibliography format for " <> t
+                 "Could not determine bibliography format for " <> fp
 
 getRefs :: PandocMonad m
         => Locale
         -> BibFormat
         -> (Text -> Bool)
-        -> Maybe FilePath
+        -> Maybe Text
         -> ByteString
         -> m [Reference Inlines]
-getRefs locale format idpred mbfp raw =
+getRefs locale format idpred mbfp raw = do
+  let err' = throwError .
+             PandocBibliographyError (fromMaybe mempty mbfp)
   case format of
     Format_bibtex ->
-      either (throwError . PandocAppError . T.pack . show) return .
+      either (err' . tshow) return .
         readBibtexString Bibtex locale idpred . UTF8.toText $ raw
     Format_biblatex ->
-      either (throwError . PandocAppError . T.pack . show) return .
+      either (err' . tshow) return .
         readBibtexString Biblatex locale idpred . UTF8.toText $ raw
     Format_json ->
-      either (throwError . PandocAppError . T.pack)
+      either (err' . T.pack)
              (return . filter (idpred . unItemId . referenceId)) .
         cslJsonToReferences $ raw
     Format_yaml -> do
       rs <- yamlToRefs idpred
               def{ readerExtensions = pandocExtensions }
-              mbfp
+              (T.unpack <$> mbfp)
               (L.fromStrict raw)
       return $ mapMaybe metaValueToReference rs
 
@@ -514,15 +515,42 @@ extractText (FancyVal x) = toText x
 extractText (NumVal n)   = T.pack (show n)
 extractText _            = mempty
 
-deNote :: Inline -> Inline
-deNote (Note bs) = Note $ walk go bs
+capitalizeNoteCitation :: Inline -> Inline
+capitalizeNoteCitation (Cite cs [Note [Para ils]]) =
+  Cite cs
+  [Note [Para $ B.toList $ addTextCase Nothing CapitalizeFirst
+              $ B.fromList ils]]
+capitalizeNoteCitation x = x
+
+deNote :: [Inline] -> [Inline]
+deNote [] = []
+deNote (Note bs:rest) =
+  Note (walk go bs) : deNote rest
  where
-  go (Note bs')
-       = Span ("",[],[]) (Space : Str "(" :
-                          (removeFinalPeriod
-                            (blocksToInlines bs')) ++ [Str ")"])
-  go x = x
-deNote x = x
+  go [] = []
+  go (Cite (c:cs) ils : zs)
+    | citationMode c == AuthorInText
+      = Cite (c:cs) (concatMap (noteAfterComma (needsPeriod zs)) ils) : go zs
+    | otherwise
+      = Cite (c:cs) (concatMap noteInParens ils) : go zs
+  go (x:xs) = x : go xs
+  needsPeriod [] = True
+  needsPeriod (Str t:_) = case T.uncons t of
+                            Nothing    -> False
+                            Just (c,_) -> isUpper c
+  needsPeriod (Space:zs) = needsPeriod zs
+  needsPeriod _ = False
+  noteInParens (Note bs')
+       = Space : Str "(" :
+         removeFinalPeriod (blocksToInlines bs') ++ [Str ")"]
+  noteInParens x = [x]
+  noteAfterComma needsPer (Note bs')
+       = Str "," : Space :
+         (if needsPer
+             then id
+             else removeFinalPeriod) (blocksToInlines bs')
+  noteAfterComma _ x = [x]
+deNote (x:xs) = x : deNote xs
 
 -- Note: we can't use dropTextWhileEnd indiscriminately,
 -- because this would remove the final period on abbreviations like Ibid.
@@ -532,6 +560,38 @@ deNote x = x
 removeFinalPeriod :: [Inline] -> [Inline]
 removeFinalPeriod ils =
   case lastMay ils of
+    Just (Span attr ils')
+      -> initSafe ils ++ [Span attr (removeFinalPeriod ils')]
+    Just (Emph ils')
+      -> initSafe ils ++ [Emph (removeFinalPeriod ils')]
+    Just (Strong ils')
+      -> initSafe ils ++ [Strong (removeFinalPeriod ils')]
+    Just (SmallCaps ils')
+      -> initSafe ils ++ [SmallCaps (removeFinalPeriod ils')]
     Just (Str t)
       | T.takeEnd 1 t == "." -> initSafe ils ++ [Str (T.dropEnd 1 t)]
+      | isRightQuote (T.takeEnd 1 t)
+        -> removeFinalPeriod
+             (initSafe ils ++ [Str tInit | not (T.null tInit)]) ++ [Str tEnd]
+             where
+               tEnd  = T.takeEnd 1 t
+               tInit = T.dropEnd 1 t
     _ -> ils
+ where
+  isRightQuote "\8221" = True
+  isRightQuote "\8217" = True
+  isRightQuote "\187"  = True
+  isRightQuote _       = False
+
+bcp47LangToIETF :: PandocMonad m => Text -> m (Maybe Lang)
+bcp47LangToIETF bcplang =
+  case BCP47.parseBCP47 bcplang of
+    Left _ -> do
+      report $ InvalidLang bcplang
+      return Nothing
+    Right lang ->
+      return $ Just
+             $ Lang (BCP47.langLanguage lang)
+                    (if T.null (BCP47.langRegion lang)
+                        then Nothing
+                        else Just (BCP47.langRegion lang))

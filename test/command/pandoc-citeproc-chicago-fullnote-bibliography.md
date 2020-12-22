@@ -49,8 +49,7 @@ References {#references .unnumbered}
     [-@item1], and now Doe with a locator [-@item2 p. 44].
 ^D
 [WARNING] Citeproc: citation nonexistent not found
-Pandoc with citeproc-hs
-=======================
+# Pandoc with citeproc-hs
 
 [^1]
 
@@ -80,8 +79,7 @@ Now some modifiers.[^13]
 
 With some markup.[^14]
 
-References {#references .unnumbered}
-==========
+# References {#references .unnumbered}
 
 ::: {#refs .references .csl-bib-body .hanging-indent}
 ::: {#ref-item2 .csl-entry}
@@ -114,7 +112,7 @@ Sam Smith. Oxford: Oxford University Press, 2007.
     Roe, "Why Water Is Wet," in *Third Book*, ed. Sam Smith (Oxford:
     Oxford University Press, 2007)](#ref-пункт3).
 
-[^7]: [Doe and Roe](#ref-пункт3) (["Why Water Is Wet," 12](#ref-пункт3))
+[^7]: [Doe and Roe](#ref-пункт3), ["Why Water Is Wet," 12](#ref-пункт3)
     and a citation without locators ([Doe and Roe, "Why Water Is
     Wet"](#ref-пункт3)).
 
@@ -123,7 +121,7 @@ Sam Smith. Oxford: Oxford University Press, 2007.
 
 [^9]: See [Doe, *First Book*, 2005, 34--35](#ref-item1).
 
-[^10]: Some citations (See [Doe, chap. 3](#ref-item1); [Doe and Roe,
+[^10]: Some citations (see [Doe, chap. 3](#ref-item1); [Doe and Roe,
     "Why Water Is Wet"](#ref-пункт3); [Doe, "Article,"
     2006](#ref-item2)).
 

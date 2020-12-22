@@ -22,10 +22,9 @@ Title
 
 Some text.[^1]
 
-[^1]: Comment regarding text, supported by citation [@OCLC_i1099]
+[^1]: Comment regarding text, supported by citation [@OCLC_i1099].
 ^D
-Title
-=====
+# Title
 
 Some text.[^1]
 
@@ -36,5 +35,5 @@ OCLC. "WorldCat." Accessed September 19, 2014.
 :::
 :::
 
-[^1]: Comment regarding text, supported by citation (OCLC, "WorldCat.")
+[^1]: Comment regarding text, supported by citation (OCLC, "WorldCat").
 ```

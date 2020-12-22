@@ -782,8 +782,8 @@ parseBlock (Elem e) =
         "para"  -> parseMixed para (elContent e)
         "formalpara" -> do
            tit <- case filterChild (named "title") e of
-                        Just t  -> para . strong . (<> str ".") <$>
-                                     getInlines t
+                        Just t  -> divWith ("",["formalpara-title"],[]) .
+                                   para .  strong <$> getInlines t
                         Nothing -> return mempty
            (tit <>) <$> parseMixed para (elContent e)
         "simpara"  -> parseMixed para (elContent e)
@@ -794,11 +794,10 @@ parseBlock (Elem e) =
         "titleabbrev" -> skip
         "authorinitials" -> skip
         "bibliography" -> sect 0
-        "bibliodiv" -> do
-           tit <- case filterChild (named "title") e of
-                    Just _  -> sect 1
-                    Nothing -> return mempty
-           (tit <>) <$> parseMixed para (elContent e)
+        "bibliodiv" ->
+          case filterChild (named "title") e of
+            Just _  -> sect 1
+            Nothing -> return mempty
         "biblioentry" -> parseMixed para (elContent e)
         "bibliomisc" -> parseMixed para (elContent e)
         "bibliomixed" -> parseMixed para (elContent e)
@@ -961,12 +960,22 @@ parseBlock (Elem e) =
                       let aligns = case colspecs of
                                      [] -> replicate numrows AlignDefault
                                      cs -> map toAlignment cs
+                      let parseWidth s = safeRead (T.filter (\x -> (x >= '0' && x <= '9')
+                                                                   || x == '.') s)
+                      let textWidth = case filterChild (named "?dbfo") e of
+                                        Just d  -> case attrValue "table-width" d of
+                                                     "" -> 1.0
+                                                     w  -> fromMaybe 100.0 (parseWidth w) / 100.0
+                                        Nothing -> 1.0
                       let widths = case colspecs of
                                      [] -> replicate numrows ColWidthDefault
                                      cs -> let ws = map toWidth cs
                                            in case sequence ws of
-                                                Just ws' -> let tot = sum ws'
-                                                            in  ColWidth . (/ tot) <$> ws'
+                                                Just ws' -> let colTot = sum ws'
+                                                                scale
+                                                                  | textWidth == 1.0 = (/ colTot)
+                                                                  | otherwise = (* (textWidth / colTot) )
+                                                            in  ColWidth . scale <$> ws'
                                                 Nothing  -> replicate numrows ColWidthDefault
                       let toRow = Row nullAttr
                           toHeaderRow l = [toRow l | not (null l)]
@@ -1047,7 +1056,7 @@ parseEntry cn el = do
           _ -> 1
   let colSpan = toColSpan el
   let align = toAlignment el
-  (fmap (cell align 1 colSpan) . (parseMixed plain) . elContent) el
+  (fmap (cell align 1 colSpan) . parseMixed plain . elContent) el
 
 getInlines :: PandocMonad m => Element -> DB m Inlines
 getInlines e' = trimInlines . mconcat <$>

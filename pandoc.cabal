@@ -1,6 +1,6 @@
 cabal-version:   2.2
 name:            pandoc
-version:         2.11.0.4
+version:         2.11.3.1
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -84,6 +84,7 @@ data-files:
                  data/templates/default.epub2
                  data/templates/default.epub3
                  data/templates/article.jats_publishing
+                 data/templates/affiliations.jats
                  -- translations
                  data/translations/*.yaml
                  -- source files for reference.docx
@@ -286,6 +287,7 @@ extra-source-files:
                  test/tables.opendocument
                  test/tables.org
                  test/tables.asciidoc
+                 test/tables.asciidoctor
                  test/tables.haddock
                  test/tables.texinfo
                  test/tables.rst
@@ -297,7 +299,9 @@ extra-source-files:
                  test/tables.xwiki
                  test/tables/*.html4
                  test/tables/*.html5
+                 test/tables/*.latex
                  test/tables/*.native
+                 test/tables/*.jats_archiving
                  test/testsuite.txt
                  test/writer.latex
                  test/writer.context
@@ -318,6 +322,7 @@ extra-source-files:
                  test/writer.opendocument
                  test/writer.org
                  test/writer.asciidoc
+                 test/writer.asciidoctor
                  test/writer.haddock
                  test/writer.rst
                  test/writer.icml
@@ -376,10 +381,6 @@ source-repository head
   type:          git
   location:      git://github.com/jgm/pandoc.git
 
-flag static
-  Description:   Use static linking for pandoc executable.
-  Default:       False
-
 flag embed_data_files
   Description:   Embed data files in binary for relocatable executable.
   Default:       False
@@ -399,14 +400,14 @@ library
                  aeson-pretty          >= 0.8.5    && < 0.9,
                  attoparsec            >= 0.12     && < 0.14,
                  base64-bytestring     >= 0.1      && < 1.2,
-                 binary                >= 0.5      && < 0.11,
+                 binary                >= 0.7      && < 0.11,
                  blaze-html            >= 0.9      && < 0.10,
                  blaze-markup          >= 0.8      && < 0.9,
                  bytestring            >= 0.9      && < 0.12,
                  case-insensitive      >= 1.2      && < 1.3,
-                 citeproc              >= 0.1.0.3  && < 0.2,
-                 commonmark            >= 0.1.0.2  && < 0.2,
-                 commonmark-extensions >= 0.2      && < 0.3,
+                 citeproc              >= 0.3.0.1  && < 0.4,
+                 commonmark            >= 0.1.1.2  && < 0.2,
+                 commonmark-extensions >= 0.2.0.4  && < 0.3,
                  commonmark-pandoc     >= 0.2      && < 0.3,
                  connection            >= 0.3.1,
                  containers            >= 0.4.2.1  && < 0.7,
@@ -414,7 +415,7 @@ library
                  deepseq               >= 1.3      && < 1.5,
                  directory             >= 1.2.3    && < 1.4,
                  doclayout             >= 0.3      && < 0.4,
-                 doctemplates          >= 0.8.2    && < 0.9,
+                 doctemplates          >= 0.9      && < 0.10,
                  emojis                >= 0.1      && < 0.2,
                  exceptions            >= 0.8      && < 0.11,
                  file-embed            >= 0.0      && < 0.1,
@@ -437,8 +438,8 @@ library
                  random                >= 1        && < 1.2,
                  safe                  >= 0.3      && < 0.4,
                  scientific            >= 0.3      && < 0.4,
-                 skylighting           >= 0.10     && < 0.11,
-                 skylighting-core      >= 0.10     && < 0.11,
+                 skylighting           >= 0.10.2   && < 0.11,
+                 skylighting-core      >= 0.10.2   && < 0.11,
                  split                 >= 0.2      && < 0.3,
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
@@ -481,7 +482,6 @@ library
   if impl(ghc >= 8.4)
     ghc-options:     -Wincomplete-uni-patterns
                      -Widentities
-                     -Werror=missing-home-modules
                      -fhide-source-paths
 
   default-language: Haskell2010
@@ -603,6 +603,10 @@ library
                    Text.Pandoc.Readers.Docx.Parse.Styles,
                    Text.Pandoc.Readers.Docx.Util,
                    Text.Pandoc.Readers.Docx.Fields,
+                   Text.Pandoc.Readers.HTML.Parsing,
+                   Text.Pandoc.Readers.HTML.Table,
+                   Text.Pandoc.Readers.HTML.TagCategories,
+                   Text.Pandoc.Readers.HTML.Types,
                    Text.Pandoc.Readers.LaTeX.Parsing,
                    Text.Pandoc.Readers.LaTeX.Lang,
                    Text.Pandoc.Readers.LaTeX.SIunitx,
@@ -629,6 +633,12 @@ library
                    Text.Pandoc.Readers.Metadata,
                    Text.Pandoc.Readers.Roff,
                    Text.Pandoc.Writers.Docx.StyleMap,
+                   Text.Pandoc.Writers.JATS.Table,
+                   Text.Pandoc.Writers.JATS.Types,
+                   Text.Pandoc.Writers.LaTeX.Caption,
+                   Text.Pandoc.Writers.LaTeX.Notes,
+                   Text.Pandoc.Writers.LaTeX.Table,
+                   Text.Pandoc.Writers.LaTeX.Types,
                    Text.Pandoc.Writers.Roff,
                    Text.Pandoc.Writers.Powerpoint.Presentation,
                    Text.Pandoc.Writers.Powerpoint.Output,
@@ -679,11 +689,9 @@ executable pandoc
      hs-source-dirs: prelude
      other-modules:  Prelude
      build-depends:  base-compat >= 0.9
-  if flag(static)
-    ld-options:     -static
   default-language: Haskell2010
   other-extensions: NoImplicitPrelude
-  hs-source-dirs:  .
+  hs-source-dirs:  app
   main-is:         pandoc.hs
   buildable:       True
   other-modules:   Paths_pandoc
@@ -696,7 +704,6 @@ executable pandoc
   if impl(ghc >= 8.4)
     ghc-options:     -Wincomplete-uni-patterns
                      -Widentities
-                     -Werror=missing-home-modules
                      -fhide-source-paths
 
 executable trypandoc
@@ -723,7 +730,6 @@ executable trypandoc
   if impl(ghc >= 8.4)
     ghc-options:     -Wincomplete-uni-patterns
                      -Widentities
-                     -Werror=missing-home-modules
                      -fhide-source-paths
 
 benchmark weigh-pandoc
@@ -750,7 +756,6 @@ benchmark weigh-pandoc
   if impl(ghc >= 8.4)
     ghc-options:     -Wincomplete-uni-patterns
                      -Widentities
-                     -Werror=missing-home-modules
                      -fhide-source-paths
 
 
@@ -767,7 +772,7 @@ test-suite test-pandoc
                   bytestring        >= 0.9     && < 0.12,
                   containers        >= 0.4.2.1 && < 0.7,
                   directory         >= 1.2.3   && < 1.4,
-                  doctemplates      >= 0.8.2   && < 0.9,
+                  doctemplates      >= 0.9     && < 0.10,
                   exceptions        >= 0.8     && < 0.11,
                   executable-path   >= 0.0     && < 0.1,
                   filepath          >= 1.1     && < 1.5,
@@ -857,7 +862,6 @@ test-suite test-pandoc
   if impl(ghc >= 8.4)
     ghc-options:     -Wincomplete-uni-patterns
                      -Widentities
-                     -Werror=missing-home-modules
                      -fhide-source-paths
 
 
@@ -888,5 +892,4 @@ benchmark benchmark-pandoc
   if impl(ghc >= 8.4)
     ghc-options:     -Wincomplete-uni-patterns
                      -Widentities
-                     -Werror=missing-home-modules
                      -fhide-source-paths

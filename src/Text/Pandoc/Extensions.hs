@@ -149,9 +149,12 @@ data Extension =
     | Ext_tex_math_dollars    -- ^ TeX math between $..$ or $$..$$
     | Ext_tex_math_double_backslash  -- ^ TeX math btw \\(..\\) \\[..\\]
     | Ext_tex_math_single_backslash  -- ^ TeX math btw \(..\) \[..\]
+    | Ext_xrefs_name          -- ^ Use xrefs with names
+    | Ext_xrefs_number        -- ^ Use xrefs with numbers
     | Ext_yaml_metadata_block -- ^ YAML metadata block
     | Ext_gutenberg           -- ^ Use Project Gutenberg conventions for plain
     | Ext_attributes          -- ^ Generic attribute syntax
+    | Ext_sourcepos           -- ^ Include source position attributes
     deriving (Show, Read, Enum, Eq, Ord, Bounded, Data, Typeable, Generic)
 
 -- | Extensions to be used with pandoc-flavored markdown.
@@ -355,7 +358,7 @@ getDefaultExtensions "commonmark"      = extensionsFromList
 getDefaultExtensions "commonmark_x"    = extensionsFromList
   [ Ext_pipe_tables
   , Ext_raw_html
-  , Ext_auto_identifiers
+  , Ext_gfm_auto_identifiers
   , Ext_strikeout
   , Ext_task_lists
   , Ext_emoji
@@ -465,6 +468,8 @@ getAllExtensions f = universalExtensions <> getAll f
   getAll "opendocument"    = extensionsFromList
     [ Ext_empty_paragraphs
     , Ext_native_numbering
+    , Ext_xrefs_name
+    , Ext_xrefs_number
     ]
   getAll "odt"             = getAll "opendocument" <> autoIdExtensions
   getAll "muse"            = autoIdExtensions <>
@@ -474,9 +479,10 @@ getAllExtensions f = universalExtensions <> getAll f
   getAll "plain"           = allMarkdownExtensions
   getAll "gfm"             = getAll "commonmark"
   getAll "commonmark"      =
-    autoIdExtensions <>
     extensionsFromList
-    [ Ext_pipe_tables
+    [ Ext_gfm_auto_identifiers
+    , Ext_ascii_identifiers
+    , Ext_pipe_tables
     , Ext_autolink_bare_uris
     , Ext_strikeout
     , Ext_task_lists
@@ -498,6 +504,7 @@ getAllExtensions f = universalExtensions <> getAll f
     , Ext_implicit_header_references
     , Ext_attributes
     , Ext_fenced_code_attributes
+    , Ext_sourcepos
     ]
   getAll "commonmark_x"    = getAll "commonmark"
   getAll "org"             = autoIdExtensions <>

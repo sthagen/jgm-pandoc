@@ -330,6 +330,12 @@ doOpt (k',v) = do
       parseYAML v >>= \x -> return (\o -> o{ optSlideLevel = x })
     "atx-headers" ->
       parseYAML v >>= \x -> return (\o -> o{ optSetextHeaders = not x })
+    "markdown-headings" ->
+      parseYAML v >>= \x -> return (\o ->
+        case T.toLower x of
+          "atx"    -> o{ optSetextHeaders = False }
+          "setext" -> o{ optSetextHeaders = True }
+          _        -> o)
     "ascii" ->
       parseYAML v >>= \x -> return (\o -> o{ optAscii = x })
     "default-image-extension" ->
@@ -367,6 +373,11 @@ doOpt (k',v) = do
                                                     foldr addItem o xs)
           <|>
           (parseYAML v >>= \(x :: Text) -> return $ \o -> addItem x o)
+    "citation-abbreviations" ->
+      parseYAML v >>= \x ->
+             return (\o -> o{ optMetadata =
+                                addMeta "citation-abbreviations" (T.unpack x)
+                                  (optMetadata o) })
     "ipynb-output" ->
       parseYAML v >>= \x -> return (\o -> o{ optIpynbOutput = x })
     "include-before-body" ->
@@ -464,7 +475,7 @@ defaultOpts = Opt
     , optPdfEngine             = Nothing
     , optPdfEngineOpts         = []
     , optSlideLevel            = Nothing
-    , optSetextHeaders         = True
+    , optSetextHeaders         = False
     , optAscii                 = False
     , optDefaultImageExtension = ""
     , optExtractMedia          = Nothing

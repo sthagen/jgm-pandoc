@@ -309,18 +309,19 @@ enquote starred mblang = do
      else doubleQuoted . langspan <$> withQuoteContext InDoubleQuote tok
 
 blockquote :: PandocMonad m => Bool -> Maybe Text -> LP m Blocks
-blockquote citations mblang = do
-  citePar <- if citations
-                then do
-                  cs <- cites NormalCitation False
-                  return $ para (cite cs mempty)
-                else return mempty
+blockquote cvariant mblang = do
+  citepar <- if cvariant
+                then (\xs -> para (cite xs mempty))
+                       <$> cites NormalCitation False
+                else option mempty $ para <$> bracketed inline
   let lang = mblang >>= babelLangToBCP47
   let langdiv = case lang of
                       Nothing -> id
                       Just l  -> divWith ("",[],[("lang", renderLang l)])
+  _closingPunct <- option mempty $ bracketed inline -- currently ignored
   bs <- grouped block
-  return $ blockQuote . langdiv $ (bs <> citePar)
+  optional $ symbolIn (".:;?!" :: [Char])  -- currently ignored
+  return $ blockQuote . langdiv $ (bs <> citepar)
 
 doAcronym :: PandocMonad m => Text -> LP m Inlines
 doAcronym form = do
@@ -558,7 +559,14 @@ tok = try $ spaces >> grouped inline <|> inlineCommand' <|> singleChar'
           return $ str t
 
 opt :: PandocMonad m => LP m Inlines
-opt = bracketed inline <|> (str <$> rawopt)
+opt = do
+  toks <- try (sp *> bracketedToks <* sp)
+  -- now parse the toks as inlines
+  st <- getState
+  parsed <- runParserT (mconcat <$> many inline) st "bracketed option" toks
+  case parsed of
+    Right result -> return result
+    Left e       -> throwError $ PandocParsecError (untokenize toks) e
 
 paropt :: PandocMonad m => LP m Inlines
 paropt = parenWrapped inline
@@ -1217,6 +1225,16 @@ preamble = mconcat <$> many preambleBlock
                              anyTok
                              return mempty)
 
+rule :: PandocMonad m => LP m Blocks
+rule = do
+  skipopts
+  width <- T.takeWhile (\c -> isDigit c || c == '.') . stringify <$> tok
+  _thickness <- tok
+  -- 0-width rules are used to fix spacing issues:
+  case safeRead width of
+    Just (0 :: Double) -> return mempty
+    _ -> return horizontalRule
+
 paragraph :: PandocMonad m => LP m Blocks
 paragraph = do
   x <- trimInlines . mconcat <$> many1 inline
@@ -1587,7 +1605,7 @@ blockCommands = M.fromList
    --
    , ("hrule", pure horizontalRule)
    , ("strut", pure mempty)
-   , ("rule", skipopts *> tok *> tok $> horizontalRule)
+   , ("rule", rule)
    , ("item", looseItem)
    , ("documentclass", skipopts *> braced *> preamble)
    , ("centerline", para . trimInlines <$> (skipopts *> tok))
@@ -1638,7 +1656,7 @@ environments = M.fromList
           skipopts *> spaces *> optional braced *> spaces *> blocks)
    , ("figure", env "figure" $ skipopts *> figure)
    , ("subfigure", env "subfigure" $ skipopts *> tok *> figure)
-   , ("center", env "center" blocks)
+   , ("center", divWith ("", ["center"], []) <$> env "center" blocks)
    , ("longtable",  env "longtable" $
           resetCaption *> simpTable "longtable" False >>= addTableCaption)
    , ("table",  env "table" $
@@ -1794,6 +1812,7 @@ theoremEnvironment name = do
                   _          -> bs
 
 italicize :: Block -> Block
+italicize x@(Para [Image{}]) = x -- see #6925
 italicize (Para ils) = Para [Emph ils]
 italicize (Plain ils) = Plain [Emph ils]
 italicize x = x
@@ -1921,32 +1940,6 @@ addImageCaption = walkM go
                                  [Str (renderDottedNum num)] (sLabels st) }
           return $ Image attr' alt' (src, tit')
         go x = return x
-
-getNextNumber :: Monad m
-              => (LaTeXState -> DottedNum) -> LP m DottedNum
-getNextNumber getCurrentNum = do
-  st <- getState
-  let chapnum =
-        case sLastHeaderNum st of
-             DottedNum (n:_) | sHasChapters st -> Just n
-             _                                 -> Nothing
-  return . DottedNum $
-    case getCurrentNum st of
-       DottedNum [m,n]  ->
-         case chapnum of
-              Just m' | m' == m   -> [m, n+1]
-                      | otherwise -> [m', 1]
-              Nothing             -> [1]
-                                      -- shouldn't happen
-       DottedNum [n]   ->
-         case chapnum of
-              Just m  -> [m, 1]
-              Nothing -> [n + 1]
-       _               ->
-         case chapnum of
-               Just n  -> [n, 1]
-               Nothing -> [1]
-
 
 coloredBlock :: PandocMonad m => Text -> LP m Blocks
 coloredBlock stylename = try $ do
@@ -2166,6 +2159,8 @@ parseTableRow envname prefsufs = do
         prefpos <- getPosition
         contents <- mconcat <$>
             many ( snd <$> withRaw (controlSeq "parbox" >> parbox) -- #5711
+                  <|>
+                   snd <$> withRaw (inlineEnvironment <|> dollarsMath)
                   <|>
                    (do notFollowedBy
                          (() <$ amp <|> () <$ lbreak <|> end_ envname)

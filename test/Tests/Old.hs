@@ -58,7 +58,7 @@ tests pandocPath =
     ]
   , testGroup "latex"
     [ testGroup "writer"
-        (writerTests' "latex" ++ lhsWriterTests' "latex")
+        (extWriterTests' "latex" ++ lhsWriterTests' "latex")
     , testGroup "reader"
       [ test' "basic" ["-r", "latex+raw_tex", "-w", "native", "-s"]
         "latex-reader.latex" "latex-reader.native"
@@ -101,7 +101,7 @@ tests pandocPath =
   , testGroup "jats"
     [ testGroup "writer"
       [ testGroup "jats_archiving" $
-        writerTests' "jats_archiving"
+        extWriterTests' "jats_archiving"
       , testGroup "jats_articleauthoring" $
         writerTests' "jats_articleauthoring"
       , testGroup "jats_publishing" $
@@ -215,7 +215,8 @@ tests pandocPath =
     [ test' "reader" ["-f", "ipynb-raw_html-raw_tex+raw_attribute",
                       "-t", "native", "-s"]
       "ipynb/simple.ipynb" "ipynb/simple.out.native"
-    , test' "writer" ["-f", "native", "-t",
+    , test' "writer" ["-f", "native",
+                      "--markdown-headings=setext", "-t",
                       "ipynb-raw_html-raw_tex+raw_attribute", "-s"]
       "ipynb/simple.in.native" "ipynb/simple.ipynb"
     ]
@@ -241,7 +242,8 @@ lhsWriterTests pandocPath format
     ]
   where
     t n f = test pandocPath
-             n ["--wrap=preserve", "-r", "native", "-s", "-w", f]
+             n ["--wrap=preserve", "-r", "native", "-s",
+              "--markdown-headings=setext", "-w", f]
              "lhs-test.native" ("lhs-test" <.> f)
 
 lhsReaderTest :: FilePath -> String -> TestTree

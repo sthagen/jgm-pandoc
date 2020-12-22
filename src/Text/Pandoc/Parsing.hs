@@ -190,7 +190,7 @@ where
 
 import Control.Monad.Identity
 import Control.Monad.Reader
-import Data.Char (chr, isAlphaNum, isAscii, isAsciiUpper,
+import Data.Char (chr, isAlphaNum, isAscii, isAsciiUpper, isAsciiLower,
                   isPunctuation, isSpace, ord, toLower, toUpper)
 import Data.Default
 import Data.Functor (($>))
@@ -443,7 +443,14 @@ spaceChar = satisfy $ \c -> c == ' ' || c == '\t'
 
 -- | Parses a nonspace, nonnewline character.
 nonspaceChar :: Stream s m Char => ParserT s st m Char
-nonspaceChar = noneOf ['\t', '\n', ' ', '\r']
+nonspaceChar = satisfy (not . isSpaceChar)
+
+isSpaceChar :: Char -> Bool
+isSpaceChar ' '  = True
+isSpaceChar '\t' = True
+isSpaceChar '\n' = True
+isSpaceChar '\r' = True
+isSpaceChar _    = False
 
 -- | Skips zero or more spaces or tabs.
 skipSpaces :: Stream s m Char => ParserT s st m ()
@@ -634,7 +641,7 @@ uri = try $ do
   scheme <- uriScheme
   char ':'
   -- Avoid parsing e.g. "**Notes:**" as a raw URI:
-  notFollowedBy (oneOf "*_]")
+  notFollowedBy $ satisfy (\c -> c == '*' || c == '_' || c == ']')
   -- We allow sentence punctuation except at the end, since
   -- we don't want the trailing '.' in 'http://google.com.' We want to allow
   -- http://en.wikipedia.org/wiki/State_of_emergency_(disambiguation)
@@ -648,7 +655,20 @@ uri = try $ do
   let uri' = scheme <> ":" <> fromEntities str'
   return (uri', escapeURI uri')
   where
-    wordChar = alphaNum <|> oneOf "#$%+/@\\_-&="
+    isWordChar '#' = True
+    isWordChar '$' = True
+    isWordChar '%' = True
+    isWordChar '+' = True
+    isWordChar '/' = True
+    isWordChar '@' = True
+    isWordChar '\\' = True
+    isWordChar '_' = True
+    isWordChar '-' = True
+    isWordChar '&' = True
+    isWordChar '=' = True
+    isWordChar c   = isAlphaNum c
+
+    wordChar = satisfy isWordChar
     percentEscaped = try $ (:) <$> char '%' <*> many1 hexDigit
     entity = try $ pure <$> characterReference
     punct = try $ many1 (char ',') <|> fmap pure (satisfy (\c -> not (isSpace c) && c /= '<' && c /= '>'))
@@ -663,7 +683,9 @@ mathInlineWith :: Stream s m Char  => Text -> Text -> ParserT s st m Text
 mathInlineWith op cl = try $ do
   textStr op
   when (op == "$") $ notFollowedBy space
-  words' <- many1Till (countChar 1 (noneOf " \t\n\\")
+  words' <- many1Till (
+                       (T.singleton <$>
+                          satisfy (\c -> not (isSpaceChar c || c == '\\')))
                    <|> (char '\\' >>
                            -- This next clause is needed because \text{..} can
                            -- contain $, \(\), etc.
@@ -671,7 +693,7 @@ mathInlineWith op cl = try $ do
                                  (("\\text" <>) <$> inBalancedBraces 0 ""))
                             <|>  (\c -> T.pack ['\\',c]) <$> anyChar))
                    <|> do (blankline <* notFollowedBy' blankline) <|>
-                             (oneOf " \t" <* skipMany (oneOf " \t"))
+                             (spaceChar <* skipMany spaceChar)
                           notFollowedBy (char '$')
                           return " "
                     ) (try $ textStr cl)
@@ -701,7 +723,8 @@ mathInlineWith op cl = try $ do
 mathDisplayWith :: Stream s m Char => Text -> Text -> ParserT s st m Text
 mathDisplayWith op cl = try $ fmap T.pack $ do
   textStr op
-  many1Till (noneOf "\n" <|> (newline <* notFollowedBy' blankline)) (try $ textStr cl)
+  many1Till (satisfy (/= '\n') <|> (newline <* notFollowedBy' blankline))
+            (try $ textStr cl)
 
 mathDisplay :: (HasReaderOptions st, Stream s m Char)
             => ParserT s st m Text
@@ -798,7 +821,11 @@ exampleNum :: Stream s m Char
            => ParserT s ParserState m (ListNumberStyle, Int)
 exampleNum = do
   char '@'
-  lab <- T.pack <$> many (alphaNum <|> satisfy (\c -> c == '_' || c == '-'))
+  lab <- mconcat . map T.pack <$>
+                    many (many1 alphaNum <|>
+                          try (do c <- char '_' <|> char '-'
+                                  cs <- many1 alphaNum
+                                  return (c:cs)))
   st <- getState
   let num = stateNextExample st
   let newlabels = if T.null lab
@@ -817,13 +844,13 @@ defaultNum = do
 -- | Parses a lowercase letter and returns (LowerAlpha, number).
 lowerAlpha :: Stream s m Char => ParserT s st m (ListNumberStyle, Int)
 lowerAlpha = do
-  ch <- oneOf ['a'..'z']
+  ch <- satisfy isAsciiLower
   return (LowerAlpha, ord ch - ord 'a' + 1)
 
 -- | Parses an uppercase letter and returns (UpperAlpha, number).
 upperAlpha :: Stream s m Char => ParserT s st m (ListNumberStyle, Int)
 upperAlpha = do
-  ch <- oneOf ['A'..'Z']
+  ch <- satisfy isAsciiUpper
   return (UpperAlpha, ord ch - ord 'A' + 1)
 
 -- | Parses a roman numeral i or I

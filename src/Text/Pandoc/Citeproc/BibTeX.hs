@@ -601,7 +601,7 @@ inBraces :: BibParser Text
 inBraces = do
   char '{'
   res <- manyTill
-         (  (T.pack <$> many1 (noneOf "{}\\"))
+         (  take1WhileP (\c -> c /= '{' && c /= '}' && c /= '\\')
         <|> (char '\\' >> (  (char '{' >> return "\\{")
                          <|> (char '}' >> return "\\}")
                          <|> return "\\"))
@@ -616,7 +616,7 @@ inQuotes :: BibParser Text
 inQuotes = do
   char '"'
   T.concat <$> manyTill
-             (  (T.pack <$> many1 (noneOf "\"\\{"))
+             ( take1WhileP (\c -> c /= '{' && c /= '"' && c /= '\\')
                <|> (char '\\' >> T.cons '\\' . T.singleton <$> anyChar)
                <|> braced <$> inBraces
             ) (char '"')
@@ -822,12 +822,11 @@ getOldDate prefix = do
          , dateLiteral = literal }
 
 getRawField :: Text -> Bib Text
-getRawField f =
-  (stringify <$> getField f)
-  <|> do fs <- asks fields
-         case Map.lookup f fs of
-              Just x  -> return x
-              Nothing -> notFound f
+getRawField f = do
+  fs <- asks fields
+  case Map.lookup f fs of
+       Just x  -> return x
+       Nothing -> notFound f
 
 getLiteralList :: Text -> Bib [Inlines]
 getLiteralList f = do

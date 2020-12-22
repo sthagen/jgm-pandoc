@@ -65,8 +65,10 @@ dist: man/pandoc.1
 	cd pandoc-${version}
 	stack setup && stack test && cd .. && rm -rf "pandoc-${version}"
 
-checkdocs: README.md
-	! grep -n -e "\t" MANUAL.txt changelog
+check: checkdocs check-cabal
+
+checkdocs:
+	! grep -q -n -e "\t" MANUAL.txt changelog.md
 
 debpkg: man/pandoc.1
 	docker run -v `pwd`:/mnt \
@@ -75,11 +77,6 @@ debpkg: man/pandoc.1
 		   -w /mnt \
 	           utdemir/ghc-musl:v12-libgmp-ghc8101 bash \
 		   /mnt/linux/make_artifacts.sh
-
-macospkg:
-	rm -rf macos-release-candidate
-	aws s3 sync s3://travis-jgm-pandoc macos-release-candidate
-	make -C macos-release-candidate
 
 man/pandoc.1: MANUAL.txt man/pandoc.1.before man/pandoc.1.after
 	pandoc $< -f markdown -t man -s \
@@ -117,4 +114,14 @@ update-website:
 clean:
 	stack clean
 
-.PHONY: deps quick full haddock install clean test bench changes_github macospkg dist prof download_stats reformat lint weigh doc/lua-filters.md pandoc-templates trypandoc update-website debpkg macospkg checkdocs ghcid ghci fix_spacing hlint
+check-cabal: git-files.txt sdist-files.txt
+	echo "Checking to see if all committed test/data files are in sdist."
+	diff -u $^
+
+sdist-files.txt: .FORCE
+	cabal sdist --list-only | sed 's/\.\///' | grep '^\(test\|data\)\/' | sort > $@
+
+git-files.txt: .FORCE
+	git ls-tree -r --name-only HEAD | grep '^\(test\|data\)\/' | sort > $@
+
+.PHONY: .FORCE deps quick full haddock install clean test bench changes_github dist prof download_stats reformat lint weigh doc/lua-filters.md pandoc-templates trypandoc update-website debpkg checkdocs ghcid ghci fix_spacing hlint check check-cabal

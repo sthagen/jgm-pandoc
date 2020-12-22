@@ -62,6 +62,7 @@ data PandocError = PandocIOError Text IOError
                  | PandocUnknownWriterError Text
                  | PandocUnsupportedExtensionError Text Text
                  | PandocCiteprocError CiteprocError
+                 | PandocBibliographyError Text Text
                  deriving (Show, Typeable, Generic)
 
 instance Exception PandocError
@@ -136,13 +137,15 @@ handleError (Left e) =
                   " -t latex|beamer|context|ms|html5" <>
                  "\nand specify an output file with " <>
                  ".pdf extension (-o filename.pdf)."
-         "doc" -> "\nPandoc can convert to DOCX, but not from DOC."
+         "doc" -> "\nPandoc can convert to DOCX, but not to DOC."
          _     -> ""
     PandocUnsupportedExtensionError ext f -> err 23 $
       "The extension " <> ext <> " is not supported " <>
       "for " <> f
     PandocCiteprocError e' -> err 24 $
       prettyCiteprocError e'
+    PandocBibliographyError fp msg -> err 25 $
+      "Error reading bibliography file " <> fp <> ":\n" <> msg
 
 err :: Int -> Text -> IO a
 err exitCode msg = do

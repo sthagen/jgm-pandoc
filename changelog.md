@@ -1,5 +1,566 @@
 # Revision history for pandoc
 
+## pandoc 2.11.3.1 (2020-12-18)
+
+  * Added some missing files to extra-source-files and data
+    files, so they are included in the sdist tarball.  Closes #6961.
+    Cleaned up some extraneous data and test files, and added
+    a CI check to ensure that the test and data files included
+    in the sdist match what is in the git repository.
+
+  * Use citeproc 0.3.0.1, which avoids removing nonbreaking
+    space at the end of the `initialize-with` attribute. (Some
+    journals require nonbreaking space after initials, and this
+    makes that possible.)
+
+## pandoc 2.11.3 (2020-12-17)
+
+  * With `--bibliography` (or `bibliography` in metadata), a
+    URL may now be provided, and pandoc will fetch the resource.
+    In addition, if a file path is provided and it is not
+    found relative to the working directory, the resource
+    path will be searched (#6940).
+
+  * Add `sourcepos` extension for `commonmark`, `gfm`, `commonmark_x`
+    (#4565).  With the `sourcepos` extension set set, `data-pos`
+    attributes are added to the AST by the commonmark reader. No other
+    readers are affected.  The `data-pos` attributes are put on elements
+    that accept attributes; for other elements, an enlosing Div or Span
+    is added to hold the attributes.
+
+  * Change extensions for `commonmark_x`: replace `auto_identifiers`
+    with `gfm_auto_identifiers` (#6863).  `commonmark_x` never actually
+    supported `auto_identifiers` (it didn't do anything), because the
+    underlying library implements gfm-style identifiers only.  Attempts
+    to add the `auto_identifiers` extension to `commonmark` will now
+    fail with an error.
+
+  * HTML reader:
+
+    + Split module into several submodules (Albert Krewinkel).  Reducing
+      module size should reduce memory use during compilation.
+    + Support advanced table features (Albert Krewinkel):
+      block level content in captions, row and colspans,
+      body headers, row head columns, footers, attributes.
+    + Disable round-trip testing for tables. Information for cell
+      alignment in a column is not preserved during round-trips (Albert
+      Krewinkel).
+    + Allow finer grained options for tag omission (Albert Krewinkel).
+    + Simplify list attribute handling (Albert Krewinkel).
+    + Pay attention to `lang` attributes on body element (#6938).
+      These (as well as `lang` attributes on the html element) should update
+      lang in metadata.
+    + Retain attribute prefixes and avoid duplicates (#6938).
+      Previously we stripped attribute prefixes, reading `xml:lang` as
+      `lang` for example. This resulted in two duplicate `lang`
+      attributes when `xml:lang` and `lang` were both used.  This commit
+      causes the prefixes to be retained, and also avoids invald
+      duplicate attributes.
+
+  * Commonmark reader:
+
+    + Refactor `specFor`.
+    + Set input name to `""` to avoid clutter in sourcepos output.
+
+  * Org reader:
+
+    + Parse `#+LANGUAGE` into `lang` metadata field (#6845, Albert
+      Krewinkel).
+    + Preserve targets of spurious links (#6916, Albert
+      Krewinkel).  Links with (internal) targets that the reader doesn't
+      know about are converted into emphasized text. Information on the
+      link target is now preserved by wrapping the text in a Span of class
+      `spurious-link`, with an attribute `target` set to the link's
+      original target. This allows to recover and fix broken or unknown
+      links with filters.
+
+  * DocBook reader:
+
+    + Table text width support (#6791, Nils Carlson).
+      Table width in relation to text width is not natively supported
+      by docbook but is by the docbook `fo` stylesheets through an XML
+      processing instruction, `<?dbfo table-width="50%"?>`.
+
+  * LaTeX reader:
+
+    + Improve parsing of command options (#6869, #6873).
+      In cases where we run into trouble parsing inlines til the
+      closing `]`, e.g. quotes, we return a plain string with the
+      option contents. Previously we mistakenly included the brackets
+      in this string.
+    + Preserve center environment (#6852, Igor Pashev).
+      The contents of the `center` environment are put in a `Div`
+      with class `center`.
+    + Don't parse `\rule` with width 0 as horizontal rule. These are
+      sometimes used as spacers in LaTeX.
+    + Don't apply theorem default styling to a figure inside (#6925).
+      If we put an image in italics, then when rendering to Markdown
+      we no longer get an implicit figure.
+
+  * Dokuwiki reader:
+
+    + Handle unknown interwiki links better (#6932).
+      DokuWiki lets the user define his own Interwiki links.  Previously
+      pandoc reacted to these by emitting a google search link, which is
+      not helpful. Instead, we now just emit the full URL including the
+      wikilink prefix, e.g. `faquk>FAQ-mathml`.  This at least gives users
+      the ability to modify the links using filters.
+
+  * Markdown writer:
+
+    + Properly handle boolean values in writing YAML metadata (#6388).
+    + Ensure that a new csl-block begins on a new line (#6921).
+      This just looks better and doesn't affect the semantics.
+
+  * RST writer:
+
+    + Better image handling (#6948).  An image alone in its paragraph
+    (but not a figure) is now rendered as an independent image, with an
+    `alt` attribute if a description is supplied.  An inline image that
+    is not alone in its paragraph will be rendered, as before, using a
+    substitution.  Such an image cannot have a "center", "left", or
+    "right" alignment, so the classes `align-center`, `align-left`, or
+    `align-right` are ignored.  However, `align-top`, `align-middle`,
+    `align-bottom` will generate a corresponding `align` attribute.
+
+  * Docx writer:
+
+    + Keep raw openxml strings verbatim  (#6933, Albert Krewinkel).
+    + Use Content instead of Element.  This allows us to inject
+      raw OpenXML into the document without reparsing it into an
+      Element, which is necessary if you want to inject an open
+      tag or close tag.
+    + Fix bullets/lists indentation, so that the first level is slightly
+      indented to the right instead of right on the margin (cholonam).
+    + Support bold and italic in "complex script" (#6911).
+      Previously bold and italics didn't work properly in LTR
+      text.  This commit causes the w:bCs and w:iCs attributes
+      to be used, in addition to w:b and w:i, for bold and
+      italics respectively.
+
+  * ICML writer:
+
+    + Fix image bounding box for custom widths/heighta (Mauro Bieg, #6936).
+
+  * LaTeX writer:
+
+    + Improve table spacing (#6842, #6860).
+      Remove the `\strut` that was added at the end of minipage
+      environments in cells.  Replace `\tabularnewline` with
+      `\\ \addlinespace`.
+    + Improve calculation of column spacing (#6883).
+    + Extract table handling into separate module (Albert Krewinkel).
+    + Fix bug with nested `csl-` display Spans (#6921).
+    + Improve longtable output (#6883).  Don't create minipages for
+      regular paragraphs.  Put width and alignment information in the
+      longtable column descriptors.
+
+  * OpenDocument writer:
+
+    + Support for table width as a percentage of text width
+      (#6792, Nils Carson).
+    + Implement Div and Span ident support (#6755, Nils Carson).
+      Spans and Divs containing an ident in the Attr will become bookmarks
+      or sections with idents in OpenDocument format.
+    + Add two extensions, `xrefs_name` and `xrefs_number` (#6774, Nils
+      Carlson).  Links to headings, figures and tables inside the
+      document are substituted with cross-references that will use the
+      name or caption of the referenced item for `xrefs_name` or the
+      number for `xrefs_number`.  For the `xrefs_number` to be useful
+      heading numbers must be enabled in the generated document and
+      table and figure captions must be enabled using for example the
+      `native_numbering` extension.  In order for numbers and reference
+      text to be updated the generated document must be refreshed.
+
+  * JATS writer:
+
+    + Support advanced table features (Albert Krewinkel).
+    + Support author affiliations (#6687, Albert Krewinkel).
+
+  * Docbook writer:
+
+    + Use correct id attribute consistently (Jan Tojnar).
+      DocBook5 should always use `xml:id` instead of `id`.
+    + Handle admonition titles better (Jan Tojnar).
+      Docbook reader produces a `Div` with `title` class for `<title>`
+      element within an “admonition” element. Markdown writer then turns
+      this into a fenced div with `title` class attribute. Since fenced
+      divs are block elements, their content is recognized as a
+      paragraph by the Markdown reader. This is an issue for Docbook
+      writer because it would produce an invalid DocBook document from
+      such AST – the `<title>` element can only contain “inline”
+      elements.  Handle this special case separately by unwrapping
+      the paragraph before creating the `<title>` element.
+    + Add XML namespaces to top-level elements (#6923, Jan Tojnar).
+      Previously, we only added `xmlns` attributes to chapter
+      elements, even when running with `--top-level-division=section`.
+      These namespaces are now added to part and section elements too,
+      when they are the selected top-level divisions.
+      We do not need to add namespaces to documents produced with
+      `--standalone` flag, since those will already have xmlns attribute on
+      the root element in the template.
+
+  * HTML writer:
+
+    + Fix handling of nested `csl-` display spans (#6921).
+      Previously inner Spans used to represent CSL display attributes were
+      not rendered as div tags as intended.
+
+  * EPUB writer:
+
+    + Include title page in landmarks (#6919).
+      Note that the toc is also included if `--toc` is specified.
+    + Add frontmatter type on body element for nav.xhtml (#6918).
+
+  * EPUB templates: use preserveAspectRatio="xMidYMid" for cover image (#6895,
+    Shin Sang-jae).  This change affects both the epub2 and the epub3
+    templates.  It avoids distortion of the cover image by requiring that the
+    aspect ratio be preserved.
+
+  * LaTeX template:
+
+    + Include `csquotes` package if `csquotes` variable set.
+    + Put back `amssymb`.  We need it for checkboxes in todo lists,
+      and maybe for other things.  In this location it seems compatible
+      with the cases that prompted #6469 and PR #6762.
+    + Disable language-specific shorthands in babel (#6817, #6887).
+      Babel defines "shorthands" for some languages, and these can
+      produce unexpected results. For example, in Spanish, `1.22`
+      gets rendered as `122`, and `et~al.` as `etal`.
+      One would think that babel's `shorthands=off` option (which
+      we were using) would disable these, but it doesn't.  So we
+      remove `shorthands=off` and add some code that redefines
+      the shorthands macro.  Eventually this will be fixed in babel,
+      I hope, and we can revert to something simpler.
+
+  * JATS template: allow array of persistent institute ids in `pid`
+    (Albert Krewinkel).
+
+  * Text.Pandoc.Parsing:  minor code and efficiency improvements.
+
+  * Text.Pandoc.Extension:
+
+    + Add `Ext_sourcepos` constructor for `Extension` [API change].
+    + Add `Ext_xrefs_name` and `Ext_xrefs_number` constructors for
+      `Extension` (Nils Carson) [API change].
+
+  * Text.Pandoc.Citeproc:
+
+    + Fix truncation of `[Citation]` list in `Cite` inside footnotes (#6890).
+      This affected author-in-text citations in footnotes.  It didn't cause
+      problems for the printed output, but for filters that expected the
+      citation id and other information.
+    + Allow the use of both inline and external references (#6951),
+      as with pandoc-citeproc.  References defined in the document's
+      metadata take priority over references with the same id defined in
+      an external bibliography.
+    + Use `fetchItem` to get external bibliography (#6940).
+    + Ensure that BCP47 lang codes can be used.  We ignore the variants
+      and just use the base lang code and country code when passing off
+      to citeproc.
+    + Citeproc BibTeX parser: revert change in `getRawField`
+      which was made (for reasons forgotten) when transferring
+      this code from pandoc-citeproc.  The change led to `--` in
+      URLs being interpreted as en-dashes, which is unwanted (#6874).
+
+  * Text.Pandoc.ImageSize:
+
+    + Default to DPI 72 if the format specifies DPI of 0 (#6880).
+      This shouldn't happen, in general, but it can happen with
+      JPEGs that don't conform to the spec.  Having a DPI of 0
+      will blow up size calculations (division by 0).
+    + ImageSize: use JuicyPixels to determine size for png, jpeg, and
+      gif, instead of doing our own binary parsing (#6936). This
+      gives more reliable results.
+
+  * Text.Pandoc.CSS:
+
+    + Remove `foldOrElse` (internal module) (Albert Krewinkel).
+
+  * Use skylighting 0.10.2 (#6625).
+
+  * Use citeproc 0.3. This fixes issues with references with
+    duplicate ids (jgm/citeproc#36).
+
+  * Use doctemplates 0.9.  This fixes issues with boolean
+    metadata values in the Markdown writer (#6388)
+    and in `meta-json` (#6650).  It also fixes
+    issues with nested for loops in templates.
+
+  * Add translations zh-Hans.yaml and zh-Hant.yaml (#6904, #6909,
+    Kolen Cheung, taotieren).
+
+  * Add tests: True to cabal.project.
+    This fixes some CI failures for cabal.
+
+  * Normalize test/tables/*.native (#6888, Kolen Cheung).
+
+  * Move executable to `app` directory to avoid problems with cabal repl.
+
+  * CONTRIBUTING: add section "How can I help?" (#6892, Albert Krewinkel).
+    Also adds a paragraph aimed at highlighting the importance of feature
+    maintenance.
+
+  * MANUAL: Document that --number-sections works in `ms` (#6935).
+
+
+## pandoc 2.11.2 (2020-11-19)
+
+  * Default to using ATX (`##`-style) headings for Markdown output
+    (#6662, Aner Lucero).  Previously we used Setext (underlined) headings
+    by default for levels 1--2.
+
+  * Add option `--markdown-headings=atx|setext`, and deprecate
+    `--atx-headers` (#6662, Aner Lucero).
+
+  * Support `markdown-headings` in defaults files.
+
+  * Fix corner case in YAML metadata parsing (#6823).  Previously YAML
+    metadata would sometimes not get recognized if a field ended with a
+    newline followed by spaces.
+
+  * `--self-contained`: increase coverage (#6854).
+    Previously we only self-contained attributes for certain tag names
+    (`img`, `embed`, `video`, `input`, `audio`, `source`, `track`,
+    `section`).  Now we self-contain any occurrence of `src`,
+    `data-src`, `poster`, or `data-background-image`, on any tag; and
+    also `href` on `link` tags.
+
+  * Markdown reader:
+
+    + Fix detection of locators following in-text citations.
+      Prevously, if we had `@foo [p. 33; @bar]`, the `p. 33` would be
+      incorrectly parsed as a prefix of `@bar` rather than a suffix of
+      `@foo`.
+    + Improve period suppression algorithm for citations in notes
+      in note citation styles (#6835).
+    + Don't increment `stateNoteNumber` for example list references.
+      This helps with #6836 (a bug in which example list references
+      disturb calculation of citation note number and affect when
+      `ibid` is triggered).
+
+  * LaTeX reader:
+
+    + Move `getNextNumber` from Readers.LaTeX to Readers.LaTeX.Parsing.
+    + Fix negative numbers in siunitx commands.  A change in pandoc 2.11
+      broke negative numbers, e.g.  `\SI{-33}{\celcius}` or `\num{-3}`.
+      This fixes the regression.
+
+  * DocBook reader: drop period in formalpara title
+    and put it in a div with class `formalpara-title`, so that
+    people can reformat with filters (#6562).
+
+  * Man reader: improve handling of `.IP` (#6858).  We now better handle
+    `.IP` when it is used with non-bullet, non-numbered lists, creating a
+    definition list.  We also skip blank lines like groff itself.
+
+  * Bibtex reader: fall back on `en-US` if locale for LANG not found.
+    This reproduces earlier pandoc-citeproc behavior (jgm/citeproc#26).
+
+  * JATS writer:
+
+    + Wrap all tables (Albert Krewinkel).
+      All `<table>` elements are put inside `<table-wrap>` elements, as the
+      former are not valid as immediate child elements of `<body>`.
+    + Move Table handling to separate module (Albert Krewinkel).
+      Adds two new unexported modules:
+      Text.Pandoc.Writers.JATS.Types, Text.Pandoc.Writers.JATS.Table.
+
+  * Org writer:
+
+    + Replace org #+KEYWORDS with #+keywords (TEC).
+      As of ~2 years ago, lower case keywords became the standard (though
+      they are handled case insensitive, as always).
+    + Update org supported languages and identifiers according to the
+      current list contained in
+      <https://orgmode.org/worg/org-contrib/babel/languages/index.html>
+      (TEC).
+
+  * Only use `filterIpynbOutput` if input format is ipynb (#6841).
+    Before this change content could go missing from divs with class
+    `output`, even when non-ipynb was being converted.
+
+  * When checking reader/writer name, check base name now that we permit
+    extensions on formats other than markdown.
+
+  * Text.Pandoc.PDF: Fix `changePathSeparators` for Windows (#6173).
+    Previously a path beginning with a drive, like `C:\foo\bar`, was
+    translated to `C:\/foo/bar`, which caused problems.
+    With this fix, the backslashes are removed.
+
+  * Text.Pandoc.Logging: Add constructor `ATXHeadingInLHS` constructor
+    to `LogMessage` [API change].
+
+  * Fix error that is given when people specify `doc` output (#6834,
+    gison93).
+
+  * LaTeX template:  add a `\break` after parbox in `CSLRightInline`.
+    This should fix spacing problems between entries with numeric styles.
+    Also fix number of params on `CSLReferences`.
+
+  * reveal.js template: Put quotes around `controlsLayout`,
+    `controlsBackArrows`, and `display`, since these require strings.
+    Add `showSlideNumber`, `hashOneBasedIndex`, `pause`.
+
+  * Use citeproc 0.2.  This fixes a bug with title case around parentheses.
+
+  * pandoc.cabal: remove 'static' flag.
+    This isn't really necessary and can be misleading (e.g. on macOS,
+    where a fully static build isn't possible). cabal's new option
+    `--enable-executable-static` does the same. On stack you can add
+    something like this to the options for your executable in package.yaml:
+
+        ld-options: -static -pthread
+
+  * Remove obsolete bibutils flag setting in `linux/make_artifacts.sh`.
+
+  * Manual:
+
+    + Correct `link-citation` -> `link-citations`.
+    + Add a sentence about `pagetitle` for HTML (#6843, Alex Toldaiev).
+
+  * INSTALL.md: Remove references to `pandoc-citeproc` (#6857).
+
+  * CONTRIBUTING: describe hlint and how it's used (#6840, Albert
+    Krewinkel).
+
+## pandoc 2.11.1.1 (2020-11-07)
+
+  * Citeproc: improve punctuation in in-text note citations (#6813).
+    Previously in-text note citations inside a footnote would sometimes have
+    the final period stripped, even if it was needed (e.g. on the end of
+    'ibid').
+
+  * Use citeproc 0.1.1.1.  This improves the decision about when
+    to use `ibid` in cases where citations are used inside
+    a footnote (#6813).
+
+  * Support `nocase` spans for `csljson` output.
+
+  * Require latest commonmark, commonmark-extensions.
+    This fixes a bug with `autolink_bare_uris` and commonmark.
+
+  * LaTeX reader: better handling of `\\` inside math in table cells (#6811).
+
+  * DokuWiki writer:  translate language names for code elements
+    and improve whitespace (#6807).
+
+  * MediaWiki writer: use `syntaxhighlight` tag instead of deprecated
+    `source` for highlighted code (#6810).  Also support `startFrom`
+    attribute and `numberLines`.
+
+  * Lint code in PRs and when committing to master (#6790,
+    Albert Krewinkel).
+
+  * doc/filters.md: describe technical details of filter invocations (#6815,
+    Albert Krewinkel).
+
+
+## pandoc 2.11.1 (2020-11-03)
+
+  * DocBook Reader: fix duplicate bibliography bug (#6773, Nils Carlson).
+
+  * HTML reader:
+
+    + Parse contents of iframes (#6770).
+    + Parse inline svg as image unless `raw_html` is set in the reader (in
+      which case the svg is passed through as raw HTML) (#6770).
+
+  * LaTeX reader:
+
+    + Fix bug parsing macro arguments (#6796).  If `\cL` is
+      defined as `\mathcal{L}`, and `\til` as `\tilde{#1}`, then
+      `\til\cL` should expand to `\tilde{\mathcal{L}}`, but
+      pandoc was expanding it to `\tilde\mathcal{L}`.  This is
+      fixed by parsing the arguments in "verbatim mode" when the
+      macro expands arguments at the point of use.
+    + Properly support optional (cite) argument for
+      `\blockquote` from `csquotes` (#6802).
+
+  * LaTeX writer: Improved calculation of table column widths.
+    We now have LaTeX do the calculation, using `\tabcolsep`.
+    So we should now have accurate relative column widths no
+    matter what the text width.  The default template has been modified to load
+    the calc package if tables are used.
+
+  * HTML writer: Fix duplicate "class" attribute for table
+    rows (Andy Morris).
+
+  * Text.Pandoc.Filter: allow shorter YAML representation of Citeproc
+    (Albert Krewinkel).  The map-based YAML representation of filters expects
+    `type` and `path` fields. The path field had to be present for all filter
+    types, but is not used for citeproc filters. The field can now be omitted
+    when type is "citeproc", as described in the MANUAL.
+
+  * Text.Pandoc.Error: Add `PandocBibliographyError` constructor
+    for `PandocError` [API change].  This ensures that bibliography parsing
+    errors generate messages that include the bibliography file name --
+    otherwise it can be quite mysterious where it is coming from.
+
+  * Citeproc: properly handle `csl` field with `data:` URI (#6783).
+    This is used with the JATS writer, so this fixes a regression
+    in pandoc 2.11 with JATS output and citeproc.
+
+  * Allow `citation-abbreviations` in defaults file.
+
+  * JATS templates: ensure `jats_publishing` output is valid
+    (Albert Krewinkel).
+
+  * LaTeX template:  Fix `CSLRightInline`, so that it does not
+    run over the right margin.
+
+  * HTML template: default CSS tweaks (Mauro Bieg and John
+    MacFarlane).
+
+    - Fix margin before codeblock
+    - Add `monobackgroundcolor` variable, making the background color
+      and padding of code optional.
+    - Ensure that backgrounds from highlighting styles take precedence over
+      monobackgroundcolor
+    - Remove list markers from TOC
+    - Add margin-bottom where needed
+    - Remove italics from blockquote styling
+    - Change borders and spacing in tables to be more consistent with other
+       output formats
+    - Style h5, h6
+    - Set font-size for print media to 12pt.
+    - Reduce interline space.
+    - Reduce interparagraph space.
+    - Reduce line width.
+    - Remove the special `line-height: 1` for table cells.
+    - Remove the special line-height for pre.
+    - Ensure that there is a bit more space before a heading
+      than after.
+    - Slightly reduced space after title header.
+    - Add CSS example to MANUAL
+
+  * man template:  Change comment that triggers `tbl` from
+    `.\"t` to `'\" t`, as specified in groff_man(7) (#6803).
+
+  * Use latest commonmark, commonmark-extensions.
+    This fixes a bug with nested blocks in footnotes with the
+    `footnote` extension to `commonmark`.  See jgm/commonmark-hs#63.
+
+  * Citeproc: use comma for in-text citations inside footnotes.
+    When an author-in-text citation like `@foo` occurs in a footnote,
+    we now render it with:  `AUTHOR NAME + COMMA + SPACE + REST`.
+    Previously we rendered: `AUTHOR NAME + SPACE + "(" + REST + ")"`.
+    This gives better results.  Note that normal citations are still
+    rendered in parentheses.
+
+  * Use latest citeproc:
+
+    + citeproc no longer capitalizes notes, so we do it
+      in pandoc when appropriate.
+    + Closes #6783.
+
+  * Clarify manual on `--track-changes` (#6801).
+
+  * Add `doc/jats.md` to document pandoc's handling of JATS
+    (#6794, Albert Krewinkel).
+
+  * Fix code example in lua-filters.md (#6795).
+
 ## pandoc 2.11.0.4 (2020-10-21)
 
   * Commonmark writer: fix regression with fenced divs (#6768).

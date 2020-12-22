@@ -314,7 +314,7 @@ pandocToHtml opts (Pandoc meta blocks) = do
                           "/*]]>*/\n")
                           | otherwise -> mempty
                     Nothing -> mempty
-  let mCss :: Maybe [Text] = lookupContext "css" $ metadata
+  let mCss :: Maybe [Text] = lookupContext "css" metadata
   let context =   (if stHighlighting st
                       then case writerHighlightStyle opts of
                                 Just sty -> defField "highlighting-css"
@@ -695,12 +695,12 @@ blockToHtml opts (Div (ident, "section":dclasses, dkvs)
   let fragmentClass = case slideVariant of
                            RevealJsSlides -> "fragment"
                            _              -> "incremental"
-  let inDiv zs = RawBlock (Format "html") ("<div class=\""
+  let inDiv' zs = RawBlock (Format "html") ("<div class=\""
                        <> fragmentClass <> "\">") :
                    (zs ++ [RawBlock (Format "html") "</div>"])
   let breakOnPauses zs = case splitBy isPause zs of
                            []   -> []
-                           y:ys -> y ++ concatMap inDiv ys
+                           y:ys -> y ++ concatMap inDiv' ys
   let (titleBlocks, innerSecs) =
         if titleSlide
            -- title slides have no content of their own
@@ -778,14 +778,17 @@ blockToHtml opts (Div attr@(ident, classes, kvs') bs) = do
       classes' = case slideVariant of
         NoSlides -> classes
         _ -> filter (\k -> k /= "incremental" && k /= "nonincremental") classes
+  let paraToPlain (Para ils) = Plain ils
+      paraToPlain x          = x
+  let bs' = if "csl-entry" `elem` classes'
+               then walk paraToPlain bs
+               else bs
   contents <- if "columns" `elem` classes'
                  then -- we don't use blockListToHtml because it inserts
                       -- a newline between the column divs, which throws
                       -- off widths! see #4028
-                      mconcat <$> mapM (blockToHtml opts) bs
-                 else if isCslBibEntry
-                         then mconcat <$> mapM (cslEntryToHtml opts') bs
-                         else blockListToHtml opts' bs
+                      mconcat <$> mapM (blockToHtml opts) bs'
+                 else blockListToHtml opts' bs'
   let contents' = nl opts >> contents >> nl opts
   let (divtag, classes'') = if html5 && "section" `elem` classes'
                             then (H5.section, filter (/= "section") classes')
@@ -1089,16 +1092,18 @@ tableRowToHtml :: PandocMonad m
                -> TableRow
                -> StateT WriterState m Html
 tableRowToHtml opts (TableRow tblpart attr rownum rowhead rowbody) = do
-  let rowclass = A.class_ $ case rownum of
+  let rowclass = case rownum of
         Ann.RowNumber x | x `rem` 2 == 1   -> "odd"
         _               | tblpart /= Thead -> "even"
         _                                  -> "header"
+  let attr' = case attr of
+                (id', classes, rest) -> (id', rowclass:classes, rest)
   let celltype = case tblpart of
                    Thead -> HeaderCell
                    _     -> BodyCell
   headcells <- mapM (cellToHtml opts HeaderCell) rowhead
   bodycells <- mapM (cellToHtml opts celltype) rowbody
-  rowHtml <- addAttrs opts attr $ H.tr ! rowclass $ do
+  rowHtml <- addAttrs opts attr' $ H.tr $ do
     nl opts
     mconcat headcells
     mconcat bodycells
@@ -1211,6 +1216,10 @@ inlineToHtml opts inline = do
     LineBreak      -> return $ do
                         if html5 then H5.br else H.br
                         strToHtml "\n"
+    (Span ("",[cls],[]) ils)
+        | cls == "csl-block" || cls == "csl-left-margin" ||
+          cls == "csl-right-inline" || cls == "csl-indent"
+        -> inlineListToHtml opts ils >>= inDiv cls
 
     (Span (id',classes,kvs) ils) ->
                         let spanLikeTag = case classes of
@@ -1288,8 +1297,9 @@ inlineToHtml opts inline = do
                                         | any ((=="cite") . fst) kvs
                                           -> (Just attr, cs)
                                       cs -> (Nothing, cs)
-                                 H.q `fmap` inlineListToHtml opts lst'
-                                   >>= maybe return (addAttrs opts) maybeAttr
+                                 let addAttrsMb = maybe return (addAttrs opts)
+                                 inlineListToHtml opts lst' >>=
+                                   addAttrsMb maybeAttr . H.q
                                else (\x -> leftQuote >> x >> rightQuote)
                                     `fmap` inlineListToHtml opts lst
     (Math t str) -> do
@@ -1459,22 +1469,12 @@ blockListToNote opts ref blocks = do
                        _          -> noteItem
   return $ nl opts >> noteItem'
 
-cslEntryToHtml :: PandocMonad m
-               => WriterOptions
-               -> Block
-               -> StateT WriterState m Html
-cslEntryToHtml opts (Para xs) = do
+inDiv :: PandocMonad m=> Text -> Html -> StateT WriterState m Html
+inDiv cls x = do
   html5 <- gets stHtml5
-  let inDiv :: Text -> Html -> Html
-      inDiv cls x = ((if html5 then H5.div else H.div)
-                      x ! A.class_ (toValue cls))
-  let go (Span ("",[cls],[]) ils)
-        | cls == "csl-block" || cls == "csl-left-margin" ||
-          cls == "csl-right-inline" || cls == "csl-indent"
-        = inDiv cls <$> inlineListToHtml opts ils
-      go il = inlineToHtml opts il
-  mconcat <$> mapM go xs
-cslEntryToHtml opts x = blockToHtml opts x
+  return $
+    (if html5 then H5.div else H.div)
+                x ! A.class_ (toValue cls)
 
 isMathEnvironment :: Text -> Bool
 isMathEnvironment s = "\\begin{" `T.isPrefixOf` s &&

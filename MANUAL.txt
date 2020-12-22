@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: October 20, 2020
+date: December 17, 2020
 ---
 
 # Synopsis
@@ -665,18 +665,18 @@ header when requesting a document from a URL:
 
 :   Specifies what to do with insertions, deletions, and comments
     produced by the MS Word "Track Changes" feature.  `accept` (the
-    default), inserts all insertions, and ignores all
-    deletions. `reject` inserts all deletions and ignores
-    insertions. Both `accept` and `reject` ignore comments. `all` puts
-    in insertions, deletions, and comments, wrapped in spans with
-    `insertion`, `deletion`, `comment-start`, and `comment-end`
-    classes, respectively. The author and time of change is
-    included. `all` is useful for scripting: only accepting changes
-    from a certain reviewer, say, or before a certain date. If a
-    paragraph is inserted or deleted, `track-changes=all` produces a
-    span with the class `paragraph-insertion`/`paragraph-deletion`
-    before the affected paragraph break. This option only affects the
-    docx reader.
+    default) processes all the insertions and deletions.
+    `reject` ignores them.  Both `accept` and `reject` ignore comments.
+    `all` includes all insertions, deletions, and comments, wrapped
+    in spans with `insertion`, `deletion`, `comment-start`, and
+    `comment-end` classes, respectively. The author and time of
+    change is included. `all` is useful for scripting: only
+    accepting changes from a certain reviewer, say, or before a
+    certain date. If a paragraph is inserted or deleted,
+    `track-changes=all` produces a span with the class
+    `paragraph-insertion`/`paragraph-deletion` before the
+    affected paragraph break. This option only affects the docx
+    reader.
 
 `--extract-media=`*DIR*
 
@@ -899,11 +899,6 @@ header when requesting a document from a URL:
     `--resource-path=.:test` will search the working directory
     and the `test` subdirectory, in that order.
 
-    `--resource-path` only has an effect if (a) the output
-    format embeds images (for example, `docx`, `pdf`, or `html`
-    with `--self-contained`) or (b) it is used together with
-    `--extract-media`.
-
 `--request-header=`*NAME*`:`*VAL*
 
 :   Set the request header *NAME* to the value *VAL* when making
@@ -914,7 +909,7 @@ header when requesting a document from a URL:
 
 `--no-check-certificate`
 
-:   Disable the certificate verification to allow access to 
+:   Disable the certificate verification to allow access to
     unsecure HTTP resources (for example when the certificate
     is no longer valid or self signed).
 
@@ -963,37 +958,45 @@ header when requesting a document from a URL:
     placement of link references is affected by the
     `--reference-location` option.
 
-`--reference-location = block`|`section`|`document`
+`--reference-location=block`|`section`|`document`
 
 :   Specify whether footnotes (and references, if `reference-links` is
     set) are placed at the end of the current (top-level) block, the
     current section, or the document. The default is
     `document`. Currently only affects the markdown writer.
 
+`--markdown-headings=setext`|`atx`
+
+:   Specify whether to use ATX-style (`#`-prefixed) or
+    Setext-style (underlined) headings for level 1 and 2
+    headings in Markdown output.  (The default is `atx`.)
+    ATX-style headings are always used for levels 3+.
+    This option also affects Markdown cells in `ipynb` output.
+
 `--atx-headers`
 
-:   Use ATX-style headings in Markdown output. The default is
-    to use setext-style headings for levels 1 to 2, and then ATX headings.
-    (Note: for `gfm` output, ATX headings are always used.)
-    This option also affects markdown cells in `ipynb` output.
+:   *Deprecated synonym for `--markdown-headings=atx`.*
 
-`--top-level-division=[default|section|chapter|part]`
+`--top-level-division=default`|`section`|`chapter`|`part`
 
-:   Treat top-level headings as the given division type in LaTeX, ConTeXt,
-    DocBook, and  TEI output. The hierarchy order is part, chapter, then section;
-    all headings are shifted such that the top-level heading becomes the specified
-    type. The default behavior is to determine the best division type via
-    heuristics: unless other conditions apply, `section` is chosen. When the
-    `documentclass` variable is set to `report`, `book`, or `memoir` (unless the
-    `article` option is specified), `chapter` is implied as the setting for this
-    option. If `beamer` is the output format, specifying either `chapter` or
-    `part` will cause top-level headings to become `\part{..}`, while
-    second-level headings remain as their default type.
+:   Treat top-level headings as the given division type in
+    LaTeX, ConTeXt, DocBook, and  TEI output. The hierarchy
+    order is part, chapter, then section; all headings are
+    shifted such that the top-level heading becomes the
+    specified type. The default behavior is to determine the
+    best division type via heuristics: unless other conditions
+    apply, `section` is chosen. When the `documentclass`
+    variable is set to `report`, `book`, or `memoir` (unless the
+    `article` option is specified), `chapter` is implied as the
+    setting for this option. If `beamer` is the output format,
+    specifying either `chapter` or `part` will cause top-level
+    headings to become `\part{..}`, while second-level headings
+    remain as their default type.
 
 `-N`, `--number-sections`
 
-:   Number section headings in LaTeX, ConTeXt, HTML, Docx, or EPUB output.
-    By default, sections are not numbered.  Sections with class
+:   Number section headings in LaTeX, ConTeXt, HTML, Docx, ms, or EPUB
+    output.  By default, sections are not numbered.  Sections with class
     `unnumbered` will never be numbered, even if `--number-sections`
     is specified.
 
@@ -1326,7 +1329,10 @@ header when requesting a document from a URL:
 :   Set the `bibliography` field in the document's metadata to *FILE*,
     overriding any value set in the metadata.  If you supply
     this argument multiple times, each *FILE* will be added to
-    bibliography.
+    bibliography.  If *FILE* is a URL, it will be fetched
+    via HTTP. If *FILE* is not found relative to the
+    working directory, it will be sought in the resource path
+    (see `--resource-path`).
 
 `--csl=`*FILE*
 
@@ -1335,8 +1341,8 @@ header when requesting a document from a URL:
     `--metadata csl=FILE`.)  If *FILE* is a URL, it will be
     fetched via HTTP.  If *FILE* is not found relative to the
     working directory, it will be sought in the resource path
-    and finally in the `csl` subdirectory of the
-    pandoc user data directory.
+    (see `--resource-path`) and finally in the `csl`
+    subdirectory of the pandoc user data directory.
 
 `--citation-abbreviations=`*FILE*
 
@@ -1345,28 +1351,31 @@ header when requesting a document from a URL:
     `--metadata citation-abbreviations=FILE`.)
     If *FILE* is a URL, it will be fetched via HTTP.  If *FILE* is not
     found relative to the working directory, it will be sought
-    in the resource path and finally in the `csl` subdirectory
-    of the pandoc user data directory.
+    in the resource path (see `--resource-path`) and finally in
+    the `csl` subdirectory of the pandoc user data directory.
 
 `--natbib`
 
-:   Use [`natbib`] for citations in LaTeX output.  This option is not for use
-    with the `--citeproc` option or with PDF output.  It is intended for
-    use in producing a LaTeX file that can be processed with [`bibtex`].
+:   Use [`natbib`] for citations in LaTeX output.  This option
+    is not for use with the `--citeproc` option or with PDF
+    output.  It is intended for use in producing a LaTeX file
+    that can be processed with [`bibtex`].
 
 `--biblatex`
 
-:   Use [`biblatex`] for citations in LaTeX output.  This option is not for use
-    with the `--citeproc` option or with PDF output. It is intended for
-    use in producing a LaTeX file that can be processed with [`bibtex`] or [`biber`].
+:   Use [`biblatex`] for citations in LaTeX output.  This option
+    is not for use with the `--citeproc` option or with PDF
+    output. It is intended for use in producing a LaTeX file
+    that can be processed with [`bibtex`] or [`biber`].
 
 ## Math rendering in HTML {.options}
 
-The default is to render TeX math as far as possible using Unicode characters.
-Formulas are put inside a `span` with `class="math"`, so that they may be styled
-differently from the surrounding text if needed. However, this gives acceptable
-results only for basic math, usually you will want to use `--mathjax` or another
-of the following options.
+The default is to render TeX math as far as possible using
+Unicode characters.  Formulas are put inside a `span` with
+`class="math"`, so that they may be styled differently from the
+surrounding text if needed. However, this gives acceptable
+results only for basic math, usually you will want to use
+`--mathjax` or another of the following options.
 
 `--mathjax`[`=`*URL*]
 
@@ -1380,10 +1389,11 @@ of the following options.
 
 `--mathml`
 
-:   Convert TeX math to [MathML] (in `epub3`, `docbook4`, `docbook5`, `jats`,
-    `html4` and `html5`).  This is the default in `odt` output. Note that
-    currently only Firefox and Safari (and select e-book readers) natively
-    support MathML.
+:   Convert TeX math to [MathML] (in `epub3`, `docbook4`,
+    `docbook5`, `jats`, `html4` and `html5`).  This is the
+    default in `odt` output. Note that currently only Firefox
+    and Safari (and select e-book readers) natively support
+    MathML.
 
 `--webtex`[`=`*URL*]
 
@@ -1533,6 +1543,7 @@ csl: ieee
 bibliography:
 - foobar.bib
 - barbaz.json
+citation-abbreviations: abbrevs.json
 
 # Filters will be assumed to be Lua filters if they have
 # the .lua extension, and json filters otherwise.  But
@@ -1623,7 +1634,7 @@ epub-cover-image: cover.jpg
 reference-links: true
 # block, section, or document
 reference-location: block
-atx-headers: false
+markdown-headings: setext
 
 # accept, reject, or all
 track-changes: accept
@@ -2098,7 +2109,8 @@ Currently the following pipes are predefined:
     including a title block in the document itself, you can
     set the `title-meta`, `author-meta`, and `date-meta`
     variables.  (By default these are set automatically, based
-    on `title`, `author`, and `date`.)
+    on `title`, `author`, and `date`.) The page title in HTML
+    is set by `pagetitle`, which is equal to `title` by default.
 
 `subtitle`
 :   document subtitle, included in HTML, EPUB, LaTeX, ConTeXt, and docx
@@ -2172,15 +2184,16 @@ ODT or pptx.
 :   the base script direction, either `rtl` (right-to-left)
     or `ltr` (left-to-right).
 
-    For bidirectional documents, native pandoc `span`s and `div`s
-    with the `dir` attribute (value `rtl` or `ltr`) can be used to
-    override the base direction in some output formats.
-    This may not always be necessary if the final renderer
-    (e.g. the browser, when generating HTML) supports the
-    [Unicode Bidirectional Algorithm].
+    For bidirectional documents, native pandoc `span`s and
+    `div`s with the `dir` attribute (value `rtl` or `ltr`) can
+    be used to override the base direction in some output
+    formats.  This may not always be necessary if the final
+    renderer (e.g. the browser, when generating HTML) supports
+    the [Unicode Bidirectional Algorithm].
 
-    When using LaTeX for bidirectional documents, only the `xelatex` engine
-    is fully supported (use `--pdf-engine=xelatex`).
+    When using LaTeX for bidirectional documents, only the
+    `xelatex` engine is fully supported (use
+    `--pdf-engine=xelatex`).
 
 [BCP 47]: https://tools.ietf.org/html/bcp47
 [Unicode Bidirectional Algorithm]: https://www.w3.org/International/articles/inline-bidi-markup/uba-basics
@@ -2189,7 +2202,7 @@ ODT or pptx.
 ### Variables for HTML
 
 `document-css`
-:   Enables inclusion of most of the CSS in the `styles.html`
+:   Enables inclusion of most of the [CSS] in the `styles.html`
     [partial](#partials) (have a look with
     `pandoc --print-default-data-file=templates/styles.html`).
     Unless you use [`--css`](#option--css), this variable
@@ -2213,6 +2226,10 @@ ODT or pptx.
 `monofont`
 :   sets the CSS `font-family` property on `code` elements.
 
+`monobackgroundcolor`
+:   sets the CSS `background-color` property on `code` elements
+    and adds extra padding.
+
 `linestretch`
 :   sets the CSS `line-height` property on the `html` element,
     which is preferred to be unitless.
@@ -2223,11 +2240,34 @@ ODT or pptx.
 `margin-left`, `margin-right`, `margin-top`, `margin-bottom`
 :   sets the corresponding CSS `padding` properties on the `body` element.
 
+To override or extend some [CSS] for just one document, include for example:
+
+    ---
+    header-includes: |
+      <style>
+      blockquote {
+        font-style: italic;
+      }
+      tr.even {
+        background-color: #f0f0f0;
+      }
+      td, th {
+        padding: 0.5em 2em 0.5em 0.5em;
+      }
+      tbody {
+        border-bottom: none;
+      }
+      </style>
+    ---
+
+[CSS]: https://developer.mozilla.org/en-US/docs/Learn/CSS
+
 ### Variables for HTML math
 
 `classoption`
-:   when using [KaTeX](#option--katex), you can render display math equations
-    flush left using [YAML metadata](#layout) or with `-M classoption=fleqn`.
+:   when using [KaTeX](#option--katex), you can render display
+math equations flush left using [YAML metadata](#layout) or with
+`-M classoption=fleqn`.
 
 ### Variables for HTML slides
 
@@ -2339,9 +2379,10 @@ Pandoc uses these variables when [creating a PDF] with a LaTeX engine.
         ...
 
 `documentclass`
-:   document class: usually one of the standard classes, [`article`], [`book`],
-    and [`report`]; the [KOMA-Script] equivalents, `scrartcl`, `scrbook`,
-    and `scrreprt`, which default to smaller margins; or [`memoir`]
+:   document class: usually one of the standard classes,
+    [`article`], [`book`], and [`report`]; the [KOMA-Script]
+    equivalents, `scrartcl`, `scrbook`, and `scrreprt`, which
+    default to smaller margins; or [`memoir`]
 
 `geometry`
 :   option for [`geometry`] package, e.g. `margin=1in`;
@@ -2366,8 +2407,9 @@ Pandoc uses these variables when [creating a PDF] with a LaTeX engine.
         ...
 
 `indent`
-:   if true, pandoc will use document class settings for indentation (the default LaTeX template
-    otherwise removes indentation and adds space between paragraphs)
+:   if true, pandoc will use document class settings for
+    indentation (the default LaTeX template otherwise removes
+    indentation and adds space between paragraphs)
 
 `linestretch`
 :   adjusts line spacing using the [`setspace`]
@@ -2392,8 +2434,8 @@ Pandoc uses these variables when [creating a PDF] with a LaTeX engine.
 #### Fonts
 
 `fontenc`
-:   allows font encoding to be specified through `fontenc` package (with `pdflatex`);
-    default is `T1` (see [LaTeX font encodings guide])
+:   allows font encoding to be specified through `fontenc` package (with
+    `pdflatex`); default is `T1` (see [LaTeX font encodings guide])
 
 `fontfamily`
 :   font package for use with `pdflatex`:
@@ -2463,7 +2505,8 @@ Pandoc uses these variables when [creating a PDF] with a LaTeX engine.
 :   contents of acknowledgments footnote after document title
 
 `toc`
-:   include table of contents (can also be set using `--toc/--table-of-contents`)
+:   include table of contents (can also be set using
+    `--toc/--table-of-contents`)
 
 `toc-depth`
 :   level of section to include in table of contents
@@ -2505,12 +2548,12 @@ Pandoc uses these variables when [creating a PDF] with ConTeXt.
 :   font size for body text (e.g. `10pt`, `12pt`)
 
 `headertext`, `footertext`
-:   text to be placed in running header or footer (see [ConTeXt Headers and Footers]);
-    repeat up to four times for different placement
+:   text to be placed in running header or footer (see [ConTeXt Headers and
+    Footers]); repeat up to four times for different placement
 
 `indenting`
-:   controls indentation of paragraphs, e.g. `yes,small,next` (see [ConTeXt Indentation]);
-    repeat for multiple options
+:   controls indentation of paragraphs, e.g. `yes,small,next` (see
+    [ConTeXt Indentation]); repeat for multiple options
 
 `interlinespace`
 :   adjusts line spacing, e.g. `4ex` (using [`setupinterlinespace`]);
@@ -2521,16 +2564,19 @@ Pandoc uses these variables when [creating a PDF] with ConTeXt.
     repeat for multiple options
 
 `linkcolor`, `contrastcolor`
-:   color for links outside and inside a page, e.g. `red`, `blue` (see [ConTeXt Color])
+:   color for links outside and inside a page, e.g. `red`, `blue` (see
+    [ConTeXt Color])
 
 `linkstyle`
-:   typeface style for links, e.g. `normal`, `bold`, `slanted`, `boldslanted`, `type`, `cap`, `small`
+:   typeface style for links, e.g. `normal`, `bold`, `slanted`, `boldslanted`,
+    `type`, `cap`, `small`
 
 `lof`, `lot`
 :   include list of figures, list of tables
 
 `mainfont`, `sansfont`, `monofont`, `mathfont`
-:   font families: take the name of any system font (see [ConTeXt Font Switching])
+:   font families: take the name of any system font (see
+    [ConTeXt Font Switching])
 
 `margin-left`, `margin-right`, `margin-top`, `margin-bottom`
 :   sets margins, if `layout` is not used (otherwise `layout`
@@ -2545,16 +2591,18 @@ Pandoc uses these variables when [creating a PDF] with ConTeXt.
     repeat for multiple options
 
 `pdfa`
-:   adds to the preamble the setup necessary to generate PDF/A of the type
-    specified, e.g. `1a:2005`, `2a`. If no type is specified (i.e. the value
-    is set to True, by e.g. `--metadata=pdfa` or `pdfa: true` in a YAML metadata
-    block), `1b:2005` will be used as default, for reasons of backwards
-    compatibility. Using `--variable=pdfa` without specified value is not supported.
-    To successfully generate PDF/A the required ICC color profiles have to
-    be available and the content and all included files (such as images)
-    have to be standard conforming.  The ICC profiles and output intent
-    may be specified using the variables `pdfaiccprofile` and `pdfaintent`.
-    See also [ConTeXt PDFA] for more details.
+:   adds to the preamble the setup necessary to generate PDF/A
+    of the type specified, e.g. `1a:2005`, `2a`. If no type is
+    specified (i.e. the value is set to True, by e.g.
+    `--metadata=pdfa` or `pdfa: true` in a YAML metadata block),
+    `1b:2005` will be used as default, for reasons of backwards
+    compatibility. Using `--variable=pdfa` without specified value
+    is not supported.  To successfully generate PDF/A the required
+    ICC color profiles have to be available and the content and all
+    included files (such as images) have to be standard conforming.
+    The ICC profiles and output intent may be specified using the
+    variables `pdfaiccprofile` and `pdfaintent`.  See also [ConTeXt
+    PDFA] for more details.
 
 `pdfaiccprofile`
 :   when used in conjunction with `pdfa`, specifies the ICC profile to use
@@ -2569,10 +2617,12 @@ Pandoc uses these variables when [creating a PDF] with ConTeXt.
     If left unspecified, `sRGB IEC61966-2.1` is used as default.
 
 `toc`
-:   include table of contents (can also be set using `--toc/--table-of-contents`)
+:   include table of contents (can also be set using
+    `--toc/--table-of-contents`)
 
 `whitespace`
-:   spacing between paragraphs, e.g. `none`, `small` (using [`setupwhitespace`])
+:   spacing between paragraphs, e.g. `none`, `small` (using
+    [`setupwhitespace`])
 
 `includesource`
 :   include all source documents as file attachments in the PDF file
@@ -2975,6 +3025,43 @@ This extension can be enabled/disabled for the following formats:
 output formats
 :  `odt`, `opendocument`
 
+#### Extension: `xrefs_name` ####
+
+Links to headings, figures and tables inside the document are
+substituted with cross-references that will use the name or caption
+of the referenced item. The original link text is replaced once
+the generated document is refreshed. This extension can be combined
+with `xrefs_number` in which case numbers will appear before the
+name.
+
+Text in cross-references is only made consistent with the referenced
+item once the document has been refreshed.
+
+This extension can be enabled/disabled for the following formats:
+
+output formats
+:  `odt`, `opendocument`
+
+#### Extension: `xrefs_number` ####
+
+Links to headings, figures and tables inside the document are
+substituted with cross-references that will use the number
+of the referenced item. The original link text is discarded.
+This extension can be combined with `xrefs_name` in which case
+the name or caption numbers will appear after the number.
+
+For the `xrefs_number` to be useful heading numbers must be enabled
+in the generated document, also table and figure captions must be enabled
+using for example the `native_numbering` extension.
+
+Numbers in cross-references are only visible in the final document once
+it has been refreshed.
+
+This extension can be enabled/disabled for the following formats:
+
+output formats
+:  `odt`, `opendocument`
+
 #### Extension: `styles` #### {#ext-styles}
 
 When converting from docx, read all docx styles as divs (for
@@ -3001,8 +3088,8 @@ output format.
 
 #### Extension: `citations` {#org-citations}
 
-Some aspects of [Pandoc's Markdown citation syntax](#citations) are also accepted
-in `org` input.
+Some aspects of [Pandoc's Markdown citation syntax](#citations)
+are also accepted in `org` input.
 
 #### Extension: `ntb` ####
 
@@ -3110,7 +3197,8 @@ pandoc does require the space.
 
 ### Heading identifiers ###
 
-See also the [`auto_identifiers` extension](#extension-auto_identifiers) above.
+See also the [`auto_identifiers`
+extension](#extension-auto_identifiers) above.
 
 #### Extension: `header_attributes` ####
 
@@ -3232,11 +3320,12 @@ block in a block quote, you need five spaces after the `>`:
 
 #### Extension: `blank_before_blockquote` ####
 
-Standard Markdown syntax does not require a blank line before a block
-quote.  Pandoc does require this (except, of course, at the beginning of the
-document). The reason for the requirement is that it is all too easy for a
-`>` to end up at the beginning of a line by accident (perhaps through line
-wrapping). So, unless the `markdown_strict` format is used, the following does
+Standard Markdown syntax does not require a blank line before a
+block quote.  Pandoc does require this (except, of course, at
+the beginning of the document). The reason for the requirement
+is that it is all too easy for a `>` to end up at the beginning
+of a line by accident (perhaps through line wrapping). So,
+unless the `markdown_strict` format is used, the following does
 not produce a nested block quote in pandoc:
 
     > This is a block quote.
@@ -3305,14 +3394,16 @@ this syntax:
                    qsort (filter (>= x) xs)
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Here `mycode` is an identifier, `haskell` and `numberLines` are classes, and
-`startFrom` is an attribute with value `100`. Some output formats can use this
-information to do syntax highlighting. Currently, the only output formats
-that uses this information are HTML, LaTeX, Docx, Ms, and PowerPoint. If
-highlighting is supported for your output format and language, then the code
-block above will appear highlighted, with numbered lines. (To see which
-languages are supported, type `pandoc --list-highlight-languages`.) Otherwise,
-the code block above will appear as follows:
+Here `mycode` is an identifier, `haskell` and `numberLines` are
+classes, and `startFrom` is an attribute with value `100`. Some
+output formats can use this information to do syntax
+highlighting. Currently, the only output formats that uses this
+information are HTML, LaTeX, Docx, Ms, and PowerPoint. If
+highlighting is supported for your output format and language,
+then the code block above will appear highlighted, with numbered
+lines. (To see which languages are supported, type `pandoc
+--list-highlight-languages`.) Otherwise, the code block above
+will appear as follows:
 
     <pre id="mycode" class="haskell numberLines" startFrom="100">
       <code>
@@ -3578,11 +3669,12 @@ a blank line, and must be followed by one or more definitions.
 A definition begins with a colon or tilde, which may be indented one
 or two spaces.
 
-A term may have multiple definitions, and each definition may consist of one or
-more block elements (paragraph, code block, list, etc.), each indented four
-spaces or one tab stop.  The body of the definition (including the first line,
-aside from the colon or tilde) should be indented four spaces. However,
-as with other Markdown lists, you can "lazily" omit indentation except
+A term may have multiple definitions, and each definition may
+consist of one or more block elements (paragraph, code block,
+list, etc.), each indented four spaces or one tab stop.  The
+body of the definition (including the first line, aside from the
+colon or tilde) should be indented four spaces. However, as with
+other Markdown lists, you can "lazily" omit indentation except
 at the beginning of a paragraph or other block element:
 
     Term 1
@@ -3610,7 +3702,8 @@ Note that space between items in a definition list is required.
 hard wrapping, can be activated with `compact_definition_lists`: see
 [Non-pandoc extensions], below.)
 
-[^3]:  I have been influenced by the suggestions of [David Wheeler](https://justatheory.com/2009/02/modest-markdown-proposal/).
+[^3]:  I have been influenced by the suggestions of [David
+  Wheeler](https://justatheory.com/2009/02/modest-markdown-proposal/).
 
 ### Numbered example lists ###
 
@@ -5032,6 +5125,13 @@ for regular emphasis, add extra blank space around headings.
 
   [Project Gutenberg]: https://www.gutenberg.org
 
+#### Extension: `sourcepos` ####
+
+Include source position attributes when parsing `commonmark`.
+For elements that accept attributes, a `data-pos` attribute
+is added; other elements are placed in a surrounding
+Div or Span elemnet with a `data-pos` attribute.
+
 ## Markdown variants
 
 In addition to pandoc's extended Markdown, the following Markdown
@@ -5146,6 +5246,10 @@ array of YAML-encoded references, for example:
       language: en-GB
     ...
 
+If both an external bibliography and inline (YAML metadata)
+references are provided, both will be used. In case of
+conflicting `id`s, the inline references will take precedence.
+
 Note that `pandoc` can be used to produce such a YAML metadata
 section from a BibTeX, BibLaTeX, or CSL JSON bibliography:
 
@@ -5239,11 +5343,11 @@ The CSL project provides further information on [finding and
 editing styles].
 
 The `--citation-abbreviations` option (or the
-`citation-abbreviations` metadata field) may be used to
-specify a JSON file containing abbreviations of journals
-that should be used in formatted bibliographies when
-`form="short"` is specified.  The format of the file
-can be illustrated with an example:
+`citation-abbreviations` metadata field) may be used to specify
+a JSON file containing abbreviations of journals that should be
+used in formatted bibliographies when `form="short"` is
+specified.  The format of the file can be illustrated with an
+example:
 
 
     { "default": {
@@ -5333,7 +5437,7 @@ or BibLaTeX (for `--biblatex`) format.
 
 A few other metadata fields affect bibliography formatting:
 
-`link-citation`
+`link-citations`
 :   If true, citations will be
     hyperlinked to the corresponding bibliography entries
     (for author-date and numerical styles only).
@@ -5409,18 +5513,21 @@ To produce an HTML/JavaScript slide show, simply type
 
 where `FORMAT` is either `s5`, `slidy`, `slideous`, `dzslides`, or `revealjs`.
 
-For Slidy, Slideous, reveal.js, and S5, the file produced by pandoc with the
-`-s/--standalone` option embeds a link to JavaScript and CSS files, which are
-assumed to be available at the relative path `s5/default` (for S5), `slideous`
-(for Slideous), `reveal.js` (for reveal.js), or at the Slidy website at
-`w3.org` (for Slidy).  (These paths can be changed by setting the `slidy-url`,
-`slideous-url`, `revealjs-url`, or `s5-url` variables; see [Variables for HTML slides],
-above.) For DZSlides, the (relatively short) JavaScript and CSS are included in
-the file by default.
+For Slidy, Slideous, reveal.js, and S5, the file produced by
+pandoc with the `-s/--standalone` option embeds a link to
+JavaScript and CSS files, which are assumed to be available at
+the relative path `s5/default` (for S5), `slideous` (for
+Slideous), `reveal.js` (for reveal.js), or at the Slidy website
+at `w3.org` (for Slidy).  (These paths can be changed by setting
+the `slidy-url`, `slideous-url`, `revealjs-url`, or `s5-url`
+variables; see [Variables for HTML slides], above.) For
+DZSlides, the (relatively short) JavaScript and CSS are included
+in the file by default.
 
-With all HTML slide formats, the `--self-contained` option can be used to
-produce a single file that contains all of the data necessary to display the
-slide show, including linked scripts, stylesheets, images, and videos.
+With all HTML slide formats, the `--self-contained` option can
+be used to produce a single file that contains all of the data
+necessary to display the slide show, including linked scripts,
+stylesheets, images, and videos.
 
 To produce a PDF slide show using beamer, type
 

@@ -34,15 +34,15 @@ import Control.Monad.Identity
 import Citeproc.Locale (getLocale)
 import Citeproc.CslJson
 import Text.Pandoc.Options (WriterOptions)
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Aeson.Encode.Pretty         (Config (..), Indent (Spaces),
                                          NumberFormat (Generic),
                                          defConfig, encodePretty')
 
 writeCslJson :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeCslJson _opts (Pandoc meta _) = do
-  let lang = fromMaybe (Lang "en" (Just "US")) $
-              parseLang <$> (lookupMeta "lang" meta >>= metaValueToText)
+  let lang = maybe (Lang "en" (Just "US")) parseLang
+               (lookupMeta "lang" meta >>= metaValueToText)
   locale <- case getLocale lang of
                Left e  -> throwError $ PandocCiteprocError e
                Right l -> return l
@@ -77,6 +77,7 @@ fromInline (Image _ ils _) = fromInlines ils
 fromInline (Note _) = CslEmpty
 fromInline (Span (_,[cl],_) ils)
   | "csl-" `T.isPrefixOf` cl = CslDiv cl (fromInlines ils)
+  | cl == "nocase" = CslNoCase (fromInlines ils)
 fromInline (Span _ ils) = fromInlines ils
 
 toCslJson :: Locale -> [Reference Inlines] -> ByteString
