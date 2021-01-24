@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.LaTeX.Table
-   Copyright   : Copyright (C) 2006-2020 John MacFarlane
+   Copyright   : Copyright (C) 2006-2021 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -169,7 +169,7 @@ rowToLaTeX :: PandocMonad m
            -> LW m (Doc Text)
 rowToLaTeX blocksWriter celltype row = do
   cellsDocs <- mapM (cellToLaTeX blocksWriter celltype) (fillRow row)
-  return $ hsep (intersperse "&" cellsDocs) <> " \\\\ \\addlinespace"
+  return $ hsep (intersperse "&" cellsDocs) <> " \\\\"
 
 -- | Pads row with empty cells to adjust for rowspans above this row.
 fillRow :: [Ann.Cell] -> [Ann.Cell]

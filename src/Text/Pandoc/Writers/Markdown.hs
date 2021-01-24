@@ -5,7 +5,7 @@
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.Markdown
-   Copyright   : Copyright (C) 2006-2020 John MacFarlane
+   Copyright   : Copyright (C) 2006-2021 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -494,25 +494,24 @@ blockToMarkdown' opts b@(RawBlock f str) = do
   let renderEmpty = mempty <$ report (BlockNotRendered b)
   case variant of
     PlainText -> renderEmpty
-    _ | f `elem` ["markdown", "markdown_github", "markdown_phpextra",
-                  "markdown_mmd", "markdown_strict"] ->
-            return $ literal str <> literal "\n"
-      | isEnabled Ext_raw_attribute opts -> rawAttribBlock
-      | f `elem` ["html", "html5", "html4"] ->
-            case () of
-              _ | isEnabled Ext_markdown_attribute opts -> return $
-                    literal (addMarkdownAttribute str) <> literal "\n"
-                | isEnabled Ext_raw_html opts -> return $
-                    literal str <> literal "\n"
-                | isEnabled Ext_raw_attribute opts -> rawAttribBlock
-                | otherwise -> renderEmpty
-      | f `elem` ["latex", "tex"] ->
-            case () of
-              _ | isEnabled Ext_raw_tex opts -> return $
-                    literal str <> literal "\n"
-                | isEnabled Ext_raw_attribute opts -> rawAttribBlock
-                | otherwise -> renderEmpty
-      | otherwise -> renderEmpty
+    Commonmark
+      | f `elem` ["gfm", "commonmark", "commonmark_x", "markdown"]
+         -> return $ literal str <> literal "\n"
+    Markdown
+      | f `elem` ["markdown", "markdown_github", "markdown_phpextra",
+                  "markdown_mmd", "markdown_strict"]
+         -> return $ literal str <> literal "\n"
+    _ | isEnabled Ext_raw_attribute opts -> rawAttribBlock
+      | f `elem` ["html", "html5", "html4"]
+      , isEnabled Ext_markdown_attribute opts
+         -> return $ literal (addMarkdownAttribute str) <> literal "\n"
+      | f `elem` ["html", "html5", "html4"]
+      , isEnabled Ext_raw_html opts
+         -> return $ literal str <> literal "\n"
+      | f `elem` ["latex", "tex"]
+      , isEnabled Ext_raw_tex opts
+         -> return $ literal str <> literal "\n"
+    _ -> renderEmpty
 blockToMarkdown' opts HorizontalRule =
   return $ blankline <> literal (T.replicate (writerColumns opts) "-") <> blankline
 blockToMarkdown' opts (Header level attr inlines) = do
@@ -674,7 +673,10 @@ blockToMarkdown' opts (BulletList items) = do
   contents <- inList $ mapM (bulletListItemToMarkdown opts) items
   return $ (if isTightList items then vcat else vsep) contents <> blankline
 blockToMarkdown' opts (OrderedList (start,sty,delim) items) = do
-  let start' = if isEnabled Ext_startnum opts then start else 1
+  variant <- asks envVariant
+  let start' = if variant == Commonmark || isEnabled Ext_startnum opts
+                  then start
+                  else 1
   let sty'   = if isEnabled Ext_fancy_lists opts then sty else DefaultStyle
   let delim' = if isEnabled Ext_fancy_lists opts then delim else DefaultDelim
   let attribs = (start', sty', delim')
@@ -1247,21 +1249,23 @@ inlineToMarkdown opts il@(RawInline f str) = do
   let renderEmpty = mempty <$ report (InlineNotRendered il)
   case variant of
     PlainText -> renderEmpty
-    _ | f `elem` ["markdown", "markdown_github", "markdown_phpextra",
-                  "markdown_mmd", "markdown_strict"] ->
-            return $ literal str
-      | isEnabled Ext_raw_attribute opts -> rawAttribInline
-      | f `elem` ["html", "html5", "html4"] ->
-            case () of
-              _ | isEnabled Ext_raw_html opts -> return $ literal str
-                | isEnabled Ext_raw_attribute opts -> rawAttribInline
-                | otherwise -> renderEmpty
-      | f `elem` ["latex", "tex"] ->
-            case () of
-              _ | isEnabled Ext_raw_tex opts -> return $ literal str
-                | isEnabled Ext_raw_attribute opts -> rawAttribInline
-                | otherwise -> renderEmpty
-      | otherwise -> renderEmpty
+    Commonmark
+      | f `elem` ["gfm", "commonmark", "commonmark_x", "markdown"]
+         -> return $ literal str
+    Markdown
+      | f `elem` ["markdown", "markdown_github", "markdown_phpextra",
+                  "markdown_mmd", "markdown_strict"]
+         -> return $ literal str
+    _ | isEnabled Ext_raw_attribute opts -> rawAttribInline
+      | f `elem` ["html", "html5", "html4"]
+      , isEnabled Ext_raw_html opts
+         -> return $ literal str
+      | f `elem` ["latex", "tex"]
+      , isEnabled Ext_raw_tex opts
+         -> return $ literal str
+    _ -> renderEmpty
+
+
 inlineToMarkdown opts LineBreak = do
   variant <- asks envVariant
   if variant == PlainText || isEnabled Ext_hard_line_breaks opts

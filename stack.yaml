@@ -13,15 +13,15 @@ extra-deps:
 - hslua-1.1.2
 - jira-wiki-markup-1.3.2
 - HsYAML-aeson-0.2.0.0
-- commonmark-0.1.1.2
+- commonmark-0.1.1.3
 - commonmark-extensions-0.2.0.4
 - commonmark-pandoc-0.2.0.1
 - doctemplates-0.9
-- citeproc-0.3.0.3
 - texmath-0.12.1
+- citeproc-0.3.0.5
 # - citeproc:
 #   git: https://github.com/jgm/citeproc.git
-#   commit: a8193fe375fa2354049bf9a967ba3bad4b1ba053
+#   commit: d44e24696ab444090d0e63e321c3a573f68b2e74
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
 resolver: lts-16.23

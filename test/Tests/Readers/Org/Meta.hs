@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Tests.Readers.Org.Meta
-   Copyright   : © 2014-2020 Albert Krewinkel
+   Copyright   : © 2014-2021 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <albert@zeitkraut.de>
@@ -115,6 +115,16 @@ tests =
     , "Document language" =:
       "#+LANGUAGE: de-DE" =?>
       Pandoc (setMeta "lang" (MetaString "de-DE") nullMeta) mempty
+
+    , testGroup "Todo sequences"
+      [ "not included in document" =:
+        "#+todo: WAITING | FINISHED" =?>
+        Pandoc mempty mempty
+
+      , "can contain multiple pipe characters" =:
+        "#+todo: UNFINISHED | RESEARCH | NOTES | CHART\n" =?>
+        Pandoc mempty mempty
+      ]
 
     , testGroup "LaTeX"
       [ "LATEX_HEADER" =:

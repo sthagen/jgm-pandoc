@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Tests.Readers.Org.Block.CodeBlock
-   Copyright   : © 2014-2020 Albert Krewinkel
+   Copyright   : © 2014-2021 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <albert@zeitkraut.de>
@@ -185,10 +185,10 @@ tests =
                 , "#+end_src"
                 ] =?>
       divWith
-         nullAttr
+         ("", ["captioned-content"], [] )
          (mappend
-          (plain $ spanWith ("", ["label"], [])
-                            (spcSep [ "Functor", "laws", "in", "Haskell" ]))
+          (divWith ("", ["caption"], []) $
+           plain (spcSep [ "Functor", "laws", "in", "Haskell" ]))
           (codeBlockWith ("functor-laws", ["haskell"], [])
                          (T.unlines [ "fmap id = id"
                                     , "fmap (p . q) = (fmap p) . (fmap q)"

@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.App
-   Copyright   : Copyright (C) 2006-2020 John MacFarlane
+   Copyright   : Copyright (C) 2006-2021 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -50,10 +50,9 @@ import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), defaultOpts,
 import Text.Pandoc.App.CommandLineOptions (parseOptions, options)
 import Text.Pandoc.App.OutputSettings (OutputSettings (..), optToOutputSettings)
 import Text.Pandoc.BCP47 (Lang (..), parseBCP47)
-import Text.Pandoc.Builder (setMeta)
 import Text.Pandoc.Filter (Filter (JSONFilter, LuaFilter), applyFilters)
 import Text.Pandoc.PDF (makePDF)
-import Text.Pandoc.SelfContained (makeDataURI, makeSelfContained)
+import Text.Pandoc.SelfContained (makeSelfContained)
 import Text.Pandoc.Shared (eastAsianLineBreakFilter, stripEmptyParagraphs,
          headerShift, isURI, tabFilter, uriPathToPath, filterIpynbOutput,
          defaultUserDataDirs, tshow, findM)
@@ -190,17 +189,6 @@ convertWithOpts opts = do
                     Nothing -> readDataFile "abbreviations"
                     Just f  -> readFileStrict f
 
-    metadata <- if format == "jats" &&
-                   isNothing (lookupMeta "csl" (optMetadata opts)) &&
-                   isNothing (lookupMeta "citation-style"
-                                               (optMetadata opts))
-                   then do
-                     jatsCSL <- readDataFile "jats.csl"
-                     let jatsEncoded = makeDataURI
-                                         ("application/xml", jatsCSL)
-                     return $ setMeta "csl" jatsEncoded $ optMetadata opts
-                   else return $ optMetadata opts
-
     case lookupMetaString "lang" (optMetadata opts) of
            ""      -> setTranslations $ Lang "en" "" "US" []
            l       -> case parseBCP47 l of
@@ -286,7 +274,7 @@ convertWithOpts opts = do
                       then fillMediaBag
                       else return)
               >=> return . adjustMetadata (metadataFromFile <>)
-              >=> return . adjustMetadata (<> metadata)
+              >=> return . adjustMetadata (<> optMetadata opts)
               >=> applyTransforms transforms
               >=> applyFilters readerOpts filters [T.unpack format]
               >=> maybe return extractMedia (optExtractMedia opts)

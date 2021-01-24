@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.Writers.EPUB
-   Copyright   : Copyright (C) 2010-2020 John MacFarlane
+   Copyright   : Copyright (C) 2010-2021 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -465,7 +465,12 @@ pandocToEPUB version opts doc = do
                 case epubCoverImage metadata of
                      Nothing   -> return ([],[])
                      Just img  -> do
-                       let coverImage = takeFileName img
+                       let fp = takeFileName img
+                       mediaPaths <- gets (map (fst . snd) . stMediaPaths)
+                       coverImageName <-  -- see #4206
+                            if ("media/" <> fp) `elem` mediaPaths
+                               then getMediaNextNewName (takeExtension fp)
+                               else return fp
                        imgContent <- lift $ P.readFileLazy img
                        (coverImageWidth, coverImageHeight) <-
                              case imageSize opts' (B.toStrict imgContent) of
@@ -478,7 +483,7 @@ pandocToEPUB version opts doc = do
                                     ("coverpage", toVal' "true"),
                                     ("pagetitle", toVal $
                                       escapeStringForXML $ TS.pack plainTitle),
-                                    ("cover-image", toVal' coverImage),
+                                    ("cover-image", toVal' coverImageName),
                                     ("cover-image-width", toVal' $
                                        show coverImageWidth),
                                     ("cover-image-height", toVal' $
@@ -486,7 +491,7 @@ pandocToEPUB version opts doc = do
                                      cssvars True <> vars }
                             (Pandoc meta [])
                        coverEntry <- mkEntry "text/cover.xhtml" cpContent
-                       coverImageEntry <- mkEntry ("media/" ++ coverImage)
+                       coverImageEntry <- mkEntry ("media/" ++ coverImageName)
                                              imgContent
                        return ( [ coverEntry ]
                               , [ coverImageEntry ] )
@@ -557,6 +562,20 @@ pandocToEPUB version opts doc = do
   let extractLinkURL' :: Int -> Inline -> [(TS.Text, TS.Text)]
       extractLinkURL' num (Span (ident, _, _) _)
         | not (TS.null ident) = [(ident, TS.pack (showChapter num) <> "#" <> ident)]
+      extractLinkURL' num (Link (ident, _, _) _ _)
+        | not (TS.null ident) = [(ident, TS.pack (showChapter num) <> "#" <> ident)]
+      extractLinkURL' num (Image (ident, _, _) _ _)
+        | not (TS.null ident) = [(ident, TS.pack (showChapter num) <> "#" <> ident)]
+      extractLinkURL' num (RawInline fmt raw)
+        | isHtmlFormat fmt
+        = foldr (\tag ->
+                   case tag of
+                     TagOpen{} ->
+                       case fromAttrib "id" tag of
+                         "" -> id
+                         x  -> ((x, TS.pack (showChapter num) <> "#" <> x):)
+                     _ -> id)
+            [] (parseTags raw)
       extractLinkURL' _ _ = []
 
   let extractLinkURL :: Int -> Block -> [(TS.Text, TS.Text)]
@@ -564,6 +583,18 @@ pandocToEPUB version opts doc = do
         | not (TS.null ident) = [(ident, TS.pack (showChapter num) <> "#" <> ident)]
       extractLinkURL num (Header _ (ident, _, _) _)
         | not (TS.null ident) = [(ident, TS.pack (showChapter num) <> "#" <> ident)]
+      extractLinkURL num (Table (ident,_,_) _ _ _ _ _)
+        | not (TS.null ident) = [(ident, TS.pack (showChapter num) <> "#" <> ident)]
+      extractLinkURL num (RawBlock fmt raw)
+        | isHtmlFormat fmt
+        = foldr (\tag ->
+                   case tag of
+                     TagOpen{} ->
+                       case fromAttrib "id" tag of
+                         "" -> id
+                         x  -> ((x, TS.pack (showChapter num) <> "#" <> x):)
+                     _ -> id)
+            [] (parseTags raw)
       extractLinkURL num b = query (extractLinkURL' num) b
 
   let reftable = concat $ zipWith (\(Chapter bs) num ->
@@ -1050,14 +1081,19 @@ getMediaNextNewName :: PandocMonad m => String -> E m String
 getMediaNextNewName ext = do
   nextId <- gets stMediaNextId
   modify $ \st -> st { stMediaNextId = nextId + 1 }
-  let nextName = "file" ++ show nextId ++ ext
-  (P.fetchItem (TS.pack nextName) >> getMediaNextNewName ext) `catchError` const (return nextName)
+  return $ "file" ++ show nextId ++ ext
+
+isHtmlFormat :: Format -> Bool
+isHtmlFormat (Format "html") = True
+isHtmlFormat (Format "html4") = True
+isHtmlFormat (Format "html5") = True
+isHtmlFormat _ = False
 
 transformBlock  :: PandocMonad m
                 => Block
                 -> E m Block
 transformBlock (RawBlock fmt raw)
-  | fmt == Format "html" = do
+  | isHtmlFormat fmt = do
   let tags = parseTags raw
   tags' <- mapM transformTag tags
   return $ RawBlock fmt (renderTags' tags')
@@ -1077,7 +1113,7 @@ transformInline opts x@(Math t m)
     return $ Span ("",["math",mathclass],[])
                 [Image nullAttr [x] ("../" <> newsrc, "")]
 transformInline _opts (RawInline fmt raw)
-  | fmt == Format "html" = do
+  | isHtmlFormat fmt = do
   let tags = parseTags raw
   tags' <- mapM transformTag tags
   return $ RawInline fmt (renderTags' tags')

@@ -3,7 +3,7 @@
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {- |
 Module      : Text.Pandoc.ImageSize
-Copyright   : Copyright (C) 2011-2020 John MacFarlane
+Copyright   : Copyright (C) 2011-2021 John MacFarlane
 License     : GNU GPL, version 2 or above
 
 Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -328,12 +328,16 @@ getSize img =
 svgSize :: WriterOptions -> ByteString -> Maybe ImageSize
 svgSize opts img = do
   doc <- Xml.parseXMLDoc $ UTF8.toString img
+  let viewboxSize = do
+        vb <- Xml.findAttrBy (== Xml.QName "viewBox" Nothing Nothing) doc
+        [_,_,w,h] <- mapM safeRead (T.words (T.pack vb))
+        return (w,h)
   let dpi = fromIntegral $ writerDpi opts
   let dirToInt dir = do
         dim <- Xml.findAttrBy (== Xml.QName dir Nothing Nothing) doc >>= lengthToDim . T.pack
         return $ inPixel opts dim
-  w <- dirToInt "width"
-  h <- dirToInt "height"
+  w <- dirToInt "width" <|> (fst <$> viewboxSize)
+  h <- dirToInt "height" <|> (snd <$> viewboxSize)
   return ImageSize {
     pxX  = w
   , pxY  = h

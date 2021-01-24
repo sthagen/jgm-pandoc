@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: December 29, 2020
+date: January 21, 2021
 ---
 
 # Synopsis
@@ -281,6 +281,8 @@ header when requesting a document from a URL:
     ::: {#output-formats}
     - `asciidoc` ([AsciiDoc]) or `asciidoctor` ([AsciiDoctor])
     - `beamer` ([LaTeX beamer][`beamer`] slide show)
+    - `bibtex` ([BibTeX] bibliography)
+    - `biblatex` ([BibLaTeX] bibliography)
     - `commonmark` ([CommonMark] Markdown)
     - `commonmark_x` ([CommonMark] Markdown with extensions)
     - `context` ([ConTeXt])
@@ -588,8 +590,8 @@ header when requesting a document from a URL:
 
      3. `$PATH` (executable only)
 
-    Filters and Lua-filters are applied in the order specified
-    on the command line.
+    Filters, Lua-filters, and citeproc processing are applied in
+    the order specified on the command line.
 
 `-L` *SCRIPT*, `--lua-filter=`*SCRIPT*
 
@@ -603,26 +605,17 @@ header when requesting a document from a URL:
     The `pandoc` Lua module provides helper functions for element
     creation.  It is always loaded into the script's Lua environment.
 
-    The following is an example Lua script for macro-expansion:
-
-        function expand_hello_world(inline)
-          if inline.c == '{{helloworld}}' then
-            return pandoc.Emph{ pandoc.Str "Hello, World" }
-          else
-            return inline
-          end
-        end
-
-        return {{Str = expand_hello_world}}
+    See the [Lua filters documentation] for further details.
 
     In order of preference, pandoc will look for Lua filters in
 
-     1. a specified full or relative path (executable or
-     non-executable)
+     1. a specified full or relative path
 
-     2. `$DATADIR/filters` (executable or non-executable)
-     where `$DATADIR` is the user data directory (see
-     `--data-dir`, above).
+     2. `$DATADIR/filters` where `$DATADIR` is the user data
+     directory (see `--data-dir`, above).
+
+    Filters, Lua filters, and citeproc processing are applied in
+    the order specified on the command line.
 
 `-M` *KEY*[`=`*VAL*], `--metadata=`*KEY*[`:`*VAL*]
 
@@ -707,6 +700,7 @@ header when requesting a document from a URL:
 [PHP]: https://github.com/vinai/pandocfilters-php
 [perl]: https://metacpan.org/pod/Pandoc::Filter
 [JavaScript/node.js]: https://github.com/mvhenderson/pandoc-filter-node
+[Lua filters documentation]: https://pandoc.org/lua-filters.html
 
 ## General writer options {.options}
 
@@ -1506,6 +1500,16 @@ input-files:
 - preface.md
 - content.md
 # or you may use input-file: with a single value
+
+# Include options from the specified defaults files.
+# The files will be searched for first in the working directory
+# and then in the defaults subdirectory of the user data directory.
+# The files are included in the same order in which they appear in
+# the list. Options specified in this defaults file always have
+# priority over the included ones.
+defaults:
+- defsA
+- defsB
 
 template: letter
 standalone: true
@@ -3090,6 +3094,13 @@ output format.
 
 Some aspects of [Pandoc's Markdown citation syntax](#citations)
 are also accepted in `org` input.
+
+#### Extension: `element_citations` ####
+
+In the `jats` output formats, this causes reference items to
+be replaced with `<element-citation>` elements. These
+elements are not influenced by CSL styles, but all information
+on the item is included in tags.
 
 #### Extension: `ntb` ####
 
@@ -5256,11 +5267,11 @@ section from a BibTeX, BibLaTeX, or CSL JSON bibliography:
     pandoc chem.bib -s -f biblatex -t markdown
     pandoc chem.json -s -f csljson -t markdown
 
-`pandoc` can also be used to produce CSL JSON bibliography
-from BibTeX, BibLaTeX, or markdown YAML:
+Indeed, `pandoc` can convert between any of these
+citation formats:
 
     pandoc chem.bib -s -f biblatex -t csljson
-    pandoc chem.yaml -s -f markdown -t csljson
+    pandoc chem.yaml -s -f markdown -t biblatex
 
 Running pandoc on a bibliography file with the `--citeproc`
 option will create a formatted bibliography in the format
@@ -5358,6 +5369,34 @@ example:
         }
       }
     }
+
+
+## Citations in note styles
+
+Pandoc's citation processing is designed to allow you to
+move between author-date, numerical, and note styles without
+modifying the markdown source.  When you're using a note
+style, avoid inserting footnotes manually. Instead, insert
+citations just as you would in an author-date style---for
+example,
+
+    Blah blah [@foo, p. 33].
+
+The footnote will be created automatically. Pandoc will take
+care of removing the space and moving the note before or
+after the period, depending on the setting of
+`notes-after-punctuation`, as described below in [Other relevant
+metadata fields].
+
+In some cases you may need to put a citation inside a regular
+footnote.  Normal citations in footnotes (such as `[@foo, p.
+33]`) will be rendered in parentheses.  In-text citations (such
+as `@foo [p. 33]`) will be rendered without parentheses. (A
+comma will be added if appropriate.)  Thus:
+
+    [^1]:  Some studies [@foo; @bar, p. 33] show that
+    frubulicious zoosnaps are quantical.  For a survey
+    of the literature, see @baz [chap. 1].
 
 ## Raw content in a style
 
@@ -6291,7 +6330,7 @@ application, here are some things to keep in mind:
 
 # Authors
 
-Copyright 2006--2020 John MacFarlane (jgm@berkeley.edu). Released
+Copyright 2006--2021 John MacFarlane (jgm@berkeley.edu). Released
 under the [GPL], version 2 or greater.  This software carries no
 warranty of any kind.  (See COPYRIGHT for full copyright and
 warranty notices.) For a full list of contributors, see the file

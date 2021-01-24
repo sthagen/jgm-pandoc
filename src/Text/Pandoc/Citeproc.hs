@@ -5,7 +5,10 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Text.Pandoc.Citeproc
-  ( processCitations )
+  ( processCitations,
+    getReferences,
+    getStyle
+  )
 where
 
 import Citeproc
@@ -15,39 +18,110 @@ import Text.Pandoc.Citeproc.CslJson (cslJsonToReferences)
 import Text.Pandoc.Citeproc.BibTeX (readBibtexString, Variant(..))
 import Text.Pandoc.Citeproc.MetaValue (metaValueToReference, metaValueToText)
 import Text.Pandoc.Readers.Markdown (yamlToRefs)
-import Text.Pandoc.Class (setResourcePath, getResourcePath, getUserDataDir)
 import qualified Text.Pandoc.BCP47 as BCP47
-import Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as L
+import Text.Pandoc.Builder (Inlines, Many(..), deleteMeta, setMeta)
+import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Definition as Pandoc
-import Text.Pandoc.Walk
-import Text.Pandoc.Builder as B
-import Text.Pandoc (PandocMonad(..), PandocError(..),
-                    readDataFile, ReaderOptions(..), pandocExtensions,
-                    report, LogMessage(..), fetchItem)
+import Text.Pandoc.Class (PandocMonad(..), getResourcePath, getUserDataDir,
+                          fetchItem, readDataFile, report, setResourcePath)
+import Text.Pandoc.Error (PandocError(..))
+import Text.Pandoc.Extensions (pandocExtensions)
+import Text.Pandoc.Logging (LogMessage(..))
+import Text.Pandoc.Options (ReaderOptions(..))
 import Text.Pandoc.Shared (stringify, ordNub, blocksToInlines, tshow)
 import qualified Text.Pandoc.UTF8 as UTF8
+import Text.Pandoc.Walk (query, walk, walkM)
+import Control.Applicative ((<|>))
+import Control.Monad.Except (catchError, throwError)
+import Control.Monad.State (State, evalState, get, put, runState)
 import Data.Aeson (eitherDecode)
-import Data.Default
-import Data.Ord ()
-import qualified Data.Map as M
-import qualified Data.Set as Set
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as L
 import Data.Char (isPunctuation, isUpper)
+import Data.Default (Default(def))
+import qualified Data.Foldable as Foldable
+import qualified Data.Map as M
+import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Ord ()
+import qualified Data.Sequence as Seq
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad.State
-import qualified Data.Sequence as Seq
-import qualified Data.Foldable as Foldable
-import System.FilePath
-import Control.Applicative
-import Control.Monad.Except
-import Data.Maybe (mapMaybe, fromMaybe)
+import System.FilePath (takeExtension)
 import Safe (lastMay, initSafe)
 -- import Debug.Trace as Trace (trace, traceShowId)
 
 
-processCitations :: PandocMonad m => Pandoc -> m Pandoc
+processCitations  :: PandocMonad m => Pandoc -> m Pandoc
 processCitations (Pandoc meta bs) = do
+  style <- getStyle (Pandoc meta bs)
+
+  mblang <- getLang meta
+  let locale = Citeproc.mergeLocales mblang style
+
+  refs <- getReferences (Just locale) (Pandoc meta bs)
+
+  let otherIdsMap = foldr (\ref m ->
+                             case T.words . extractText <$>
+                                  M.lookup "other-ids"
+                                      (referenceVariables ref) of
+                                Nothing  -> m
+                                Just ids -> foldr
+                                  (\id' ->
+                                    M.insert id' (referenceId ref)) m ids)
+                          M.empty refs
+  let meta' = deleteMeta "nocite" meta
+  let citations = getCitations locale otherIdsMap $ Pandoc meta' bs
+
+
+  let linkCites = maybe False truish $ lookupMeta "link-citations" meta
+  let opts = defaultCiteprocOptions{ linkCitations = linkCites }
+  let result = Citeproc.citeproc opts style (localeLanguage locale)
+                  refs citations
+  mapM_ (report . CiteprocWarning) (resultWarnings result)
+  let sopts = styleOptions style
+  let classes = "references" : -- TODO remove this or keep for compatibility?
+                "csl-bib-body" :
+                ["hanging-indent" | styleHangingIndent sopts]
+  let refkvs = (case styleEntrySpacing sopts of
+                   Just es | es > 0 -> (("entry-spacing",T.pack $ show es):)
+                   _ -> id) .
+               (case styleLineSpacing sopts of
+                   Just ls | ls > 1 -> (("line-spacing",T.pack $ show ls):)
+                   _ -> id) $ []
+  let bibs = mconcat $ map (\(ident, out) ->
+                     B.divWith ("ref-" <> ident,["csl-entry"],[]) . B.para .
+                       walk (convertQuotes locale) .  insertSpace $ out)
+                      (resultBibliography result)
+  let moveNotes = maybe True truish $
+                        lookupMeta "notes-after-punctuation" meta
+  let cits = map (walk fixLinks . walk (convertQuotes locale)) $
+               resultCitations result
+
+  let fixQuotes = case localePunctuationInQuote locale of
+                    Just True ->
+                      B.toList . movePunctuationInsideQuotes .  B.fromList
+                    _ -> id
+
+  let metanocites = lookupMeta "nocite" meta
+  let Pandoc meta'' bs' =
+         maybe id (setMeta "nocite") metanocites .
+         walk (map capitalizeNoteCitation .
+                fixQuotes .  mvPunct moveNotes locale) .
+         walk deNote .
+         evalState (walkM insertResolvedCitations $ Pandoc meta' bs)
+         $ cits
+  return $ Pandoc meta''
+         $ insertRefs refkvs classes meta''
+            (walk fixLinks $ B.toList bibs) bs'
+
+-- | Retrieve the CSL style specified by the csl or citation-style
+-- metadata field in a pandoc document, or the default CSL style
+-- if none is specified.  Retrieve the parent style
+-- if the style is a dependent style.  Add abbreviations defined
+-- in an abbreviation file if one has been specified.
+getStyle :: PandocMonad m => Pandoc -> m (Style Inlines)
+getStyle (Pandoc meta _) = do
   let cslfile = (lookupMeta "csl" meta <|> lookupMeta "citation-style" meta)
                 >>= metaValueToText
 
@@ -88,18 +162,35 @@ processCitations (Pandoc meta bs) = do
           catchError (getFile ".csl" basename) (\_ -> fst <$> fetchItem url)
 
   styleRes <- Citeproc.parseStyle getParentStyle cslContents
-  style <-
-    case styleRes of
-       Left err    -> throwError $ PandocAppError $ prettyCiteprocError err
-       Right style -> return style{ styleAbbreviations = mbAbbrevs }
-  mblang <- maybe (return Nothing) bcp47LangToIETF
-               ((lookupMeta "lang" meta <|> lookupMeta "locale" meta) >>=
-                 metaValueToText)
-  let locale = Citeproc.mergeLocales mblang style
+  case styleRes of
+     Left err    -> throwError $ PandocAppError $ prettyCiteprocError err
+     Right style -> return style{ styleAbbreviations = mbAbbrevs }
+
+
+-- Retrieve citeproc lang based on metadata.
+getLang :: PandocMonad m => Meta -> m (Maybe Lang)
+getLang meta = maybe (return Nothing) bcp47LangToIETF
+                 ((lookupMeta "lang" meta <|> lookupMeta "locale" meta) >>=
+                   metaValueToText)
+
+-- | Get references defined inline in the metadata and via an external
+-- bibliography.  Only references that are actually cited in the document
+-- (either with a genuine citation or with `nocite`) are returned.
+-- URL variables are converted to links.
+getReferences :: PandocMonad m
+              => Maybe Locale -> Pandoc -> m [Reference Inlines]
+getReferences mblocale (Pandoc meta bs) = do
+  locale <- case mblocale of
+                Just l  -> return l
+                Nothing -> do
+                  mblang <- getLang meta
+                  case mblang of
+                    Just lang -> return $ either mempty id $ getLocale lang
+                    Nothing   -> return mempty
+
   let getCiteId (Cite cs _) = Set.fromList $ map B.citationId cs
       getCiteId _ = mempty
   let metanocites = lookupMeta "nocite" meta
-  let meta' = deleteMeta "nocite" meta
   let nocites = maybe mempty (query getCiteId) metanocites
   let citeIds = query getCiteId (Pandoc meta bs)
   let idpred = if "*" `Set.member` nocites
@@ -118,59 +209,11 @@ processCitations (Pandoc meta bs) = do
                         Just fp -> getRefsFromBib locale idpred fp
                         Nothing -> return []
                     Nothing -> return []
-  let refs = map (linkifyVariables . legacyDateRanges)
-                 (externalRefs ++ inlineRefs)
-                 -- note that inlineRefs can override externalRefs
-  let otherIdsMap = foldr (\ref m ->
-                             case T.words . extractText <$>
-                                  M.lookup "other-ids"
-                                      (referenceVariables ref) of
-                                Nothing  -> m
-                                Just ids -> foldr
-                                  (\id' ->
-                                    M.insert id' (referenceId ref)) m ids)
-                          M.empty refs
-  -- TODO: issue warning if no refs defined
-  let citations = getCitations locale otherIdsMap $ Pandoc meta' bs
-  let linkCites = maybe False truish $ lookupMeta "link-citations" meta
-  let opts = defaultCiteprocOptions{ linkCitations = linkCites }
-  let result = Citeproc.citeproc opts style (localeLanguage locale)
-                  refs citations
-  mapM_ (report . CiteprocWarning) (resultWarnings result)
-  let sopts = styleOptions style
-  let classes = "references" : -- TODO remove this or keep for compatibility?
-                "csl-bib-body" :
-                ["hanging-indent" | styleHangingIndent sopts]
-  let refkvs = (case styleEntrySpacing sopts of
-                   Just es | es > 0 -> (("entry-spacing",T.pack $ show es):)
-                   _ -> id) .
-               (case styleLineSpacing sopts of
-                   Just ls | ls > 1 -> (("line-spacing",T.pack $ show ls):)
-                   _ -> id) $ []
-  let bibs = mconcat $ map (\(ident, out) ->
-                     B.divWith ("ref-" <> ident,["csl-entry"],[]) . B.para .
-                       walk (convertQuotes locale) .  insertSpace $ out)
-                      (resultBibliography result)
-  let moveNotes = maybe True truish $
-                        lookupMeta "notes-after-punctuation" meta
-  let cits = map (walk fixLinks . walk (convertQuotes locale)) $
-               resultCitations result
+  return $ map (linkifyVariables . legacyDateRanges)
+               (externalRefs ++ inlineRefs)
+            -- note that inlineRefs can override externalRefs
 
-  let fixQuotes = case localePunctuationInQuote locale of
-                    Just True ->
-                      B.toList . movePunctuationInsideQuotes .  B.fromList
-                    _ -> id
 
-  let Pandoc meta'' bs' =
-         maybe id (setMeta "nocite") metanocites .
-         walk (map capitalizeNoteCitation .
-                fixQuotes .  mvPunct moveNotes locale) .
-         walk deNote .
-         evalState (walkM insertResolvedCitations $ Pandoc meta' bs)
-         $ cits
-  return $ Pandoc meta''
-         $ insertRefs refkvs classes meta''
-            (walk fixLinks $ B.toList bibs) bs'
 
 -- If we have a span.csl-left-margin followed by span.csl-right-inline,
 -- we insert a space. This ensures that they will be separated by a space,
