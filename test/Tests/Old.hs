@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE TupleSections #-}
 {- |
    Module      : Tests.Old
    Copyright   : © 2006-2021 John MacFarlane
@@ -14,11 +15,10 @@ module Tests.Old (tests) where
 
 import Prelude
 import Data.Algorithm.Diff
-import Data.List (intercalate)
-import Data.Maybe (catMaybes)
 import System.Exit
-import System.FilePath (joinPath, splitDirectories, (<.>), (</>))
+import System.FilePath ((<.>), (</>))
 import qualified System.Environment as Env
+import System.Environment.Executable (getExecutablePath)
 import Text.Pandoc.Process (pipeProcess)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden.Advanced (goldenTest)
@@ -322,13 +322,14 @@ testWithNormalize normalizer pandocPath testname opts inp norm =
         getActual   = do
               mldpath   <- Env.lookupEnv "LD_LIBRARY_PATH"
               mdyldpath <- Env.lookupEnv "DYLD_LIBRARY_PATH"
-              let mbDynlibDir = findDynlibDir (reverse $
-                                 splitDirectories pandocPath)
-              let dynlibEnv = [("DYLD_LIBRARY_PATH", intercalate ":" $ catMaybes [mbDynlibDir, mdyldpath])
-                              ,("LD_LIBRARY_PATH",   intercalate ":" $ catMaybes [mbDynlibDir, mldpath])]
-              let env = dynlibEnv ++
-                        [("TMP","."),("LANG","en_US.UTF-8"),("HOME", "./")]
-              (ec, out) <- pipeProcess (Just env) pandocPath options mempty
+              let env  = ("TMP",".") :
+                         ("LANG","en_US.UTF-8") :
+                         ("HOME", "./") :
+                         maybe [] ((:[]) . ("LD_LIBRARY_PATH",)) mldpath ++
+                         maybe [] ((:[]) . ("DYLD_LIBRARY_PATH",)) mdyldpath
+
+              (ec, out) <- pipeProcess (Just env) pandocPath
+                             ("--emulate":options) mempty
               if ec == ExitSuccess
                  then return $ filter (/='\r') . normalizer
                              $ UTF8.toStringLazy out
@@ -339,8 +340,8 @@ testWithNormalize normalizer pandocPath testname opts inp norm =
 
 compareValues :: FilePath -> [String] -> String -> String -> IO (Maybe String)
 compareValues norm options expected actual = do
-  pandocPath <- findPandoc
-  let cmd  = pandocPath ++ " " ++ unwords options
+  testExePath <- getExecutablePath
+  let cmd  = testExePath ++ " --emulate " ++ unwords options
   let dash = replicate 72 '-'
   let diff = getDiff (lines actual) (lines expected)
   if expected == actual
@@ -350,8 +351,3 @@ compareValues norm options expected actual = do
         "\n--- " ++ norm ++
         "\n+++ " ++ cmd ++ "\n" ++
         showDiff (1,1) diff ++ dash
-
-findDynlibDir :: [FilePath] -> Maybe FilePath
-findDynlibDir []           = Nothing
-findDynlibDir ("build":xs) = Just $ joinPath (reverse xs) </> "build"
-findDynlibDir (_:xs)       = findDynlibDir xs
