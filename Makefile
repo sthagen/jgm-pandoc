@@ -2,11 +2,18 @@ version?=$(shell grep '^[Vv]ersion:' pandoc.cabal | awk '{print $$2;}')
 pandoc=$(shell find dist -name pandoc -type f -exec ls -t {} \; | head -1)
 SOURCEFILES?=$(shell git ls-tree -r master --name-only | grep "\.hs$$")
 BRANCH?=master
-RESOLVER?=lts-13
+COMMIT=$(shell git rev-parse --short HEAD)
+TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
+LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv))
+ifeq ($(LATESTBENCH),)
+BASELINE=
+else
+BASELINE=--baseline $(LATESTBENCH)
+endif
 GHCOPTS=-fdiagnostics-color=always
 WEBSITE=../../web/pandoc.org
 REVISION?=1
-BENCHARGS?="--timeout=6 +RTS -T -RTS"
+BENCHARGS?=--timeout=6 +RTS -T -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
 
 quick:
 	stack install --ghc-options='$(GHCOPTS)' --install-ghc --flag 'pandoc:embed_data_files' --fast --test --ghc-options='-j +RTS -A64m -RTS' --test-arguments='-j4 --hide-successes $(TESTARGS)'
@@ -39,7 +46,7 @@ ghcid:
 	ghcid -c "stack repl --flag 'pandoc:embed_data_files'"
 
 bench:
-	stack bench --benchmark-arguments=$(BENCHARGS) --ghc-options '$(GHCOPTS)'
+	stack bench --benchmark-arguments='$(BENCHARGS) $(BASELINE) --csv bench_$(TIMESTAMP).csv' --ghc-options '$(GHCOPTS)'
 
 weigh:
 	stack build --ghc-options '$(GHCOPTS)' pandoc:weigh-pandoc && stack exec weigh-pandoc

@@ -378,10 +378,10 @@ getDefaultExtensions "commonmark_x"    = extensionsFromList
   , Ext_raw_attribute
   , Ext_implicit_header_references
   , Ext_attributes
-  , Ext_fenced_code_attributes
   ]
 getDefaultExtensions "org"             = extensionsFromList
                                           [Ext_citations,
+                                           Ext_task_lists,
                                            Ext_auto_identifiers]
 getDefaultExtensions "html"            = extensionsFromList
                                           [Ext_auto_identifiers,
@@ -509,7 +509,6 @@ getAllExtensions f = universalExtensions <> getAll f
     , Ext_raw_attribute
     , Ext_implicit_header_references
     , Ext_attributes
-    , Ext_fenced_code_attributes
     , Ext_sourcepos
     ]
   getAll "commonmark_x"    = getAll "commonmark"
@@ -517,6 +516,7 @@ getAllExtensions f = universalExtensions <> getAll f
     extensionsFromList
     [ Ext_citations
     , Ext_smart
+    , Ext_task_lists
     ]
   getAll "html"            = autoIdExtensions <>
     extensionsFromList

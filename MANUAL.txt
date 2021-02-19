@@ -1464,6 +1464,7 @@ Nonzero exit codes have the following meanings:
    24 PandocCiteprocError
    31 PandocEpubSubdirectoryError
    43 PandocPDFError
+   44 PandocXMLError
    47 PandocPDFProgramNotFoundError
    61 PandocHttpError
    62 PandocShouldNeverHappenError
@@ -1897,7 +1898,8 @@ ${ styles.html() }
 ```
 
 (If a partial is not found in the directory of the
-template, it will also be sought in the `templates`
+template and the template path is given as a relative 
+path, it will also be sought in the `templates`
 subdirectory of the user data directory.)
 
 Partials may optionally be applied to variables using
@@ -3479,6 +3481,9 @@ line must begin with a space.
     | 200 Main St.
     | Berkeley, CA 94718
 
+Inline formatting (such as emphasis) is allowed in the content,
+but not block-level formatting (such as block quotes or lists).
+
 This syntax is borrowed from [reStructuredText].
 
 ## Lists
@@ -4358,7 +4363,8 @@ you need to enclose text in literal `$` characters, backslash-escape
 them and they won't be treated as math delimiters.
 
 For display math, use `$$` delimiters.  (In this case, the delimiters
-may be separated from the formula by whitespace.)
+may be separated from the formula by whitespace.  However, there can be
+no blank lines betwen the opening and closing `$$` delimiters.)
 
 TeX math will be printed in all output formats. How it is rendered
 depends on the output format:
@@ -6306,6 +6312,21 @@ default template with the name
 subdirectory of your user data directory (see [Templates]).
 
 [Lua]: https://www.lua.org
+
+# Reproducible builds
+
+Some of the document formats pandoc targets (such as EPUB,
+docx, and ODT) include build timestamps in the generated document.
+That means that the files generated on successive builds will
+differ, even if the source does not.  To avoid this, set the
+`SOURCE_DATE_EPOCH` environment variable, and the timestamp will
+be taken from it instead of the current time.
+`SOURCE_DATE_EPOCH` should contain an integer unix timestamp
+(specifying the number of second since midnight UTC January 1, 1970).
+
+Some document formats also include a unique identifier.  For
+EPUB, this can be set explicitly by setting the `identifier`
+metadata field (see [EPUB Metadata], above).
 
 # A note on security
 

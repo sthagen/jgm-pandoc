@@ -1054,7 +1054,7 @@ romanNumeralArg = spaces *> (parser <|> inBraces)
       symbol '}'
       return res
     parser = do
-      Tok _ Word s <- satisfyTok isWordTok
+      s <- untokenize <$> many1 (satisfyTok isWordTok)
       let (digits, rest) = T.span isDigit s
       unless (T.null rest) $
         Prelude.fail "Non-digits in argument to \\Rn or \\RN"
@@ -1867,11 +1867,13 @@ rawEnv name = do
   rawOptions <- mconcat <$> many rawopt
   let beginCommand = "\\begin{" <> name <> "}" <> rawOptions
   pos1 <- getPosition
-  (bs, raw) <- withRaw $ env name blocks
   if parseRaw
-     then return $ rawBlock "latex"
+     then do
+       (_, raw) <- withRaw $ env name blocks
+       return $ rawBlock "latex"
                  $ beginCommand <> untokenize raw
      else do
+       bs <- env name blocks
        report $ SkippedContent beginCommand pos1
        pos2 <- getPosition
        report $ SkippedContent ("\\end{" <> name <> "}") pos2
@@ -2208,9 +2210,7 @@ parseTableRow envname prefsufs = do
         option [] (count 1 amp)
         return $ map (setpos prefpos) pref ++ contents ++ map (setpos suffpos) suff
   rawcells <- mapM celltoks prefsufs
-  oldInput <- getInput
-  cells <- mapM (\ts -> setInput ts >> parseTableCell) rawcells
-  setInput oldInput
+  cells <- mapM (parseFromToks parseTableCell) rawcells
   spaces
   return $ Row nullAttr cells
 

@@ -1,4 +1,3 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Tests.Readers.Org.Inline.Citation
@@ -13,7 +12,6 @@ Test parsing of citations in org input.
 -}
 module Tests.Readers.Org.Inline.Citation (tests) where
 
-import Prelude
 import Test.Tasty (TestTree, testGroup)
 import Tests.Helpers ((=?>))
 import Tests.Readers.Org.Shared ((=:))
@@ -117,6 +115,46 @@ tests =
                      , citationHash = 0
                      }
       in (para $ cite [citation] "citep:pandoc")
+
+    , "multiple simple citations" =:
+      "citep:picard,riker" =?>
+      let picard = Citation
+                 { citationId = "picard"
+                 , citationPrefix = mempty
+                 , citationSuffix = mempty
+                 , citationMode = NormalCitation
+                 , citationNoteNum = 0
+                 , citationHash = 0
+                 }
+          riker  = Citation
+                 { citationId = "riker"
+                 , citationPrefix = mempty
+                 , citationSuffix = mempty
+                 , citationMode = NormalCitation
+                 , citationNoteNum = 0
+                 , citationHash = 0
+                 }
+      in (para $ cite [picard,riker] "citep:picard,riker")
+
+    , "multiple simple citations succeeded by comma" =:
+      "citep:picard,riker," =?>
+      let picard = Citation
+                 { citationId = "picard"
+                 , citationPrefix = mempty
+                 , citationSuffix = mempty
+                 , citationMode = NormalCitation
+                 , citationNoteNum = 0
+                 , citationHash = 0
+                 }
+          riker  = Citation
+                 { citationId = "riker"
+                 , citationPrefix = mempty
+                 , citationSuffix = mempty
+                 , citationMode = NormalCitation
+                 , citationNoteNum = 0
+                 , citationHash = 0
+                 }
+      in (para $ cite [picard,riker] "citep:picard,riker" <> str ",")
 
     , "extended citation" =:
       "[[citep:Dominik201408][See page 20::, for example]]" =?>

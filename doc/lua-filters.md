@@ -3084,7 +3084,8 @@ Clear-out the media bag, deleting all items.
 
 `insert (filepath, mime_type, contents)`
 
-Adds a new entry to pandoc's media bag.
+Adds a new entry to pandoc's media bag. Replaces any existing
+mediabag entry with the same `filepath`.
 
 Parameters:
 
@@ -3092,7 +3093,7 @@ Parameters:
 :   filename and path relative to the output folder.
 
 `mime_type`:
-:   the file's MIME type
+:   the file's MIME type; use `nil` if unknown or unavailable.
 
 `contents`:
 :   the binary contents of the file.
@@ -3176,11 +3177,21 @@ Usage:
 
 ### fetch {#pandoc.mediabag.fetch}
 
-`fetch (source, base_url)`
+`fetch (source)`
 
 Fetches the given source from a URL or local file. Returns two
 values: the contents of the file and the MIME type (or an empty
 string).
+
+The function will first try to retrieve `source` from the
+mediabag; if that fails, it will try to download it or read it
+from the local file system while respecting pandoc's "resource
+path" setting.
+
+Parameters:
+
+`source`:
+:   path to a resource; either a local file path or URI
 
 Returns:
 
@@ -3190,7 +3201,7 @@ Returns:
 Usage:
 
     local diagram_url = "https://pandoc.org/diagram.jpg"
-    local mt, contents = pandoc.mediabag.fetch(diagram_url, ".")
+    local mt, contents = pandoc.mediabag.fetch(diagram_url)
 
 # Module pandoc.List
 

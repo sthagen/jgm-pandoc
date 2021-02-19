@@ -1,10 +1,8 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE PatternGuards     #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Tests.Writers.OOXML (ooxmlTest) where
 
-import Prelude
 import Text.Pandoc
 import Test.Tasty
 import Test.Tasty.Golden.Advanced
@@ -45,7 +43,8 @@ compareXMLBool _ _ = False
 
 displayDiff :: Content -> Content -> String
 displayDiff elemA elemB =
-  showDiff (1,1) $ getDiff (lines $ ppContent elemA) (lines $ ppContent elemB)
+  showDiff (1,1)
+    (getDiff (lines $ showContent elemA) (lines $ showContent elemB))
 
 goldenArchive :: FilePath -> IO Archive
 goldenArchive fp = toArchive . BL.fromStrict <$> BS.readFile fp
