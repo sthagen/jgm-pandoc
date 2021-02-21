@@ -453,20 +453,23 @@ doMacros = do
       updateState $ \st -> st{ sExpanded = True }
 
 doMacros' :: PandocMonad m => Int -> [Tok] -> LP m [Tok]
-doMacros' n inp =
-  case inp of
-     Tok spos (CtrlSeq "begin") _ : Tok _ Symbol "{" :
-      Tok _ Word name : Tok _ Symbol "}" : ts
-        -> handleMacros n spos name ts
-     Tok spos (CtrlSeq "end") _ : Tok _ Symbol "{" :
-      Tok _ Word name : Tok _ Symbol "}" : ts
-        -> handleMacros n spos ("end" <> name) ts
-     Tok _ (CtrlSeq "expandafter") _ : t : ts
-        -> combineTok t <$> doMacros' n ts
-     Tok spos (CtrlSeq name) _ : ts
-        -> handleMacros n spos name ts
-     _ -> return inp
-   <|> return inp
+doMacros' n inp = do
+  macros <- sMacros <$> getState
+  if M.null macros
+     then return inp
+     else
+       case inp of
+          Tok spos (CtrlSeq "begin") _ : Tok _ Symbol "{" :
+           Tok _ Word name : Tok _ Symbol "}" : ts
+             -> handleMacros macros n spos name ts <|> return inp
+          Tok spos (CtrlSeq "end") _ : Tok _ Symbol "{" :
+           Tok _ Word name : Tok _ Symbol "}" : ts
+             -> handleMacros macros n spos ("end" <> name) ts <|> return inp
+          Tok _ (CtrlSeq "expandafter") _ : t : ts
+             -> combineTok t <$> doMacros' n ts
+          Tok spos (CtrlSeq name) _ : ts
+             -> handleMacros macros n spos name ts <|> return inp
+          _ -> return inp
 
   where
     combineTok (Tok spos (CtrlSeq name) x) (Tok _ Word w : ts)
@@ -507,10 +510,9 @@ doMacros' n inp =
         Tok spos (CtrlSeq x) (txt <> " ") : acc
     addTok _ _ spos t acc = setpos spos t : acc
 
-    handleMacros n' spos name ts = do
+    handleMacros macros n' spos name ts = do
       when (n' > 20)  -- detect macro expansion loops
         $ throwError $ PandocMacroLoop name
-      macros <- sMacros <$> getState
       case M.lookup name macros of
            Nothing -> mzero
            Just (Macro expansionPoint argspecs optarg newtoks) -> do
@@ -680,28 +682,25 @@ grouped parser = try $ do
   -- {{a,b}} should be parsed the same as {a,b}
   try (grouped parser <* egroup) <|> (mconcat <$> manyTill parser egroup)
 
-braced' :: PandocMonad m => LP m Tok -> Int -> LP m [Tok]
-braced' getTok n =
-  handleEgroup <|> handleBgroup <|> handleOther
-  where handleEgroup = do
-          t <- symbol '}'
-          if n == 1
-             then return []
-             else (t:) <$> braced' getTok (n - 1)
-        handleBgroup = do
-          t <- symbol '{'
-          (t:) <$> braced' getTok (n + 1)
-        handleOther = do
-          t <- getTok
-          (t:) <$> braced' getTok n
+braced' :: PandocMonad m => LP m Tok -> LP m [Tok]
+braced' getTok = symbol '{' *> go (1 :: Int)
+ where
+  go n = do
+    t <- getTok
+    case t of
+      Tok _ Symbol "}"
+        | n > 1     -> (t:) <$> go (n - 1)
+        | otherwise -> return []
+      Tok _ Symbol "{" -> (t:) <$> go (n + 1)
+      _ -> (t:) <$> go n
 
 braced :: PandocMonad m => LP m [Tok]
-braced = symbol '{' *> braced' anyTok 1
+braced = braced' anyTok
 
 -- URLs require special handling, because they can contain %
 -- characters.  So we retonenize comments as we go...
 bracedUrl :: PandocMonad m => LP m [Tok]
-bracedUrl = bgroup *> braced' (retokenizeComment >> anyTok) 1
+bracedUrl = braced' (retokenizeComment >> anyTok)
 
 -- For handling URLs, which allow literal % characters...
 retokenizeComment :: PandocMonad m => LP m ()
