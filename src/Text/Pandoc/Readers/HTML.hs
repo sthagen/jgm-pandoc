@@ -19,7 +19,6 @@ module Text.Pandoc.Readers.HTML ( readHtml
                                 , htmlInBalanced
                                 , isInlineTag
                                 , isBlockTag
-                                , NamedTag(..)
                                 , isTextTag
                                 , isCommentTag
                                 ) where
@@ -158,11 +157,10 @@ pHead = pInTags "head" $ pTitle <|> pMetaTag <|> pBaseTag <|> (mempty <$ pAny)
           return mempty
 
 block :: PandocMonad m => TagParser m Blocks
-block = do
+block = ((do
+  tag <- lookAhead (pSatisfy isBlockTag)
   exts <- getOption readerExtensions
-  tag <- lookAhead pAny
-  res <-
-   (case tag of
+  case tag of
     TagOpen name attr ->
       let type' = fromMaybe "" $
                      lookup "type" attr <|> lookup "epub:type" attr
@@ -215,11 +213,8 @@ block = do
           | epubExts
           -> eSwitch B.para block
         _ -> mzero
-    _ -> mzero)
-   <|> pPlain
-   <|> pRawHtmlBlock
-  trace (T.take 60 $ tshow $ B.toList res)
-  return res
+    _ -> mzero) <|> pPlain <|> pRawHtmlBlock) >>= \res ->
+        res <$ trace (T.take 60 $ tshow $ B.toList res)
 
 namespaces :: PandocMonad m => [(Text, TagParser m Inlines)]
 namespaces = [(mathMLNamespace, pMath True)]
@@ -579,9 +574,9 @@ tagToText (TagOpen "br" _) = "\n"
 tagToText _                = ""
 
 inline :: PandocMonad m => TagParser m Inlines
-inline = do
+inline = pTagText <|> do
+  tag <- lookAhead (pSatisfy isInlineTag)
   exts <- getOption readerExtensions
-  tag <- lookAhead pAny
   case tag of
     TagOpen name attr ->
       case name of
@@ -935,27 +930,21 @@ pSpace = many1 (satisfy isSpace) >>= \xs ->
                then return B.softbreak
                else return B.space
 
-class NamedTag a where
-  getTagName :: a -> Maybe Text
+getTagName :: Tag Text -> Maybe Text
+getTagName (TagOpen t _) = Just t
+getTagName (TagClose t)  = Just t
+getTagName _             = Nothing
 
-instance NamedTag (Tag Text) where
-  getTagName (TagOpen t _) = Just t
-  getTagName (TagClose t)  = Just t
-  getTagName _             = Nothing
-
-instance NamedTag (Tag String) where
-  getTagName (TagOpen t _) = Just (T.pack t)
-  getTagName (TagClose t)  = Just (T.pack t)
-  getTagName _             = Nothing
-
-isInlineTag :: NamedTag (Tag a) => Tag a -> Bool
+isInlineTag :: Tag Text -> Bool
 isInlineTag t =
-  isCommentTag t || case getTagName t of
-                           Nothing  -> False
-                           Just x   -> x `Set.notMember` blockTags ||
-                                       T.take 1 x == "?" -- processing instr.
+  isCommentTag t ||
+  case getTagName t of
+    Nothing  -> False
+    Just "script" -> "math/tex" `T.isPrefixOf` fromAttrib "type" t
+    Just x   -> x `Set.notMember` blockTags ||
+                T.take 1 x == "?" -- processing instr.
 
-isBlockTag :: NamedTag (Tag a) => Tag a -> Bool
+isBlockTag :: Tag Text -> Bool
 isBlockTag t = isBlockTagName || isTagComment t
                  where isBlockTagName =
                          case getTagName t of
@@ -966,10 +955,10 @@ isBlockTag t = isBlockTagName || isTagComment t
                                     || x `Set.member` eitherBlockOrInline
                               Nothing -> False
 
-isTextTag :: Tag a -> Bool
+isTextTag :: Tag Text -> Bool
 isTextTag = tagText (const True)
 
-isCommentTag :: Tag a -> Bool
+isCommentTag :: Tag Text -> Bool
 isCommentTag = tagComment (const True)
 
 --- parsers for use in markdown, textile readers
@@ -1018,7 +1007,7 @@ htmlInBalanced' tagname ts = fromMaybe [] $ go 0 ts
         go n (t:ts') = (t :) <$> go n ts'
         go _ [] = mzero
 
-hasTagWarning :: [Tag a] -> Bool
+hasTagWarning :: [Tag Text] -> Bool
 hasTagWarning (TagWarning _:_) = True
 hasTagWarning _                = False
 

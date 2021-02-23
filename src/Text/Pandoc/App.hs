@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -28,6 +29,7 @@ import Control.Monad ( (>=>), when )
 import Control.Monad.Trans ( MonadIO(..) )
 import Control.Monad.Except (throwError)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (toLower)
 import Data.Maybe (fromMaybe, isJust, isNothing)
@@ -45,6 +47,7 @@ import System.FilePath ( takeBaseName, takeExtension )
 import System.IO (nativeNewline, stdout)
 import qualified System.IO as IO (Newline (..))
 import Text.Pandoc
+import Text.Pandoc.MIME (getCharset)
 import Text.Pandoc.App.FormatHeuristics (formatFromFilePaths)
 import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), defaultOpts,
                             IpynbOutput (..) )
@@ -73,8 +76,9 @@ convertWithOpts opts = do
   let verbosity = optVerbosity opts
 
   when (optDumpArgs opts) $
-    do UTF8.hPutStrLn stdout outputFile
-       mapM_ (UTF8.hPutStrLn stdout) (fromMaybe ["-"] $ optInputFiles opts)
+    do UTF8.hPutStrLn stdout (T.pack outputFile)
+       mapM_ (UTF8.hPutStrLn stdout . T.pack)
+             (fromMaybe ["-"] $ optInputFiles opts)
        exitSuccess
 
   let sources = case optInputFiles opts of
@@ -343,7 +347,18 @@ readSource src = case parseURI src of
                          _ -> PandocAppError (tshow e))
 
 readURI :: FilePath -> PandocIO Text
-readURI src = UTF8.toText . fst <$> openURL (T.pack src)
+readURI src = do
+  (bs, mt) <- openURL (T.pack src)
+  case mt >>= getCharset of
+    Just "UTF-8"      -> return $ UTF8.toText bs
+    Just "ISO-8859-1" -> return $ T.pack $ B8.unpack bs
+    Just charset      -> throwError $ PandocUnsupportedCharsetError charset
+    Nothing           -> liftIO $ -- try first as UTF-8, then as latin1
+                          E.catch (return $! UTF8.toText bs)
+                                  (\case
+                                      TSE.DecodeError{} ->
+                                        return $ T.pack $ B8.unpack bs
+                                      e -> E.throwIO e)
 
 readFile' :: MonadIO m => FilePath -> m BL.ByteString
 readFile' "-" = liftIO BL.getContents
@@ -354,6 +369,5 @@ writeFnBinary "-" = liftIO . BL.putStr
 writeFnBinary f   = liftIO . BL.writeFile (UTF8.encodePath f)
 
 writerFn :: MonadIO m => IO.Newline -> FilePath -> Text -> m ()
--- TODO this implementation isn't maximally efficient:
-writerFn eol "-" = liftIO . UTF8.putStrWith eol . T.unpack
-writerFn eol f   = liftIO . UTF8.writeFileWith eol f . T.unpack
+writerFn eol "-" = liftIO . UTF8.putStrWith eol
+writerFn eol f   = liftIO . UTF8.writeFileWith eol f

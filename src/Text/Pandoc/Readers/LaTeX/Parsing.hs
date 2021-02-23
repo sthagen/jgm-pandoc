@@ -155,7 +155,6 @@ data LaTeXState = LaTeXState{ sOptions       :: ReaderOptions
                             , sLabels        :: M.Map Text [Inline]
                             , sHasChapters   :: Bool
                             , sToggles       :: M.Map Text Bool
-                            , sExpanded      :: Bool
                             , sFileContents  :: M.Map Text Text
                             , sEnableWithRaw :: Bool
                             , sRawTokens     :: IntMap.IntMap [Tok]
@@ -183,7 +182,6 @@ defaultLaTeXState = LaTeXState{ sOptions       = def
                               , sLabels        = M.empty
                               , sHasChapters   = False
                               , sToggles       = M.empty
-                              , sExpanded      = False
                               , sFileContents  = M.empty
                               , sEnableWithRaw = True
                               , sRawTokens     = IntMap.empty
@@ -256,7 +254,6 @@ rawLaTeXParser toks retokenize parser valParser = do
        Right toks' -> do
          res <- lift $ runParserT (do when retokenize $ do
                                         -- retokenize, applying macros
-                                        doMacros
                                         ts <- many (satisfyTok (const True))
                                         setInput ts
                                       rawparser)
@@ -432,12 +429,11 @@ satisfyTok :: PandocMonad m => (Tok -> Bool) -> LP m Tok
 satisfyTok f = do
     doMacros -- apply macros on remaining input stream
     res <- tokenPrim (T.unpack . untoken) updatePos matcher
-    updateState $ \st -> st{ sExpanded = False
-                           , sRawTokens =
-                              if sEnableWithRaw st
-                                 then IntMap.map (res:) $ sRawTokens st
-                                 else sRawTokens st }
-    return res
+    updateState $ \st ->
+      if sEnableWithRaw st
+         then st{ sRawTokens = IntMap.map (res:) $ sRawTokens st }
+         else st
+    return $! res
   where matcher t | f t       = Just t
                   | otherwise = Nothing
         updatePos :: SourcePos -> Tok -> [Tok] -> SourcePos
@@ -446,30 +442,24 @@ satisfyTok f = do
 
 doMacros :: PandocMonad m => LP m ()
 doMacros = do
-  expanded <- sExpanded <$> getState
-  verbatimMode <- sVerbatimMode <$> getState
-  unless (expanded || verbatimMode) $ do
-      getInput >>= doMacros' 1 >>= setInput
-      updateState $ \st -> st{ sExpanded = True }
+  st <- getState
+  unless (sVerbatimMode st || M.null (sMacros st)) $ do
+    getInput >>= doMacros' 1 >>= setInput
 
 doMacros' :: PandocMonad m => Int -> [Tok] -> LP m [Tok]
-doMacros' n inp = do
-  macros <- sMacros <$> getState
-  if M.null macros
-     then return inp
-     else
-       case inp of
-          Tok spos (CtrlSeq "begin") _ : Tok _ Symbol "{" :
-           Tok _ Word name : Tok _ Symbol "}" : ts
-             -> handleMacros macros n spos name ts <|> return inp
-          Tok spos (CtrlSeq "end") _ : Tok _ Symbol "{" :
-           Tok _ Word name : Tok _ Symbol "}" : ts
-             -> handleMacros macros n spos ("end" <> name) ts <|> return inp
-          Tok _ (CtrlSeq "expandafter") _ : t : ts
-             -> combineTok t <$> doMacros' n ts
-          Tok spos (CtrlSeq name) _ : ts
-             -> handleMacros macros n spos name ts <|> return inp
-          _ -> return inp
+doMacros' n inp =
+  case inp of
+     Tok spos (CtrlSeq "begin") _ : Tok _ Symbol "{" :
+      Tok _ Word name : Tok _ Symbol "}" : ts
+        -> handleMacros n spos name ts <|> return inp
+     Tok spos (CtrlSeq "end") _ : Tok _ Symbol "{" :
+      Tok _ Word name : Tok _ Symbol "}" : ts
+        -> handleMacros n spos ("end" <> name) ts <|> return inp
+     Tok _ (CtrlSeq "expandafter") _ : t : ts
+        -> combineTok t <$> doMacros' n ts
+     Tok spos (CtrlSeq name) _ : ts
+        -> handleMacros n spos name ts <|> return inp
+     _ -> return inp
 
   where
     combineTok (Tok spos (CtrlSeq name) x) (Tok _ Word w : ts)
@@ -510,9 +500,10 @@ doMacros' n inp = do
         Tok spos (CtrlSeq x) (txt <> " ") : acc
     addTok _ _ spos t acc = setpos spos t : acc
 
-    handleMacros macros n' spos name ts = do
+    handleMacros n' spos name ts = do
       when (n' > 20)  -- detect macro expansion loops
         $ throwError $ PandocMacroLoop name
+      macros <- sMacros <$> getState
       case M.lookup name macros of
            Nothing -> mzero
            Just (Macro expansionPoint argspecs optarg newtoks) -> do
