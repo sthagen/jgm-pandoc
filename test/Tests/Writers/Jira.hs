@@ -3,6 +3,7 @@ module Tests.Writers.Jira (tests) where
 
 import Data.Text (unpack)
 import Test.Tasty
+import Test.Tasty.HUnit (HasCallStack)
 import Tests.Helpers
 import Text.Pandoc
 import Text.Pandoc.Arbitrary ()
@@ -12,7 +13,7 @@ jira :: (ToPandoc a) => a -> String
 jira = unpack . purely (writeJira def) . toPandoc
 
 infix 4 =:
-(=:) :: (ToString a, ToPandoc a)
+(=:) :: (ToString a, ToPandoc a, HasCallStack)
      => String -> (a, String) -> TestTree
 (=:) = test jira
 
@@ -60,6 +61,22 @@ tests =
       , "user link with user as description" =:
         linkWith ("", ["user-account"], []) "~johndoe" "" "~johndoe" =?>
         "[~johndoe]"
+      ]
+
+    , testGroup "spans"
+      [ "id is used as anchor" =:
+        spanWith ("unicorn", [], []) (str "Unicorn") =?>
+        "{anchor:unicorn}Unicorn"
+      ]
+
+    , testGroup "code"
+      [ "code block with known language" =:
+        codeBlockWith ("", ["java"], []) "Book book = new Book(\"Algebra\")" =?>
+        "{code:java}\nBook book = new Book(\"Algebra\")\n{code}"
+
+      , "code block without language" =:
+        codeBlockWith ("", [], []) "preformatted\n  text.\n" =?>
+        "{noformat}\npreformatted\n  text.\n{noformat}"
       ]
     ]
   ]

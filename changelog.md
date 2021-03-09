@@ -1,6 +1,42 @@
 # Revision history for pandoc
 
-## pandoc 2.12 (UNRELEASED -- PROVISIONAL)
+## pandoc 2.12 (2021-03-08)
+
+  * `--resource-path` now accumulates if specified multiple
+    times (#6152).  Resource paths specified later on the command line are
+    prepended to those specified earlier.  Thus,
+    `--resource-path foo --resource-path bar:baz` is equivalent to
+    `--resource-path bar:bas:foo`.  (The previous behavior was
+    for the last `--resource-path` to replace all the rest.)
+    `resource-path` in defaults files behaves the same way: it
+    will be prepended to the resource path set by earlier
+    command line options or defaults files.  This change
+    facilitates the use of multiple defaults files: each can
+    specify a directory containing resources it refers to
+    without clobbering the resource paths set by the others.
+
+  * Allow defaults files to refer to the home directory, the
+    user data directory, and the directory containing the defaults file
+    itself (#5871, #5982, #5977).  In fields that expect file paths
+    (and only in these fields),
+
+    + `${VARIABLE}` will expand to the value of the environment variable
+      `VARIABLE` (and in particular `${HOME}` will expand to the path
+      of the home directory).  A warning will be raised for undefined
+      variables.
+    + `${USERDATA}` will expand to the path of the user data
+      directory in force when the defaults file is being processed.
+    + `${.}` will expand to the directory containing the defaults file.
+      (This allows default files to be placed in a directory containing
+      resources they make use of.)
+
+  * When downloading content from URL arguments, be sensitive to
+    the character encoding (#5600).  We can properly handle UTF-8 and latin1
+    (ISO-8859-1); for others we raise an error.  Fall back to latin1 if
+    no charset is given in the mime type and UTF-8 decoding fails.
+
+  * Allow abbreviations that don't end in a period to be
+    specified using `--abbreviations` (#7124).
 
   * Add new unexported module Text.Pandoc.XML.Light, as well
     as Text.Pandoc.XML.Light.Types, Text.Pantoc.XML.Light.Proc,
@@ -33,75 +69,6 @@
     docbook-reader.docbook test lacked definitions for the entities it used;
     these have been added. And the docx golden tests have been updated,
     because the new parser does not preserve the order of attributes.
-
-  * Text.Pandoc.App
-
-    + Add `parseOptionsFromArgs` [API change, new exported function].
-
-  * Text.Pandoc.Citeproc.BibTeX
-
-    + `Text.Pandoc.Citeproc.writeBibTeXString` now returns
-      `Doc Text` instead of `Text` (#7068).
-    + Correctly handle `pages` (= `page` in CSL) (#7067).
-    + Correctly handle BibLaTeX `langid` (= `language` in CSL, #7067).
-    + In BibTeX output, protect foreign titles since there's no language
-      field (#7067).
-    + Clean up BibTeX parsing (#7049).  Previously there was a messy code
-      path that gave strange results in some cases, not passing through raw
-      tex but trying to extract a string content.  This was an artefact of
-      trying to handle some special bibtex-specific commands in the BibTeX
-      reader. Now we just handle these in the LaTeX reader and simplify
-      parsing in the BibTeX reader. This does mean that more raw tex will
-      be passed through (and currently this is not sensitive to the
-      `raw_tex` extension; this should be fixed).
-
-  * Text.Pandoc.Citeproc.MetaValue
-
-    + Correctly parse "raw" date value in markdown references metadata.
-      (See jgm/citeproc#53.)
-
-  * Text.Pandoc.Class
-
-    + Add `getTimestamp` [API change].  This attempts to read the
-      `SOURCE_DATE_EPOCH` environment variable and parse a UTC time
-      from it (treating it as a unix date stamp, see
-      https://reproducible-builds.org/specs/source-date-epoch/). If the
-      variable is not set or can't be parsed as a unix date stamp, then the
-      function returns the current date.
-
-  * Text.Pandoc.Error
-
-    + Remove unused variables (Albert Krewinkel)
-    + Export `renderError` [API change].
-    + Refactor `handleError` to use `renderError`. This allows us render
-      error messages without exiting.
-
-  * Text.Pandoc.Extensions
-
-    + `Ext_task_lists` is now supported by org (and turned
-      on by default) (Albert Krewinkel, #6336).
-    + Remove `Ext_fenced_code_attributes` from allowed commonmark attributes
-      (#7097).  This attribute was listed as allowed, but it didn't actually
-      do anything. Use `attributes` for code attributes and more.
-
-  * Lua subsystem:
-
-    + Always load built-in Lua scripts from default data-dir (Albert
-      Krewinkel).  The Lua modules `pandoc` and `pandoc.List` are now always
-      loaded from the system's default data directory. Loading from a
-      different directory by overriding the default path, e.g. via
-      `--data-dir`, is no longer supported to avoid unexpected behavior
-      and to address security concerns.
-    + Add module "pandoc.path" (Albert Krewinkel, #6001, #6565).
-      The module allows to work with file paths in a convenient and
-      platform-independent manner.
-
-  * Text.Pandoc.PDF
-
-    + Disable `smart` extension when building PDF via LaTeX.
-      This is to prevent accidental creation of ligatures like
-      `` ?` `` and `` !` `` (especially in languages with quotations like
-      German), and similar ligature issues.  (See jgm/citeproc#54.)
 
   * DocBook reader:
 
@@ -137,6 +104,11 @@
 
   * LaTeX reader:
 
+    + Don't export `tokenize`, `untokenize` [API change].  These are internal
+      implementation details, which were only exported for testing.
+      They don't belong in the public API.
+    + Improved efficiency of the parser.  With these changes the reader
+      is almost twice as fast as in the last release in our benchmarks.
     + Code cleanup, removing some unnecessary things.
     + Rewrite `withRaw` so it doesn't rely on fragile assumptions
       about token positions (which break when macros are expanded)
@@ -156,11 +128,20 @@
       it doesn't change anything.
     + Improve `braced'`.  Remove the parameter, have it parse the
       opening brace, and make it more efficient.
+    + Factor out pieces of the LaTeX reader to make the module smaller.
+      This reduces memory demands when compiling.  Created
+      Text.Pandoc.Readers.{LaTeX,Math,Citation,Table,Macro,Inline}.
+      Changed Text.Pandoc.Readers.LaTeX.SIunitx to export a command map
+      instead of individual commands.
+    + Handle table cells containing `&` in `\verb` (#7129).
+
+  * Make Text.Pandoc.Readers.LaTeX.Types an unexported module [API change].
 
   * Markdown reader:
 
     + Improved handling of mmd link attributes in references (#7080).
       Previously they only worked for links that had titles.
+    + Improved efficiency of the parser (benchmarks show a 15% speedup).
 
   * OPML reader:
 
@@ -190,9 +171,10 @@
   * Jira reader:
 
     + Modified the Doc parser to skip leading blank lines. This fixes
-      parsing of documents which start with multiple blank lines (#7095).
-    + Prevent URLs within link aliases to be treated as autolinks
-      (#6944).
+      parsing of documents which start with multiple blank lines (Albert
+      Krewinkel, #7095).
+    + Prevent URLs within link aliases to be treated as autolinks (Albert
+      Krewinkel, #6944).
 
   * Text.Pandoc.Shared
 
@@ -201,6 +183,10 @@
       and `underlineSpan` (which had been deprecated in April 2020)
       [API change].
     + Export `handleTaskListItem` (Albert Krewinkel) [API change].
+    + Change `defaultUserDataDirs` to `defaultUserDataDir` [API
+      change].  We determine what is the default user data directory
+      by seeing whether the XDG directory and/or legacy
+      directory exist.
 
   * BibTeX writer:
 
@@ -218,7 +204,7 @@
     + Use `getTimestamp` instead of `getCurrentTime` for timestamp.
       Setting `SOURCE_DATE_EPOCH` will allow reproducible builds.
 
-  * Text.Pandoc.Writers.EPUB
+  * EPUB writer:
 
     + Use `getTimestamp` instead of `getCurrentTime` for timestamp.
       Setting `SOURCE_DATE_EPOCH` will allow reproducible builds (#7093).
@@ -233,6 +219,13 @@
       contains an ampersand or another character with a special meaning
       in XML.
 
+  * Jira writer:
+
+    + Use Span identifiers as anchors (Albert Krewinkel).
+    + Use `{noformat}` instead of `{code}` for unknown languages (Albert
+      Krewinkel). Code blocks which are not marked as a language supported
+      by Jira are rendered as preformatted text via `{noformat}` blocks.
+
   * LaTeX writer:
 
     + Adjust hypertargets to beginnings of paragraphs (#7078).
@@ -241,12 +234,18 @@
       This makes a particular difference for links to citations using
       `--citeproc` and `link-citations: true`.
     + Change BCP47 lang tag from `jp` to `ja` (Mauro Bieg, #7047).
+    + Use function instead of map for accent lookup (should be
+      more efficient).
+    + Split the module to make it easier to compile on low-memory
+      systems:  added Text.Pandoc.Writers.LaTeX.{Util,Citation,Lang}.
 
   * Markdown writer:
 
     + Handle math right before digit.  We insert an HTML comment to
       avoid a `$` right before a digit, which pandoc will not recognize
       as a math delimiter.
+    + Split the module to make it easier to compile on low-memory
+      systems: added Text.Pandoc.Writers.Markdown.{Types,Inline}.
 
   * ODT writer:
 
@@ -279,40 +278,154 @@
     `--include-in-header`, `--include-before-body`, `--include-after-body`)
     may be used.
 
-  * LaTeX template: Update to iftex package (#7073) (Andrew Dunning)
+  * LaTeX template:
+
+    + Update to iftex package (#7073) (Andrew Dunning)
+    + Wrap url colours in braces (#7121) (Loïc Grobol).
 
   * revealjs template: Add 'center' option for vertical slide centering.
     (maurerle, #7104).
 
   * Text.Pandoc.XML: Improve efficiency of `fromEntities`.
 
-  * Test suite: a more robust way of testing the executable.
-    Many of our tests require running the pandoc executable. This is
-    problematic for a few different reasons. First, cabal-install will
-    sometimes run the test suite after building the library but before
-    building the executable, which means the executable isn't in place for
-    the tests. One can work around that by first building, then building and
-    running the tests, but that's fragile.  Second, we have to find the
-    executable. So far, we've done that using a function `findPandoc` that
-    attempts to locate it relative to the test executable (which can be
-    located using findExecutablePath).  But the logic here is delicate and
-    work with every combination of options.  To solve both problems, we add
-    an `--emulate` option to the `test-pandoc` executable.  When `--emulate`
-    occurs as the first argument passed to `test-pandoc`, the program simply
-    emulates the regular pandoc executable, using the rest of the arguments
-    (after `--emulate`). Thus, `test-pandoc --emulate -f markdown -t latex`
-    is just like `pandoc -f markdown -t latex`.
-    Since all the work is done by library functions, implementing this
-    emulation just takes a couple lines of code and should be entirely
-    reliable.  With this change, we can test the pandoc executable by running
-    the test program itself (locatable using `findExecutablePath`) with the
-    `--emulate` option. This removes the need for the fragile `findPandoc`
-    step, and it means we can run our integration tests even when we're just
-    building the library, not the executable.  [Note: part of this change
-    involved simplifying some complex handling to set environment variables
-    for dynamic library paths.  I have tested a build with
-    `--enable-dynamic-executable`, and it works, but further testing may be
-    needed.]
+  * Text.Pandoc.MIME
+
+    + Add exported function `getCharset` [API change].
+
+  * Text.Pandoc.UTF8: change IO functions to return Text, not String
+    [API change].  This affects `readFile`, `getContents`, `writeFileWith`,
+    `writeFile`, `putStrWith`, `putStr`, `putStrLnWith`, `putStrLn`.
+    `hPutStrWith`, `hPutStr`, `hPutStrLnWith`, `hPutStrLn`, `hGetContents`.
+    This avoids the need to uselessly create a linked list of characters
+    when emiting output.
+
+  * Text.Pandoc.App
+
+    + Add `parseOptionsFromArgs` [API change, new exported function].
+    + Add fields for CSL options to `Opt` [API change]:
+      `optCSL`, `optbibliography`, `optCitationAbbreviations`.
+
+  * Text.Pandoc.Citeproc.BibTeX
+
+    + `Text.Pandoc.Citeproc.writeBibTeXString` now returns
+      `Doc Text` instead of `Text` (#7068).
+    + Correctly handle `pages` (= `page` in CSL) (#7067).
+    + Correctly handle BibLaTeX `langid` (= `language` in CSL, #7067).
+    + In BibTeX output, protect foreign titles since there's no language
+      field (#7067).
+    + Clean up BibTeX parsing (#7049).  Previously there was a messy code
+      path that gave strange results in some cases, not passing through raw
+      tex but trying to extract a string content.  This was an artefact of
+      trying to handle some special bibtex-specific commands in the BibTeX
+      reader. Now we just handle these in the LaTeX reader and simplify
+      parsing in the BibTeX reader. This does mean that more raw tex will
+      be passed through (and currently this is not sensitive to the
+      `raw_tex` extension; this should be fixed).
+
+  * Text.Pandoc.Citeproc.MetaValue
+
+    + Correctly parse "raw" date value in markdown references metadata.
+      (See jgm/citeproc#53.)
+
+  * Text.Pandoc.Citeproc
+
+    + Use https URLs for links (Salim B, #7122).
+
+  * Text.Pandoc.Class
+
+    + Add `getTimestamp` [API change].  This attempts to read the
+      `SOURCE_DATE_EPOCH` environment variable and parse a UTC time
+      from it (treating it as a unix date stamp, see
+      https://reproducible-builds.org/specs/source-date-epoch/). If the
+      variable is not set or can't be parsed as a unix date stamp, then the
+      function returns the current date.
+
+  * Text.Pandoc.Error
+
+    + Add `PandocUnsupportedCharsetError` constructor for
+      `PandocError` [API change].
+    + Export `renderError` [API change].
+    + Refactor `handleError` to use `renderError`. This allows us render
+      error messages without exiting.
+
+  * Text.Pandoc.Extensions
+
+    + `Ext_task_lists` is now supported by org (and turned
+      on by default) (Albert Krewinkel, #6336).
+    + Remove `Ext_fenced_code_attributes` from allowed commonmark attributes
+      (#7097).  This attribute was listed as allowed, but it didn't actually
+      do anything. Use `attributes` for code attributes and more.
+
+  * Lua subsystem:
+
+    + Always load built-in Lua scripts from default data-dir (Albert
+      Krewinkel).  The Lua modules `pandoc` and `pandoc.List` are now always
+      loaded from the system's default data directory. Loading from a
+      different directory by overriding the default path, e.g. via
+      `--data-dir`, is no longer supported to avoid unexpected behavior
+      and to address security concerns.
+    + Add module "pandoc.path" (Albert Krewinkel, #6001, #6565).
+      The module allows to work with file paths in a convenient and
+      platform-independent manner.
+    + Use strict evaluation when retrieving AST value from the stack
+      (Albert Krewinkel, #6674).
+
+  * Text.Pandoc.PDF
+
+    + Disable `smart` extension when building PDF via LaTeX.
+      This is to prevent accidental creation of ligatures like
+      `` ?` `` and `` !` `` (especially in languages with quotations like
+      German), and similar ligature issues.  (See jgm/citeproc#54.)
+
+  * Text.Pandoc.CSV:
+
+    + Fix parsing of unquoted values (#7112).  Previously we didn't allow
+      unescaped quotes in unquoted values, but they are allowed
+      in CSV.
+
+  * Test suite:
+
+    + Use a more robust method for testing the executable.  Many
+      of our tests require running the pandoc executable. This
+      is problematic for a few different reasons. First,
+      cabal-install will sometimes run the test suite after
+      building the library but before building the executable,
+      which means the executable isn't in place for the tests.
+      One can work around that by first building, then building
+      and running the tests, but that's fragile.  Second, we
+      have to find the executable. So far, we've done that using
+      a function `findPandoc` that attempts to locate it
+      relative to the test executable (which can be located
+      using findExecutablePath).  But the logic here is delicate
+      and work with every combination of options.  To solve both
+      problems, we add an `--emulate` option to the
+      `test-pandoc` executable.  When `--emulate` occurs as the
+      first argument passed to `test-pandoc`, the program simply
+      emulates the regular pandoc executable, using the rest of
+      the arguments (after `--emulate`). Thus, `test-pandoc
+      --emulate -f markdown -t latex` is just like `pandoc -f
+      markdown -t latex`.  Since all the work is done by library
+      functions, implementing this emulation just takes a couple
+      lines of code and should be entirely reliable.  With this
+      change, we can test the pandoc executable by running the
+      test program itself (locatable using `findExecutablePath`)
+      with the `--emulate` option. This removes the need for the
+      fragile `findPandoc` step, and it means we can run our
+      integration tests even when we're just building the
+      library, not the executable.  [Note: part of this change
+      involved simplifying some complex handling to set
+      environment variables for dynamic library paths.  I have
+      tested a build with `--enable-dynamic-executable`, and it
+      works, but further testing may be needed.]
+    + Print accurate location if a test fails (Albert
+      Krewinkel).  Ensures that tasty-hunit reports the location
+      of the failing test instead of the location of the helper
+      `test` function.
+
+  * Documentation: Update URLs and use `https` where possible (#7122,
+    Salim B).
+
+  * Add `doc/libraries.md`, a description of libraries that support pandoc.
 
   * MANUAL.txt
 
@@ -328,6 +441,9 @@
   * Makefile: in `make bench`, create CSV files for comparison and compare
     against previous benchmark run.  Add timestamp to CSV filenames.
 
+  * cabal.project: don't explicitly set -trypandoc.
+    If we do, this can't be overridden on the cabal command line.
+
   * doc/lua-filters.md: improve documentation for
     `pandoc.mediabag.insert`, `pandoc.mediabag.fetch`,
     `directory`, `normalize` (Albert Krewinkel).
@@ -336,8 +452,16 @@
 
   * Require jira-wiki-markup 1.3.3 (Albert Krewinkel)
 
-  * Require citeproc 0.3.0.7, which correctly titlecases when titles
+  * Require citeproc 0.3.0.8, which correctly titlecases when titles
     contain non-ASCII characters.
+
+  * Use skylighting 0.10.4.  This version of skylighting uses xml-conduit
+    rather than hxt. This speeds up parsing of XML syntax definitions
+    fourfold, and removes four packages from pandoc's dependency graph:
+    hxt-charproperties, hxt-unicode, hxt-regex-xmlschema, hxt.
+
+  * Add script `tools/parseTimings.pl` to help pin down which
+    modules take the most time and memory to compile.
 
   * Avoid unnecessary use of NoImplicitPrelude pragma (#7089) (Albert
     Krewinkel)
@@ -353,6 +477,16 @@
     + Clean up benchmark code.
     + Allow specifying patterns using `-p blah'.
 
+  * trypandoc: add 2 second timeout.
+
+  * Use `-split-sections` in creating linux release binary.
+    This reduces executable size significantly (by about 30%).
+
+  * Remove `weigh-pandoc`.  It's not really useful any more, now that our
+    regular benchmarks include data on allocation.
+
+  * Improve linux package build process and add script to
+    automate building an arm64 binary package.
 
 
 ## pandoc 2.11.4 (2021-01-22)
@@ -946,8 +1080,11 @@
     translated to `C:\/foo/bar`, which caused problems.
     With this fix, the backslashes are removed.
 
-  * Text.Pandoc.Logging: Add constructor `ATXHeadingInLHS` constructor
-    to `LogMessage` [API change].
+  * Text.Pandoc.Logging:
+
+    + Add constructor `ATXHeadingInLHS` to `LogMessage` [API change].
+    + Add constructor `EnvironmentVariableUndefined` to
+      `LogMessage` [API change].
 
   * Fix error that is given when people specify `doc` output (#6834,
     gison93).

@@ -2,12 +2,22 @@ set -e
 
 MACHINE=$(uname -m)
 case "$MACHINE" in
-  x86_64) ARCHITECTURE=amd64;;
-  i686)   ARCHITECTURE=i386;;
-  i386)   ARCHITECTURE=i386;;
+  x86_64)  ARCHITECTURE=amd64;;
+  i686)    ARCHITECTURE=i386;;
+  i386)    ARCHITECTURE=i386;;
+  aarch64) ARCHITECTURE=arm64;;
+  *)       ARCHITECTURE=unknown;;
 esac
 
 ARTIFACTS="${ARTIFACTS:-/artifacts}"
+
+# This is our sentinel that tells us when we're done.
+rm -f $ARTIFACTS/DONE
+
+clean_up() {
+  echo "All done!" > "$ARTIFACTS/DONE"
+}
+trap clean_up EXIT
 
 # build binaries
 
@@ -16,7 +26,7 @@ ghc --version
 
 cabal v2-update
 cabal v2-clean
-cabal v2-configure --enable-tests -f-export-dynamic -fembed_data_files --enable-executable-static --ghc-options '-optc-Os -optl=-pthread' pandoc
+cabal v2-configure --enable-tests -f-export-dynamic -fembed_data_files --enable-executable-static --ghc-options '-split-sections -optc-Os -optl=-pthread' pandoc
 cabal v2-build
 cabal v2-test -j1
 for f in $(find dist-newstyle -name 'pandoc' -type f -perm /400); do cp $f /artifacts/; done
@@ -68,5 +78,7 @@ mv pandoc $TARGET/bin
 strip $TARGET/bin/pandoc
 gzip -9 $TARGET/share/man/man1/pandoc.1
 
-tar cvzf $TARGET-linux-amd64.tar.gz $TARGET
+tar cvzf $TARGET-linux-$ARCHITECTURE.tar.gz $TARGET
 rm -r $TARGET
+
+exit 0

@@ -32,7 +32,6 @@ jobs:
           - osarch: "windows-x86_64"
             arch: "x64"
             stack_opts: "-j1"
-
     steps:
     - uses: actions/checkout@v1
     - name: Install dependencies

@@ -54,6 +54,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , comment
   , anyTok
   , singleChar
+  , tokWith
   , specialChars
   , endline
   , blankline
@@ -80,6 +81,11 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , rawopt
   , overlaySpecification
   , getNextNumber
+  , label
+  , setCaption
+  , resetCaption
+  , env
+  , addMeta
   ) where
 
 import Control.Applicative (many, (<|>))
@@ -285,6 +291,15 @@ applyMacros s = (guardDisabled Ext_latex_macros >> return s) <|>
       case res of
            Left e   -> Prelude.fail (show e)
            Right s' -> return s'
+
+{-
+When tokenize or untokenize change, test with this
+QuickCheck property:
+
+> tokUntokRoundtrip :: String -> Bool
+> tokUntokRoundtrip s =
+>   let t = T.pack s in untokenize (tokenize "random" t) == t
+-}
 
 tokenize :: SourceName -> Text -> [Tok]
 tokenize sourcename = totoks (initialPos sourcename)
@@ -914,3 +929,35 @@ getNextNumber getCurrentNum = do
                Just n  -> [n, 1]
                Nothing -> [1]
 
+label :: PandocMonad m => LP m ()
+label = do
+  controlSeq "label"
+  t <- braced
+  updateState $ \st -> st{ sLastLabel = Just $ untokenize t }
+
+setCaption :: PandocMonad m => LP m Inlines -> LP m ()
+setCaption inline = try $ do
+  skipopts
+  ils <- tokWith inline
+  optional $ try $ spaces *> label
+  updateState $ \st -> st{ sCaption = Just ils }
+
+resetCaption :: PandocMonad m => LP m ()
+resetCaption = updateState $ \st -> st{ sCaption   = Nothing
+                                      , sLastLabel = Nothing }
+
+env :: PandocMonad m => Text -> LP m a -> LP m a
+env name p = p <* end_ name
+
+tokWith :: PandocMonad m => LP m Inlines -> LP m Inlines
+tokWith inlineParser = try $ spaces >>
+                                 grouped inlineParser
+                            <|> (lookAhead anyControlSeq >> inlineParser)
+                            <|> singleChar'
+  where singleChar' = do
+          Tok _ _ t <- singleChar
+          return $ str t
+
+addMeta :: PandocMonad m => ToMetaValue a => Text -> a -> LP m ()
+addMeta field val = updateState $ \st ->
+   st{ sMeta = addMetaField field val $ sMeta st }

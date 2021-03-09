@@ -2,9 +2,11 @@ version?=$(shell grep '^[Vv]ersion:' pandoc.cabal | awk '{print $$2;}')
 pandoc=$(shell find dist -name pandoc -type f -exec ls -t {} \; | head -1)
 SOURCEFILES?=$(shell git ls-tree -r master --name-only | grep "\.hs$$")
 BRANCH?=master
+ARCH=$(shell uname -m)
+DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:8.10.4
 COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
-LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv))
+LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
 ifeq ($(LATESTBENCH),)
 BASELINE=
 else
@@ -81,10 +83,14 @@ checkdocs:
 debpkg: man/pandoc.1
 	docker run -v `pwd`:/mnt \
                    -v `pwd`/linux/artifacts:/artifacts \
+		   --user $(id -u):$(id -g) \
 		   -e REVISION=$(REVISION) \
 		   -w /mnt \
-	           utdemir/ghc-musl:v12-libgmp-ghc8101 bash \
-		   /mnt/linux/make_artifacts.sh
+		   --memory=0 \
+		   --rm \
+		   $(DOCKERIMAGE) \
+		   bash \
+		   /mnt/linux/make_artifacts.sh 2>&1 > docker.log
 
 man/pandoc.1: MANUAL.txt man/pandoc.1.before man/pandoc.1.after
 	pandoc $< -f markdown -t man -s \

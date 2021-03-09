@@ -22,28 +22,29 @@ module Text.Pandoc.App.Opt (
           , IpynbOutput (..)
           , DefaultsState (..)
           , defaultOpts
-          , addMeta
           , applyDefaults
           , fullDefaultsPath
           ) where
 import Control.Monad.Except (MonadIO, liftIO, throwError, (>=>), foldM)
 import Control.Monad.State.Strict (StateT, modify, gets)
-import System.FilePath ( addExtension, (</>), takeExtension )
+import System.FilePath ( addExtension, (</>), takeExtension, takeDirectory )
+import System.Directory ( canonicalizePath )
 import Data.Char (isLower, toLower)
 import Data.Maybe (fromMaybe)
 import GHC.Generics hiding (Meta)
-import Text.Pandoc.Builder (setMeta)
 import Text.Pandoc.Filter (Filter (..))
-import Text.Pandoc.Logging (Verbosity (WARNING))
+import Text.Pandoc.Logging (Verbosity (WARNING), LogMessage(..))
 import Text.Pandoc.Options (TopLevelDivision (TopLevelDefault),
                             TrackChanges (AcceptChanges),
                             WrapOption (WrapAuto), HTMLMathMethod (PlainMath),
                             ReferenceLocation (EndOfDocument),
                             ObfuscationMethod (NoObfuscation),
                             CiteMethod (Citeproc))
-import Text.Pandoc.Class (readFileLazy, fileExists, setVerbosity, PandocMonad)
+import Text.Pandoc.Class (readFileLazy, fileExists, setVerbosity, report,
+                          PandocMonad(lookupEnv), getUserDataDir)
 import Text.Pandoc.Error (PandocError (PandocParseError, PandocSomeError))
-import Text.Pandoc.Shared (camelCaseStrToHyphenated, defaultUserDataDirs, findM, ordNub)
+import Text.Pandoc.Shared (camelCaseStrToHyphenated, defaultUserDataDir,
+                           findM, ordNub)
 import qualified Text.Pandoc.Parsing as P
 import Text.Pandoc.Readers.Metadata (yamlMap)
 import Text.Pandoc.Class.PandocPure
@@ -52,7 +53,7 @@ import Data.Text (Text, unpack)
 import Data.Default (def)
 import qualified Data.Text as T
 import qualified Data.Map as M
-import Text.Pandoc.Definition (Meta(..), MetaValue(..), lookupMeta)
+import Text.Pandoc.Definition (Meta(..), MetaValue(..))
 import Data.Aeson (defaultOptions, Options(..))
 import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<|>))
@@ -156,6 +157,9 @@ data Opt = Opt
     , optNoCheckCertificate    :: Bool       -- ^ Disable certificate validation
     , optEol                   :: LineEnding -- ^ Style of line-endings to use
     , optStripComments         :: Bool       -- ^ Skip HTML comments
+    , optCSL                   :: Maybe FilePath -- ^ CSL stylesheet
+    , optBibliography          :: [FilePath]  -- ^ Bibliography files
+    , optCitationAbbreviations :: Maybe FilePath -- ^ Citation abbreviations
     } deriving (Generic, Show)
 
 instance FromYAML (Opt -> Opt) where
@@ -175,16 +179,127 @@ instance (PandocMonad m, MonadIO m)
     dataDir <- case M.lookup "data-dir" opts of
       Nothing -> return Nothing
       Just v -> Just . unpack <$> parseYAML v
-    f <- parseOptions $ M.toList m
+    f <- parseOptions (M.toList m)
     case M.lookup "defaults" opts of
       Just v -> do
         g <- parseDefaults v dataDir
-        return  $ g >=> f
-      Nothing -> return f
+        return  $ g >=> f >=> resolveVarsInOpt
+      Nothing -> return $ f >=> resolveVarsInOpt
     where
       toText (Scalar _ (SStr s)) = s
       toText _ = ""
   parseYAML n = failAtNode n "Expected a mapping"
+
+resolveVarsInOpt :: forall m. (PandocMonad m, MonadIO m)
+                 => Opt -> StateT DefaultsState m Opt
+resolveVarsInOpt
+    opt@Opt
+    { optTemplate              = oTemplate
+    , optMetadataFiles         = oMetadataFiles
+    , optOutputFile            = oOutputFile
+    , optInputFiles            = oInputFiles
+    , optSyntaxDefinitions     = oSyntaxDefinitions
+    , optAbbreviations         = oAbbreviations
+    , optReferenceDoc          = oReferenceDoc
+    , optEpubMetadata          = oEpubMetadata
+    , optEpubFonts             = oEpubFonts
+    , optEpubCoverImage        = oEpubCoverImage
+    , optLogFile               = oLogFile
+    , optFilters               = oFilters
+    , optDataDir               = oDataDir
+    , optExtractMedia          = oExtractMedia
+    , optCss                   = oCss
+    , optIncludeBeforeBody     = oIncludeBeforeBody
+    , optIncludeAfterBody      = oIncludeAfterBody
+    , optIncludeInHeader       = oIncludeInHeader
+    , optResourcePath          = oResourcePath
+    , optCSL                   = oCSL
+    , optBibliography          = oBibliography
+    , optCitationAbbreviations = oCitationAbbreviations
+    }
+  = do
+      oTemplate' <- mapM resolveVars oTemplate
+      oMetadataFiles' <- mapM resolveVars oMetadataFiles
+      oOutputFile' <- mapM resolveVars oOutputFile
+      oInputFiles' <- mapM (mapM resolveVars) oInputFiles
+      oSyntaxDefinitions' <- mapM resolveVars oSyntaxDefinitions
+      oAbbreviations' <- mapM resolveVars oAbbreviations
+      oReferenceDoc' <- mapM resolveVars oReferenceDoc
+      oEpubMetadata' <- mapM resolveVars oEpubMetadata
+      oEpubFonts' <- mapM resolveVars oEpubFonts
+      oEpubCoverImage' <- mapM resolveVars oEpubCoverImage
+      oLogFile' <- mapM resolveVars oLogFile
+      oFilters' <- mapM resolveVarsInFilter oFilters
+      oDataDir' <- mapM resolveVars oDataDir
+      oExtractMedia' <- mapM resolveVars oExtractMedia
+      oCss' <- mapM resolveVars oCss
+      oIncludeBeforeBody' <- mapM resolveVars oIncludeBeforeBody
+      oIncludeAfterBody' <- mapM resolveVars oIncludeAfterBody
+      oIncludeInHeader' <- mapM resolveVars oIncludeInHeader
+      oResourcePath' <- mapM resolveVars oResourcePath
+      oCSL' <- mapM resolveVars oCSL
+      oBibliography' <- mapM resolveVars oBibliography
+      oCitationAbbreviations' <- mapM resolveVars oCitationAbbreviations
+      return opt{ optTemplate              = oTemplate'
+                , optMetadataFiles         = oMetadataFiles'
+                , optOutputFile            = oOutputFile'
+                , optInputFiles            = oInputFiles'
+                , optSyntaxDefinitions     = oSyntaxDefinitions'
+                , optAbbreviations         = oAbbreviations'
+                , optReferenceDoc          = oReferenceDoc'
+                , optEpubMetadata          = oEpubMetadata'
+                , optEpubFonts             = oEpubFonts'
+                , optEpubCoverImage        = oEpubCoverImage'
+                , optLogFile               = oLogFile'
+                , optFilters               = oFilters'
+                , optDataDir               = oDataDir'
+                , optExtractMedia          = oExtractMedia'
+                , optCss                   = oCss'
+                , optIncludeBeforeBody     = oIncludeBeforeBody'
+                , optIncludeAfterBody      = oIncludeAfterBody'
+                , optIncludeInHeader       = oIncludeInHeader'
+                , optResourcePath          = oResourcePath'
+                , optCSL                   = oCSL'
+                , optBibliography          = oBibliography'
+                , optCitationAbbreviations = oCitationAbbreviations'
+                }
+
+ where
+  resolveVars :: FilePath -> StateT DefaultsState m FilePath
+  resolveVars [] = return []
+  resolveVars ('$':'{':xs) =
+    let (ys, zs) = break (=='}') xs
+     in if null zs
+           then return $ '$':'{':xs
+           else do
+             val <- lookupEnv' ys
+             (val ++) <$> resolveVars (drop 1 zs)
+  resolveVars (c:cs) = (c:) <$> resolveVars cs
+  lookupEnv' :: String -> StateT DefaultsState m String
+  lookupEnv' "." = do
+    mbCurDefaults <- gets curDefaults
+    maybe (return "")
+          (fmap takeDirectory . liftIO . canonicalizePath)
+          mbCurDefaults
+  lookupEnv' "USERDATA" = do
+    mbodatadir <- mapM resolveVars oDataDir
+    mbdatadir  <- getUserDataDir
+    defdatadir <- liftIO defaultUserDataDir
+    return $ fromMaybe defdatadir (mbodatadir <|> mbdatadir)
+  lookupEnv' v = do
+    mbval <- fmap T.unpack <$> lookupEnv (T.pack v)
+    case mbval of
+      Nothing -> do
+        report $ EnvironmentVariableUndefined (T.pack v)
+        return mempty
+      Just x  -> return x
+  resolveVarsInFilter (JSONFilter fp) =
+    JSONFilter <$> resolveVars fp
+  resolveVarsInFilter (LuaFilter fp) =
+    LuaFilter <$> resolveVars fp
+  resolveVarsInFilter CiteprocFilter = return CiteprocFilter
+
+
 
 parseDefaults :: (PandocMonad m, MonadIO m)
               => Node Pos
@@ -428,26 +543,18 @@ doOpt (k',v) = do
       (parseYAML v >>= \x -> return (\o -> o{ optCss = optCss o <>
                                                 [unpack x] }))
     "bibliography" ->
-      do let addItem x o = o{ optMetadata =
-                                 addMeta "bibliography" (T.unpack x)
-                                    (optMetadata o) }
-         (parseYAML v >>= \(xs :: [Text]) -> return $ \o ->
-                                                    foldr addItem o xs)
-          <|>
-          (parseYAML v >>= \(x :: Text) -> return $ \o -> addItem x o)
+      (parseYAML v >>= \x -> return (\o ->
+                               o{ optBibliography = optBibliography o <>
+                                                      map unpack x }))
+      <|>
+      (parseYAML v >>= \x -> return (\o ->
+                               o{ optBibliography = optBibliography o <>
+                                                       [unpack x] }))
     "csl" ->
-      do let addItem x o = o{ optMetadata =
-                                 addMeta "csl" (T.unpack x)
-                                   (optMetadata o) }
-         (parseYAML v >>= \(xs :: [Text]) -> return $ \o ->
-                                                    foldr addItem o xs)
-          <|>
-          (parseYAML v >>= \(x :: Text) -> return $ \o -> addItem x o)
+      parseYAML v >>= \x -> return (\o -> o{ optCSL = unpack <$> x })
     "citation-abbreviations" ->
-      parseYAML v >>= \x ->
-             return (\o -> o{ optMetadata =
-                                addMeta "citation-abbreviations" (T.unpack x)
-                                  (optMetadata o) })
+      parseYAML v >>= \x -> return (\o -> o{ optCitationAbbreviations =
+                                                  unpack <$> x })
     "ipynb-output" ->
       parseYAML v >>= \x -> return (\o -> o{ optIpynbOutput = x })
     "include-before-body" ->
@@ -476,7 +583,8 @@ doOpt (k',v) = do
                                 optIncludeInHeader o <> [unpack x] }))
     "resource-path" ->
       parseYAML v >>= \x ->
-             return (\o -> o{ optResourcePath = map unpack x })
+             return (\o -> o{ optResourcePath = map unpack x <>
+                                 optResourcePath o })
     "request-headers" ->
       parseYAML v >>= \x ->
              return (\o -> o{ optRequestHeaders = x })
@@ -562,6 +670,9 @@ defaultOpts = Opt
     , optNoCheckCertificate    = False
     , optEol                   = Native
     , optStripComments         = False
+    , optCSL                   = Nothing
+    , optBibliography          = []
+    , optCitationAbbreviations = Nothing
     }
 
 parseStringKey ::  Node Pos -> Parser Text
@@ -578,27 +689,6 @@ yamlToMeta (Mapping _ _ m) =
     runEverything p = runPure (P.readWithM p def "")
       >>= fmap (Meta . flip P.runF def)
 yamlToMeta _ = return mempty
-
-addMeta :: String -> String -> Meta -> Meta
-addMeta k v meta =
-  case lookupMeta k' meta of
-       Nothing -> setMeta k' v' meta
-       Just (MetaList xs) ->
-                  setMeta k' (MetaList (xs ++ [v'])) meta
-       Just x  -> setMeta k' (MetaList [x, v']) meta
- where
-  v' = readMetaValue v
-  k' = T.pack k
-
-readMetaValue :: String -> MetaValue
-readMetaValue s
-  | s == "true"  = MetaBool True
-  | s == "True"  = MetaBool True
-  | s == "TRUE"  = MetaBool True
-  | s == "false" = MetaBool False
-  | s == "False" = MetaBool False
-  | s == "FALSE" = MetaBool False
-  | otherwise    = MetaString $ T.pack s
 
 -- | Apply defaults from --defaults file.
 applyDefaults :: (PandocMonad m, MonadIO m)
@@ -625,12 +715,9 @@ fullDefaultsPath dataDir file = do
   let fp = if null (takeExtension file)
               then addExtension file "yaml"
               else file
-  dataDirs <- liftIO defaultUserDataDirs
-  let fps = fp : case dataDir of
-                   Nothing -> map (</> ("defaults" </> fp))
-                                    dataDirs
-                   Just dd -> [dd </> "defaults" </> fp]
-  fromMaybe fp <$> findM fileExists fps
+  defaultDataDir <- liftIO defaultUserDataDir
+  let defaultFp = fromMaybe defaultDataDir dataDir </> "defaults" </> fp
+  fromMaybe fp <$> findM fileExists [fp, defaultFp]
 
 -- | In a list of lists, append another list in front of every list which
 -- starts with specific element.
