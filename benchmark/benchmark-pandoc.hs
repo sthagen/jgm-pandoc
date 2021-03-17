@@ -18,12 +18,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 -}
 import Text.Pandoc
 import Text.Pandoc.MIME
-import Control.Monad (when)
+import Control.DeepSeq (force)
 import Control.Monad.Except (throwError)
 import qualified Text.Pandoc.UTF8 as UTF8
 import qualified Data.ByteString as B
 import qualified Data.Text as T
-import Test.Tasty.Bench
+-- import Test.Tasty.Bench
+import Gauge
 import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (mapMaybe)
 import Data.List (sortOn)
@@ -31,10 +32,10 @@ import Data.List (sortOn)
 readerBench :: Pandoc
             -> T.Text
             -> Maybe Benchmark
+readerBench _ name
+  | name `elem` ["bibtex", "biblatex", "csljson"] = Nothing
 readerBench doc name = either (const Nothing) Just $
   runPure $ do
-    when (name `elem` ["bibtex", "biblatex", "csljson"]) $
-      throwError $ PandocSomeError $ name <> " not supported for benchmark"
     (rdr, rexts) <- getReader name
     (wtr, wexts) <- getWriter name
     case (rdr, wtr) of
@@ -56,19 +57,19 @@ readerBench doc name = either (const Nothing) Just $
 
 getImages :: IO [(FilePath, MimeType, BL.ByteString)]
 getImages = do
-  ll <- BL.readFile "test/lalune.jpg"
-  mv <- BL.readFile "test/movie.jpg"
-  return [("lalune.jpg", "image/jpg", ll)
-         ,("movie.jpg", "image/jpg", mv)]
+  ll <- B.readFile "test/lalune.jpg"
+  mv <- B.readFile "test/movie.jpg"
+  return [("lalune.jpg", "image/jpg", BL.fromStrict ll)
+         ,("movie.jpg", "image/jpg", BL.fromStrict mv)]
 
 writerBench :: [(FilePath, MimeType, BL.ByteString)]
             -> Pandoc
             -> T.Text
             -> Maybe Benchmark
+writerBench _ _ name
+  | name `elem` ["bibtex", "biblatex", "csljson"] = Nothing
 writerBench imgs doc name = either (const Nothing) Just $
   runPure $ do
-    when (name `elem` ["bibtex", "biblatex", "csljson"]) $
-      throwError $ PandocSomeError $ name <> " not supported for benchmark"
     (wtr, wexts) <- getWriter name
     case wtr of
       TextWriter writerFun ->
@@ -90,10 +91,10 @@ main :: IO ()
 main = do
   inp <- UTF8.toText <$> B.readFile "test/testsuite.txt"
   let opts = def
-  let doc = either (error . show) id $ runPure $ readMarkdown opts inp
-  imgs <- getImages
+  let doc = either (error . show) force $ runPure $ readMarkdown opts inp
   defaultMain
-    [ bgroup "writers" $ mapMaybe (writerBench imgs doc . fst)
+    [ env getImages $ \imgs ->
+      bgroup "writers" $ mapMaybe (writerBench imgs doc . fst)
                          (sortOn fst
                            writers :: [(T.Text, Writer PandocPure)])
     , bgroup "readers" $ mapMaybe (readerBench doc . fst)

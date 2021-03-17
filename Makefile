@@ -12,13 +12,19 @@ BASELINE=
 else
 BASELINE=--baseline $(LATESTBENCH)
 endif
-GHCOPTS=-fdiagnostics-color=always
+GHCOPTS=-fdiagnostics-color=always -j4 +RTS -A256m -RTS
 WEBSITE=../../web/pandoc.org
 REVISION?=1
-BENCHARGS?=--timeout=6 +RTS -T -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
+# Note: for benchmarks we use +RTS -A256m -I0 -RTS ; otherwise the benchmarks
+# are measuring garbage collecting, and this can vary depending on which
+# other benchmarks are run.
+# For gauge:
+BENCHARGS?=--small --ci=0.90 --match=pattern $(PATTERN) +RTS -T -A256m -I0 -RTS
+# For tasty-bench:
+# BENCHARGS?=--csv bench_$(TIMESTAMP).csv --timeout=6 +RTS -T -A256m -I0 -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
 
 quick:
-	stack install --ghc-options='$(GHCOPTS)' --install-ghc --flag 'pandoc:embed_data_files' --fast --test --ghc-options='-j +RTS -A64m -RTS' --test-arguments='-j4 --hide-successes $(TESTARGS)'
+	stack install --ghc-options='$(GHCOPTS)' --install-ghc --flag 'pandoc:embed_data_files' --fast --test --ghc-options='$(GHCOPTS)' --test-arguments='-j4 --hide-successes $(TESTARGS)'
 
 quick-cabal:
 	cabal new-configure . --ghc-options '$(GHCOPTS)' --disable-optimization --enable-tests
@@ -47,11 +53,16 @@ test:
 ghcid:
 	ghcid -c "stack repl --flag 'pandoc:embed_data_files'"
 
-bench:
-	stack bench --benchmark-arguments='$(BENCHARGS) $(BASELINE) --csv bench_$(TIMESTAMP).csv' --ghc-options '$(GHCOPTS)'
+ghcid-test:
+	ghcid -c "stack repl --ghc-options=-XNoImplicitPrelude --flag 'pandoc:embed_data_files' --ghci-options=-fobject-code pandoc:lib pandoc:test-pandoc"
 
-weigh:
-	stack build --ghc-options '$(GHCOPTS)' pandoc:weigh-pandoc && stack exec weigh-pandoc
+bench:
+	stack bench \
+	  --ghc-options '-Rghc-timing $(GHCOPTS)' \
+	  --benchmark-arguments='$(BENCHARGS)' 2>&1 | \
+	  tee "bench_latest.txt"
+	perl -ne 'if (/\r/) { s/\x1b\[[0-9;]*[mGK]//g;s/^.*\r//;print; }' \
+	  bench_latest.txt > "bench_$(TIMESTAMP).txt"
 
 reformat:
 	for f in $(SOURCEFILES); do echo $$f; stylish-haskell -i $$f ; done

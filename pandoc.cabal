@@ -398,8 +398,7 @@ flag trypandoc
 
 common common-options
   default-language: Haskell2010
-  build-depends:    base         >= 4.9 && < 5,
-                    text         >= 1.1.1.0 && < 1.3
+  build-depends:    base         >= 4.9 && < 5
   ghc-options:      -Wall -fno-warn-unused-do-bind
                     -Wincomplete-record-updates
                     -Wnoncanonical-monad-instances
@@ -446,7 +445,7 @@ library
                  blaze-markup          >= 0.8      && < 0.9,
                  bytestring            >= 0.9      && < 0.12,
                  case-insensitive      >= 1.2      && < 1.3,
-                 citeproc              >= 0.3.0.7  && < 0.4,
+                 citeproc              >= 0.3.0.9  && < 0.4,
                  commonmark            >= 0.1.1.3  && < 0.2,
                  commonmark-extensions >= 0.2.0.4  && < 0.3,
                  commonmark-pandoc     >= 0.2      && < 0.3,
@@ -455,7 +454,7 @@ library
                  data-default          >= 0.4      && < 0.8,
                  deepseq               >= 1.3      && < 1.5,
                  directory             >= 1.2.3    && < 1.4,
-                 doclayout             >= 0.3      && < 0.4,
+                 doclayout             >= 0.3.0.1  && < 0.4,
                  doctemplates          >= 0.9      && < 0.10,
                  emojis                >= 0.1      && < 0.2,
                  exceptions            >= 0.8      && < 0.11,
@@ -470,7 +469,7 @@ library
                  http-client-tls       >= 0.2.4    && < 0.4,
                  http-types            >= 0.8      && < 0.13,
                  ipynb                 >= 0.1      && < 0.2,
-                 jira-wiki-markup      >= 1.3.3    && < 1.4,
+                 jira-wiki-markup      >= 1.3.4    && < 1.4,
                  mtl                   >= 2.2      && < 2.3,
                  network               >= 2.6,
                  network-uri           >= 2.6      && < 2.7,
@@ -480,13 +479,13 @@ library
                  random                >= 1        && < 1.2,
                  safe                  >= 0.3      && < 0.4,
                  scientific            >= 0.3      && < 0.4,
-                 skylighting           >= 0.10.4   && < 0.11,
-                 skylighting-core      >= 0.10.4   && < 0.11,
+                 skylighting           >= 0.10.4.1 && < 0.11,
+                 skylighting-core      >= 0.10.4.1 && < 0.11,
                  split                 >= 0.2      && < 0.3,
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
                  temporary             >= 1.1      && < 1.4,
-                 texmath               >= 0.12.1   && < 0.13,
+                 texmath               >= 0.12.2   && < 0.13,
                  text                  >= 1.1.1.0  && < 1.3,
                  text-conversions      >= 0.3      && < 0.4,
                  time                  >= 1.5      && < 1.10,
@@ -744,7 +743,6 @@ test-suite test-pandoc
                   Diff              >= 0.2     && < 0.5,
                   Glob              >= 0.7     && < 0.11,
                   QuickCheck        >= 2.4     && < 2.15,
-                  base64-bytestring >= 0.1     && < 1.3,
                   bytestring        >= 0.9     && < 0.12,
                   containers        >= 0.4.2.1 && < 0.7,
                   directory         >= 1.2.3   && < 1.4,
@@ -761,7 +759,7 @@ test-suite test-pandoc
                   tasty-hunit       >= 0.9     && < 0.11,
                   tasty-lua         >= 0.2     && < 0.3,
                   tasty-quickcheck  >= 0.8     && < 0.11,
-                  temporary         >= 1.1     && < 1.4,
+                  text              >= 1.1.1.0  && < 1.3,
                   time              >= 1.5     && < 1.10,
                   xml               >= 1.3.12  && < 1.4,
                   zip-archive       >= 0.2.3.4 && < 0.5
@@ -828,7 +826,9 @@ benchmark benchmark-pandoc
   hs-source-dirs:  benchmark
   build-depends:   bytestring,
                    containers,
-                   tasty,
-                   tasty-bench >= 0.2     && <= 0.3,
+                   gauge       >= 0.2     && < 0.3,
+                   -- tasty-bench >= 0.2     && <= 0.3,
                    mtl         >= 2.2     && < 2.3,
-                   time
+                   text        >= 1.1.1.0 && < 1.3,
+                   time,
+                   deepseq
