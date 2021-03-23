@@ -7,28 +7,26 @@ DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:8.10.4
 COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
 LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
-ifeq ($(LATESTBENCH),)
-BASELINE=
+BASELINE?=$(LATESTBENCH)
+ifeq ($(BASELINE),)
+BASELINECMD=
 else
-BASELINE=--baseline $(LATESTBENCH)
+BASELINECMD=--baseline $(BASELINE)
 endif
-GHCOPTS=-fdiagnostics-color=always -j4 +RTS -A256m -RTS
+GHCOPTS=-fdiagnostics-color=always -j4 +RTS -A8m -RTS
 WEBSITE=../../web/pandoc.org
 REVISION?=1
-# Note: for benchmarks we use +RTS -A256m -I0 -RTS ; otherwise the benchmarks
-# are measuring garbage collecting, and this can vary depending on which
-# other benchmarks are run.
 # For gauge:
-BENCHARGS?=--small --ci=0.90 --match=pattern $(PATTERN) +RTS -T -A256m -I0 -RTS
+# BENCHARGS?=--small --ci=0.90 --match=pattern $(PATTERN)
 # For tasty-bench:
-# BENCHARGS?=--csv bench_$(TIMESTAMP).csv --timeout=6 +RTS -T -A256m -I0 -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
+BENCHARGS?=--csv bench_$(TIMESTAMP).csv $(BASELINECMD) --timeout=6 +RTS -T -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
 
 quick:
 	stack install --ghc-options='$(GHCOPTS)' --install-ghc --flag 'pandoc:embed_data_files' --fast --test --ghc-options='$(GHCOPTS)' --test-arguments='-j4 --hide-successes $(TESTARGS)'
 
 quick-cabal:
 	cabal new-configure . --ghc-options '$(GHCOPTS)' --disable-optimization --enable-tests
-	cabal new-build . --disable-optimization
+	cabal new-build -j4 . --disable-optimization
 	cabal new-run test-pandoc --disable-optimization -- --hide-successes $(TESTARGS)
 
 full-cabal:
@@ -37,7 +35,7 @@ full-cabal:
 	cabal new-run test-pandoc --disable-optimization -- --hide-successes $(TESTARGS)
 
 full:
-	stack install --flag 'pandoc:embed_data_files' --flag 'pandoc:trypandoc' --bench --no-run-benchmarks --test --test-arguments='-j4 --hide-successes' --ghc-options '-Wall -Werror -fno-warn-unused-do-bind -O0 -j4 $(GHCOPTS)'
+	stack install --flag 'pandoc:embed_data_files' --flag 'pandoc:trypandoc' --bench --no-run-benchmarks --test --test-arguments='-j4 --hide-successes' --ghc-options '-Wall -Werror -fno-warn-unused-do-bind -O0 $(GHCOPTS)'
 
 ghci:
 	stack ghci --flag 'pandoc:embed_data_files'
@@ -58,11 +56,9 @@ ghcid-test:
 
 bench:
 	stack bench \
-	  --ghc-options '-Rghc-timing $(GHCOPTS)' \
+	  --ghc-options '$(GHCOPTS)' \
 	  --benchmark-arguments='$(BENCHARGS)' 2>&1 | \
 	  tee "bench_latest.txt"
-	perl -ne 'if (/\r/) { s/\x1b\[[0-9;]*[mGK]//g;s/^.*\r//;print; }' \
-	  bench_latest.txt > "bench_$(TIMESTAMP).txt"
 
 reformat:
 	for f in $(SOURCEFILES); do echo $$f; stylish-haskell -i $$f ; done

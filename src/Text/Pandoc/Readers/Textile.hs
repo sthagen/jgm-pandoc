@@ -39,6 +39,7 @@ import Control.Monad (guard, liftM)
 import Control.Monad.Except (throwError)
 import Data.Char (digitToInt, isUpper)
 import Data.List (intersperse, transpose, foldl')
+import Data.List.NonEmpty (NonEmpty(..), nonEmpty)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.HTML.TagSoup (Tag (..), fromAttrib)
@@ -375,8 +376,9 @@ table = try $ do
                              (toprow:rest) | any (fst . fst) toprow ->
                                 (toprow, rest)
                              _ -> (mempty, rawrows)
-  let nbOfCols = maximum $ map length (headers:rows)
-  let aligns = map minimum $ transpose $ map (map (snd . fst)) (headers:rows)
+  let nbOfCols = maximum $ fmap length (headers :| rows)
+  let aligns = map (maybe AlignDefault minimum . nonEmpty) $
+                transpose $ map (map (snd . fst)) (headers:rows)
   let toRow = Row nullAttr . map B.simpleCell
       toHeaderRow l = [toRow l | not (null l)]
   return $ B.table (B.simpleCaption $ B.plain caption)

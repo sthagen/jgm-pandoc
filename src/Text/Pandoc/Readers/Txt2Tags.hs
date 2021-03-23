@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 {- |
    Module      : Text.Pandoc.Readers.Txt2Tags
    Copyright   : Copyright (C) 2014 Matthew Pickering
@@ -19,6 +20,7 @@ import Control.Monad.Except (catchError, throwError)
 import Control.Monad.Reader (Reader, asks, runReader)
 import Data.Default
 import Data.List (intercalate, transpose)
+import Data.List.NonEmpty (nonEmpty)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -53,14 +55,17 @@ getT2TMeta = do
     inps <- P.getInputFiles
     outp <- fromMaybe "" <$> P.getOutputFile
     curDate <- formatTime defaultTimeLocale "%F" <$> P.getZonedTime
-    let getModTime = fmap (formatTime defaultTimeLocale "%T") .
-                       P.getModificationTime
-    curMtime <- case inps of
-                  [] -> formatTime defaultTimeLocale "%T" <$> P.getZonedTime
-                  _ -> catchError
-                        (maximum <$> mapM getModTime inps)
-                        (const (return ""))
-    return $ T2TMeta (T.pack curDate) (T.pack curMtime) (intercalate ", " inps) outp
+    curMtime <- catchError
+                 (mapM P.getModificationTime inps >>=
+                   (\case
+                       Nothing ->
+                         formatTime defaultTimeLocale "%T" <$> P.getZonedTime
+                       Just ts -> return $
+                         formatTime defaultTimeLocale "%T" $ maximum ts)
+                    . nonEmpty)
+                (const (return ""))
+    return $ T2TMeta (T.pack curDate) (T.pack curMtime)
+                     (intercalate ", " inps) outp
 
 -- | Read Txt2Tags from an input string returning a Pandoc document
 readTxt2Tags :: PandocMonad m
@@ -261,9 +266,9 @@ table = try $ do
   rows <- many1 (many commentLine *> tableRow)
   let columns = transpose rows
   let ncolumns = length columns
-  let aligns = map (foldr1 findAlign . map fst) columns
+  let aligns = map (fromMaybe AlignDefault . foldr findAlign Nothing) columns
   let rows' = map (map snd) rows
-  let size = maximum (map length rows')
+  let size = maybe 0 maximum $ nonEmpty $ map length rows'
   let rowsPadded = map (pad size) rows'
   let headerPadded = if null tableHeader then mempty else pad size tableHeader
   let toRow = Row nullAttr . map B.simpleCell
@@ -278,10 +283,11 @@ pad :: (Monoid a) => Int -> [a] -> [a]
 pad n xs = xs ++ replicate (n - length xs) mempty
 
 
-findAlign :: Alignment -> Alignment -> Alignment
-findAlign x y
-  | x == y = x
-  | otherwise = AlignDefault
+findAlign :: (Alignment, a) -> Maybe Alignment -> Maybe Alignment
+findAlign (x,_) (Just y)
+  | x == y = Just x
+  | otherwise = Just AlignDefault
+findAlign (x,_) Nothing = Just x
 
 headerRow :: T2T [(Alignment, Blocks)]
 headerRow = genericRow (string "||")

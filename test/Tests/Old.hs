@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 {- |
    Module      : Tests.Old
    Copyright   : © 2006-2021 John MacFarlane
@@ -15,8 +14,7 @@ module Tests.Old (tests) where
 import Data.Algorithm.Diff
 import System.Exit
 import System.FilePath ((<.>), (</>))
-import qualified System.Environment as Env
-import System.Environment.Executable (getExecutablePath)
+import System.Environment (getExecutablePath)
 import Text.Pandoc.Process (pipeProcess)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden.Advanced (goldenTest)
@@ -319,14 +317,7 @@ testWithNormalize normalizer pandocPath testname opts inp norm =
     (compareValues norm options) updateGolden
   where getExpected = normalizer <$> readFile' norm
         getActual   = do
-              mldpath   <- Env.lookupEnv "LD_LIBRARY_PATH"
-              mdyldpath <- Env.lookupEnv "DYLD_LIBRARY_PATH"
-              let env  = ("TMP",".") :
-                         ("LANG","en_US.UTF-8") :
-                         ("HOME", "./") :
-                         maybe [] ((:[]) . ("LD_LIBRARY_PATH",)) mldpath ++
-                         maybe [] ((:[]) . ("DYLD_LIBRARY_PATH",)) mdyldpath
-
+              env <- setupEnvironment pandocPath
               (ec, out) <- pipeProcess (Just env) pandocPath
                              ("--emulate":options) mempty
               if ec == ExitSuccess
@@ -335,7 +326,7 @@ testWithNormalize normalizer pandocPath testname opts inp norm =
                    -- filter \r so the tests will work on Windows machines
                  else fail $ "Pandoc failed with error code " ++ show ec
         updateGolden = UTF8.writeFile norm . T.pack
-        options = ["--data-dir=../data","--quiet"] ++ [inp] ++ opts
+        options = ["--quiet"] ++ [inp] ++ opts
 
 compareValues :: FilePath -> [String] -> String -> String -> IO (Maybe String)
 compareValues norm options expected actual = do

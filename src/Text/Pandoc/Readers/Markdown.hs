@@ -22,12 +22,12 @@ import Control.Monad
 import Control.Monad.Except (throwError)
 import Data.Char (isAlphaNum, isPunctuation, isSpace)
 import Data.List (transpose, elemIndex, sortOn, foldl')
+import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
 import qualified Data.ByteString.Lazy as BL
 import System.FilePath (addExtension, takeExtension)
 import Text.HTML.TagSoup hiding (Row)
@@ -45,11 +45,12 @@ import Text.Pandoc.Readers.HTML (htmlInBalanced, htmlTag, isBlockTag,
                                  isCommentTag, isInlineTag, isTextTag)
 import Text.Pandoc.Readers.LaTeX (applyMacros, rawLaTeXBlock, rawLaTeXInline)
 import Text.Pandoc.Shared
-import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.XML (fromEntities)
-import Text.Pandoc.Readers.Metadata (yamlBsToMeta, yamlBsToRefs)
+import Text.Pandoc.Readers.Metadata (yamlBsToMeta, yamlBsToRefs, yamlMetaBlock)
 
 type MarkdownParser m = ParserT Text ParserState m
+
+type F = Future ParserState
 
 -- | Read markdown from an input string and return a Pandoc document.
 readMarkdown :: PandocMonad m
@@ -271,25 +272,13 @@ pandocTitleBlock = do
                      $ nullMeta
     updateState $ \st -> st{ stateMeta' = stateMeta' st <> meta' }
 
-yamlMetaBlock :: PandocMonad m => MarkdownParser m (F Blocks)
-yamlMetaBlock = do
+yamlMetaBlock' :: PandocMonad m => MarkdownParser m (F Blocks)
+yamlMetaBlock' = do
   guardEnabled Ext_yaml_metadata_block
-  try $ do
-    string "---"
-    blankline
-    notFollowedBy blankline  -- if --- is followed by a blank it's an HRULE
-    rawYamlLines <- manyTill anyLine stopLine
-    -- by including --- and ..., we allow yaml blocks with just comments:
-    let rawYaml = T.unlines ("---" : (rawYamlLines ++ ["..."]))
-    optional blanklines
-    newMetaF <- yamlBsToMeta (fmap B.toMetaValue <$> parseBlocks)
-                $ UTF8.fromTextLazy $ TL.fromStrict rawYaml
-    -- Since `<>` is left-biased, existing values are not touched:
-    updateState $ \st -> st{ stateMeta' = stateMeta' st <> newMetaF }
-    return mempty
-
-stopLine :: PandocMonad m => MarkdownParser m ()
-stopLine = try $ (string "---" <|> string "...") >> blankline >> return ()
+  newMetaF <- yamlMetaBlock (fmap B.toMetaValue <$> parseBlocks)
+  -- Since `<>` is left-biased, existing values are not touched:
+  updateState $ \st -> st{ stateMeta' = stateMeta' st <> newMetaF }
+  return mempty
 
 mmdTitleBlock :: PandocMonad m => MarkdownParser m ()
 mmdTitleBlock = do
@@ -453,7 +442,7 @@ block :: PandocMonad m => MarkdownParser m (F Blocks)
 block = do
   res <- choice [ mempty <$ blanklines
                , codeBlockFenced
-               , yamlMetaBlock
+               , yamlMetaBlock'
                -- note: bulletList needs to be before header because of
                -- the possibility of empty list items: -
                , bulletList
@@ -1364,7 +1353,7 @@ pipeTable = try $ do
   lines' <- many pipeTableRow
   let lines'' = map (take (length aligns) <$>) lines'
   let maxlength = maximum $
-       map (\x -> T.length . stringify $ runF x def) (heads' : lines'')
+       fmap (\x -> T.length . stringify $ runF x def) (heads' :| lines'')
   numColumns <- getOption readerColumns
   let widths = if maxlength > numColumns
                   then map (\len ->

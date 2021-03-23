@@ -22,6 +22,7 @@ module Text.Pandoc.Writers.AsciiDoc (writeAsciiDoc, writeAsciiDoctor) where
 import Control.Monad.State.Strict
 import Data.Char (isPunctuation, isSpace)
 import Data.List (intercalate, intersperse)
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -104,8 +105,11 @@ pandocToAsciiDoc opts (Pandoc meta blocks) = do
 
 -- | Escape special characters for AsciiDoc.
 escapeString :: Text -> Text
-escapeString = escapeStringUsing escs
-  where escs = backslashEscapes "{"
+escapeString t
+  | T.any (== '{') t = T.concatMap escChar t
+  | otherwise        = t
+  where escChar '{' = "\\{"
+        escChar c   = T.singleton c
 
 -- | Ordered list start parser for use in Para below.
 olMarker :: Parser Text ParserState Char
@@ -274,7 +278,7 @@ blockToAsciiDoc opts block@(Table _ blkCapt specs thead tbody tfoot) = do
   let colwidth = if writerWrapText opts == WrapAuto
                     then writerColumns opts
                     else 100000
-  let maxwidth = maximum $ map offset (head':rows')
+  let maxwidth = maximum $ fmap offset (head' :| rows')
   let body = if maxwidth > colwidth then vsep rows' else vcat rows'
   let border = separator <> text "==="
   return $ 
@@ -495,7 +499,9 @@ inlineToAsciiDoc opts (Quoted qt lst) = do
         | otherwise     -> [Str "``"] ++ lst ++ [Str "''"]
 inlineToAsciiDoc _ (Code _ str) = do
   isAsciidoctor <- gets asciidoctorVariant
-  let contents = literal (escapeStringUsing (backslashEscapes "`") str)
+  let escChar '`' = "\\'"
+      escChar c   = T.singleton c
+  let contents = literal (T.concatMap escChar str)
   return $
     if isAsciidoctor
        then text "`+" <> contents <> "+`"

@@ -112,7 +112,6 @@ module Text.Pandoc.Parsing ( take1WhileP,
                              citeKey,
                              Parser,
                              ParserT,
-                             F,
                              Future(..),
                              runF,
                              askF,
@@ -196,13 +195,13 @@ import Data.Default
 import Data.Functor (($>))
 import Data.List (intercalate, transpose)
 import qualified Data.Map as M
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Data.String
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.HTML.TagSoup.Entity (lookupEntity)
-import Text.Pandoc.Asciify (toAsciiChar)
+import Text.Pandoc.Asciify (toAsciiText)
 import Text.Pandoc.Builder (Blocks, HasMeta (..), Inlines, trimInlines)
 import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Class.PandocMonad (PandocMonad, readFileFromDirs, report)
@@ -228,8 +227,6 @@ type ParserT = ParsecT
 -- in the parser state.
 newtype Future s a = Future { runDelayed :: Reader s a }
   deriving (Monad, Applicative, Functor)
-
-type F = Future ParserState
 
 runF :: Future s a -> s -> a
 runF = runReader . runDelayed
@@ -520,7 +517,7 @@ parseFromString :: (Stream s m Char, IsString s)
                 -> ParserT s st m r
 parseFromString parser str = do
   oldPos <- getPosition
-  setPosition $ initialPos "chunk"
+  setPosition $ initialPos " chunk"
   oldInput <- getInput
   setInput $ fromString $ T.unpack str
   result <- parser
@@ -1128,13 +1125,13 @@ gridTableFooter = optional blanklines
 ---
 
 -- | Removes the ParsecT layer from the monad transformer stack
-readWithM :: (Stream s m Char, ToText s)
-          => ParserT s st m a    -- ^ parser
+readWithM :: Monad m
+          => ParserT Text st m a -- ^ parser
           -> st                  -- ^ initial state
-          -> s                   -- ^ input
+          -> Text                -- ^ input
           -> m (Either PandocError a)
 readWithM parser state input =
-    mapLeft (PandocParsecError $ toText input) `liftM` runParserT parser state "source" input
+    mapLeft (PandocParsecError input) <$> runParserT parser state "source" input
 
 -- | Parse a string with a given parser and state
 readWith :: Parser Text st a
@@ -1169,7 +1166,7 @@ data ParserState = ParserState
       stateInNote            :: Bool,          -- ^ True if parsing note contents
       stateNoteNumber        :: Int,           -- ^ Last note number for citations
       stateMeta              :: Meta,          -- ^ Document metadata
-      stateMeta'             :: F Meta,        -- ^ Document metadata
+      stateMeta'             :: Future ParserState Meta, -- ^ Document metadata
       stateCitations         :: M.Map Text Text, -- ^ RST-style citations
       stateHeaderTable       :: [HeaderType],  -- ^ Ordered list of header types used
       stateIdentifiers       :: Set.Set Text, -- ^ Header identifiers used
@@ -1348,7 +1345,7 @@ data QuoteContext
 
 type NoteTable = [(Text, Text)]
 
-type NoteTable' = M.Map Text (SourcePos, F Blocks)
+type NoteTable' = M.Map Text (SourcePos, Future ParserState Blocks)
 -- used in markdown reader
 
 newtype Key = Key Text deriving (Show, Read, Eq, Ord)
@@ -1383,7 +1380,7 @@ registerHeader (ident,classes,kvs) header' = do
      then do
        let id' = uniqueIdent exts (B.toList header') ids
        let id'' = if Ext_ascii_identifiers `extensionEnabled` exts
-                     then T.pack $ mapMaybe toAsciiChar $ T.unpack id'
+                     then toAsciiText id'
                      else id'
        updateState $ updateIdentifierList $ Set.insert id'
        updateState $ updateIdentifierList $ Set.insert id''

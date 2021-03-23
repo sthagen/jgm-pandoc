@@ -25,11 +25,7 @@ module Text.Pandoc.Shared (
                      ordNub,
                      findM,
                      -- * Text processing
-                     ToString (..),
-                     ToText (..),
                      tshow,
-                     backslashEscapes,
-                     escapeStringUsing,
                      elemText,
                      notElemText,
                      stripTrailingNewlines,
@@ -127,7 +123,7 @@ import Text.HTML.TagSoup (RenderOptions (..), Tag (..), renderOptions,
 import Text.Pandoc.Builder (Blocks, Inlines, ToMetaValue (..))
 import qualified Text.Pandoc.Builder as B
 import Data.Time
-import Text.Pandoc.Asciify (toAsciiChar)
+import Text.Pandoc.Asciify (toAsciiText)
 import Text.Pandoc.Definition
 import Text.Pandoc.Extensions (Extensions, Extension(..), extensionEnabled)
 import Text.Pandoc.Generic (bottomUp)
@@ -183,37 +179,8 @@ findM p = foldr go (pure Nothing)
 -- Text processing
 --
 
-class ToString a where
-  toString :: a -> String
-
-instance ToString String where
-  toString = id
-
-instance ToString T.Text where
-  toString = T.unpack
-
-class ToText a where
-  toText :: a -> T.Text
-
-instance ToText String where
-  toText = T.pack
-
-instance ToText T.Text where
-  toText = id
-
 tshow :: Show a => a -> T.Text
 tshow = T.pack . show
-
--- | Returns an association list of backslash escapes for the
--- designated characters.
-backslashEscapes :: [Char]    -- ^ list of special characters to escape
-                 -> [(Char, T.Text)]
-backslashEscapes = map (\ch -> (ch, T.pack ['\\',ch]))
-
--- | Escape a string of characters, using an association list of
--- characters and strings.
-escapeStringUsing :: [(Char, T.Text)] -> T.Text -> T.Text
-escapeStringUsing tbl = T.concatMap $ \c -> fromMaybe (T.singleton c) $ lookup c tbl
 
 -- | @True@ exactly when the @Char@ appears in the @Text@.
 elemText :: Char -> T.Text -> Bool
@@ -511,7 +478,7 @@ inlineListToIdentifier exts =
       | otherwise = T.dropWhile (not . isAlpha)
     filterAscii
       | extensionEnabled Ext_ascii_identifiers exts
-        = T.pack . mapMaybe toAsciiChar . T.unpack
+        = toAsciiText
       | otherwise = id
     toIdent
       | extensionEnabled Ext_gfm_auto_identifiers exts =
