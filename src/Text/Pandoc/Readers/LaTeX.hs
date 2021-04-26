@@ -32,8 +32,9 @@ import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import Skylighting (defaultSyntaxMap)
 import System.FilePath (addExtension, replaceExtension, takeExtension)
-import Text.Pandoc.BCP47 (renderLang)
+import Text.Collate.Lang (renderLang)
 import Text.Pandoc.Builder as B
 import Text.Pandoc.Class.PandocPure (PandocPure)
 import Text.Pandoc.Class.PandocMonad (PandocMonad (..), getResourcePath,
@@ -1170,7 +1171,8 @@ inputListing = do
   let (ident,classes,kvs) = parseListingsOptions options
   let classes' =
         (case listingsLanguage options of
-           Nothing -> (take 1 (languagesByExtension (T.pack $ takeExtension $ T.unpack f)) <>)
+           Nothing -> (take 1 (languagesByExtension defaultSyntaxMap
+                                (T.pack $ takeExtension $ T.unpack f)) <>)
            Just _  -> id) classes
   let firstline = fromMaybe 1 $ lookup "firstline" options >>= safeRead
   let lastline = fromMaybe (length codeLines) $

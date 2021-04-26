@@ -18,7 +18,6 @@ import Text.Pandoc.Citeproc.CslJson (cslJsonToReferences)
 import Text.Pandoc.Citeproc.BibTeX (readBibtexString, Variant(..))
 import Text.Pandoc.Citeproc.MetaValue (metaValueToReference, metaValueToText)
 import Text.Pandoc.Readers.Markdown (yamlToRefs)
-import qualified Text.Pandoc.BCP47 as BCP47
 import Text.Pandoc.Builder (Inlines, Many(..), deleteMeta, setMeta)
 import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Definition as Pandoc
@@ -75,8 +74,7 @@ processCitations (Pandoc meta bs) = do
 
   let linkCites = maybe False truish $ lookupMeta "link-citations" meta
   let opts = defaultCiteprocOptions{ linkCitations = linkCites }
-  let result = Citeproc.citeproc opts style (localeLanguage locale)
-                  refs citations
+  let result = Citeproc.citeproc opts style mblang refs citations
   mapM_ (report . CiteprocWarning) (resultWarnings result)
   let sopts = styleOptions style
   let classes = "references" : -- TODO remove this or keep for compatibility?
@@ -630,13 +628,8 @@ removeFinalPeriod ils =
 
 bcp47LangToIETF :: PandocMonad m => Text -> m (Maybe Lang)
 bcp47LangToIETF bcplang =
-  case BCP47.parseBCP47 bcplang of
+  case parseLang bcplang of
     Left _ -> do
       report $ InvalidLang bcplang
       return Nothing
-    Right lang ->
-      return $ Just
-             $ Lang (BCP47.langLanguage lang)
-                    (if T.null (BCP47.langRegion lang)
-                        then Nothing
-                        else Just (BCP47.langRegion lang))
+    Right lang -> return $ Just lang

@@ -26,7 +26,7 @@ import Data.Default
 import Data.List (intersperse, sortOn, transpose)
 import Data.List.NonEmpty (nonEmpty, NonEmpty(..))
 import qualified Data.Map as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe, isNothing)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -67,7 +67,17 @@ writePlain opts document =
 -- | Convert Pandoc to Commonmark.
 writeCommonMark :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeCommonMark opts document =
-  evalMD (pandocToMarkdown opts document) def{ envVariant = Commonmark } def
+  evalMD (pandocToMarkdown opts' document) def{ envVariant = Commonmark } def
+ where
+  opts' = opts{ writerExtensions =
+                   -- These extensions can't be enabled or disabled
+                   -- for commonmark because they're part of the core;
+                   -- we set them here so that escapeText will behave
+                   -- properly.
+                   enableExtension Ext_all_symbols_escapable $
+                   enableExtension Ext_pipe_tables $
+                   enableExtension Ext_intraword_underscores $
+                     writerExtensions opts }
 
 pandocTitleBlock :: Doc Text -> [Doc Text] -> Doc Text -> Doc Text
 pandocTitleBlock tit auths dat =
@@ -132,18 +142,17 @@ valToYaml (SimpleVal x)
   | otherwise =
       if hasNewlines x
          then hang 0 ("|" <> cr) x
-         else if fst $ foldr needsDoubleQuotes (False, True) x
+         else if isNothing $ foldM needsDoubleQuotes True x
            then "\"" <> fmap escapeInDoubleQuotes x <> "\""
            else x
     where
-      needsDoubleQuotes t (positive, isFirst)
+      needsDoubleQuotes isFirst t
         = if T.any isBadAnywhere t ||
              (isFirst && T.any isYamlPunct (T.take 1 t))
-              then (True, False)
-              else (positive, False)
+              then Nothing
+              else Just False
       isBadAnywhere '#' = True
       isBadAnywhere ':' = True
-      isBadAnywhere '`' = False
       isBadAnywhere _   = False
       hasNewlines NewLine = True
       hasNewlines BlankLines{} = True
@@ -269,6 +278,12 @@ attrsToMarkdown attribs = braces $ hsep [attribId, attribClasses, attribKeys]
               escAttrChar '\\' = literal "\\\\"
               escAttrChar c    = literal $ T.singleton c
 
+-- | (Code) blocks with a single class can just use it standalone,
+-- no need to bother with curly braces.
+classOrAttrsToMarkdown :: Attr -> Doc Text
+classOrAttrsToMarkdown ("",[cls],_) = literal cls
+classOrAttrsToMarkdown attrs = attrsToMarkdown attrs
+
 linkAttributes :: WriterOptions -> Attr -> Doc Text
 linkAttributes opts attr =
   if isEnabled Ext_link_attributes opts && attr /= nullAttr
@@ -334,7 +349,7 @@ blockToMarkdown' opts (Div attrs ils) = do
     case () of
          _ | isEnabled Ext_fenced_divs opts &&
              attrs /= nullAttr ->
-                nowrap (literal ":::" <+> attrsToMarkdown attrs) $$
+                nowrap (literal ":::" <+> classOrAttrsToMarkdown attrs) $$
                 chomp contents $$
                 literal ":::" <> blankline
            | isEnabled Ext_native_divs opts ||
@@ -503,7 +518,7 @@ blockToMarkdown' opts (CodeBlock attribs str) = do
      backticks = endline '`'
      tildes = endline '~'
      attrs  = if isEnabled Ext_fenced_code_attributes opts
-                 then nowrap $ " " <> attrsToMarkdown attribs
+                 then nowrap $ " " <> classOrAttrsToMarkdown attribs
                  else case attribs of
                             (_,cls:_,_) -> " " <> literal cls
                             _             -> empty
