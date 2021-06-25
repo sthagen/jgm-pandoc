@@ -30,7 +30,8 @@ import Text.Pandoc.Builder
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Options
 import Text.Pandoc.Logging (LogMessage(..))
-import Text.Pandoc.Shared (crFilter, safeRead, extractSpaces)
+import Text.Pandoc.Shared (safeRead, extractSpaces)
+import Text.Pandoc.Sources (ToSources(..), sourcesToText)
 import Text.TeXMath (readMathML, writeTeX)
 import Text.Pandoc.XML.Light
 
@@ -133,6 +134,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [ ] corpcredit - A corporation or organization credited in a document
 [ ] corpname - The name of a corporation
 [ ] country - The name of a country
+[x] danger - An admonition set off from the text indicating hazardous situation
 [ ] database - The name of a database, or part of a database
 [x] date - The date of publication or revision of a document
 [ ] dedication - A wrapper for the dedication section of a book
@@ -539,11 +541,15 @@ instance Default DBState where
                , dbContent = [] }
 
 
-readDocBook :: PandocMonad m => ReaderOptions -> Text -> m Pandoc
+readDocBook :: (PandocMonad m, ToSources a)
+            => ReaderOptions
+            -> a
+            -> m Pandoc
 readDocBook _ inp = do
+  let sources = toSources inp
   tree <- either (throwError . PandocXMLError "") return $
             parseXMLContents
-              (TL.fromStrict . handleInstructions $ crFilter inp)
+              (TL.fromStrict . handleInstructions . sourcesToText $ sources)
   (bs, st') <- flip runStateT (def{ dbContent = tree }) $ mapM parseBlock tree
   return $ Pandoc (dbMeta st') (toList . mconcat $ bs)
 
@@ -595,16 +601,24 @@ addMetadataFromElement e = do
          Nothing -> return ()
          Just z  -> addMetaField "author" z
     addMetaField "subtitle" e
-    addMetaField "author" e
+    addAuthor e
     addMetaField "date" e
     addMetaField "release" e
     addMetaField "releaseinfo" e
     return mempty
-  where addMetaField fieldname elt =
-            case filterChildren (named fieldname) elt of
-                   []  -> return ()
-                   [z] -> getInlines z >>= addMeta fieldname
-                   zs  -> mapM getInlines zs >>= addMeta fieldname
+  where
+   addAuthor elt =
+     case filterChildren (named "author") elt of
+       [] -> return ()
+       [z] -> fromAuthor z >>= addMeta "author"
+       zs  -> mapM fromAuthor zs >>= addMeta "author"
+   fromAuthor elt =
+     mconcat . intersperse space <$> mapM getInlines (elChildren elt)
+   addMetaField fieldname elt =
+     case filterChildren (named fieldname) elt of
+       []  -> return ()
+       [z] -> getInlines z >>= addMeta fieldname
+       zs  -> mapM getInlines zs >>= addMeta fieldname
 
 addMeta :: PandocMonad m => ToMetaValue a => Text -> a -> DB m ()
 addMeta field val = modify (setMeta field val)
@@ -705,7 +719,7 @@ blockTags =
   ] ++ admonitionTags
 
 admonitionTags :: [Text]
-admonitionTags = ["important","caution","note","tip","warning"]
+admonitionTags = ["caution","danger","important","note","tip","warning"]
 
 -- Trim leading and trailing newline characters
 trimNl :: Text -> Text

@@ -16,7 +16,6 @@ module Text.Pandoc.Writers.ConTeXt ( writeConTeXt ) where
 import Control.Monad.State.Strict
 import Data.Char (ord, isDigit)
 import Data.List (intersperse)
-import Data.List.NonEmpty (nonEmpty)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -178,8 +177,12 @@ blockToConTeXt (Para lst) = do
   contents <- inlineListToConTeXt lst
   return $ contents <> blankline
 blockToConTeXt (LineBlock lns) = do
-  doclines <- nowrap . vcat <$> mapM inlineListToConTeXt lns
-  return $ "\\startlines" $$ doclines $$ "\\stoplines" <> blankline
+  let emptyToBlankline doc = if isEmpty doc
+                             then blankline
+                             else doc
+  doclines <- mapM inlineListToConTeXt lns
+  let contextLines = vcat . map emptyToBlankline $ doclines
+  return $ "\\startlines" $$ contextLines $$ "\\stoplines" <> blankline
 blockToConTeXt (BlockQuote lst) = do
   contents <- blockListToConTeXt lst
   return $ "\\startblockquote" $$ nest 0 contents $$ "\\stopblockquote" <> blankline
@@ -229,14 +232,7 @@ blockToConTeXt (OrderedList (start, style', delim) lst) = do
                         Period       -> "stopper=."
                         OneParen     -> "stopper=)"
                         TwoParens    -> "left=(,stopper=)"
-    let width = maybe 0 maximum $ nonEmpty $ map T.length $
-                  take (length contents)
-                       (orderedListMarkers (start, style', delim))
-    let width' = (toEnum width + 1) / 2
-    let width'' = if width' > (1.5 :: Double)
-                     then "width=" <> tshow width' <> "em"
-                     else ""
-    let specs2Items = filter (not . T.null) [start', delim', width'']
+    let specs2Items = filter (not . T.null) [start', delim']
     let specs2 = if null specs2Items
                     then ""
                     else "[" <> T.intercalate "," specs2Items <> "]"
@@ -250,8 +246,8 @@ blockToConTeXt (OrderedList (start, style', delim) lst) = do
                           UpperAlpha   -> 'A') :
                        if isTightList lst then ",packed]" else "]"
     let specs = T.pack style'' <> specs2
-    return $ "\\startitemize" <> literal specs $$ vcat contents $$
-             "\\stopitemize" <> blankline
+    return $ "\\startenumerate" <> literal specs $$ vcat contents $$
+             "\\stopenumerate" <> blankline
 blockToConTeXt (DefinitionList lst) =
   liftM vcat $ mapM defListItemToConTeXt lst
 blockToConTeXt HorizontalRule = return $ "\\thinrule" <> blankline
@@ -483,7 +479,7 @@ inlineToConTeXt (Note contents) = do
               then literal "\\footnote{" <> nest 2 (chomp contents') <> char '}'
               else literal "\\startbuffer " <> nest 2 (chomp contents') <>
                    literal "\\stopbuffer\\footnote{\\getbuffer}"
-inlineToConTeXt (Span (_,_,kvs) ils) = do
+inlineToConTeXt (Span (ident,_,kvs) ils) = do
   mblang <- fromBCP47 (lookup "lang" kvs)
   let wrapDir txt = case lookup "dir" kvs of
                       Just "rtl" -> braces $ "\\righttoleft " <> txt
@@ -493,7 +489,11 @@ inlineToConTeXt (Span (_,_,kvs) ils) = do
                        Just lng -> braces ("\\language" <>
                                            brackets (literal lng) <> txt)
                        Nothing -> txt
-  wrapLang . wrapDir <$> inlineListToConTeXt ils
+      addReference =
+        if T.null ident
+        then id
+        else (("\\reference" <> brackets (literal ident) <> "{}") <>)
+  addReference . wrapLang . wrapDir <$> inlineListToConTeXt ils
 
 -- | Craft the section header, inserting the section reference, if supplied.
 sectionHeader :: PandocMonad m

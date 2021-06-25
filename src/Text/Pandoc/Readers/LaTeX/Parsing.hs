@@ -27,6 +27,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , rawLaTeXParser
   , applyMacros
   , tokenize
+  , tokenizeSources
   , untokenize
   , untoken
   , totoks
@@ -112,7 +113,6 @@ import Text.Pandoc.Readers.LaTeX.Types (ExpansionPoint (..), Macro (..),
                                         ArgSpec (..), Tok (..), TokType (..))
 import Text.Pandoc.Shared
 import Text.Parsec.Pos
--- import Debug.Trace
 
 newtype DottedNum = DottedNum [Int]
   deriving (Show, Eq)
@@ -248,7 +248,7 @@ withVerbatimMode parser = do
 
 rawLaTeXParser :: (PandocMonad m, HasMacros s, HasReaderOptions s)
                => [Tok] -> Bool -> LP m a -> LP m a
-               -> ParserT Text s m (a, Text)
+               -> ParserT Sources s m (a, Text)
 rawLaTeXParser toks retokenize parser valParser = do
   pstate <- getState
   let lstate = def{ sOptions = extractReaderOptions pstate }
@@ -268,7 +268,7 @@ rawLaTeXParser toks retokenize parser valParser = do
               Left _    -> mzero
               Right ((val, raw), st) -> do
                 updateState (updateMacros (sMacros st <>))
-                _ <- takeP (T.length (untokenize toks'))
+                void $ count (T.length (untokenize toks')) anyChar
                 let result = untokenize raw
                 -- ensure we end with space if input did, see #4442
                 let result' =
@@ -281,7 +281,7 @@ rawLaTeXParser toks retokenize parser valParser = do
                 return (val, result')
 
 applyMacros :: (PandocMonad m, HasMacros s, HasReaderOptions s)
-            => Text -> ParserT Text s m Text
+            => Text -> ParserT Sources s m Text
 applyMacros s = (guardDisabled Ext_latex_macros >> return s) <|>
    do let retokenize = untokenize <$> many (satisfyTok (const True))
       pstate <- getState
@@ -300,6 +300,11 @@ QuickCheck property:
 > tokUntokRoundtrip s =
 >   let t = T.pack s in untokenize (tokenize "random" t) == t
 -}
+
+tokenizeSources :: Sources -> [Tok]
+tokenizeSources = concatMap tokenizeSource . unSources
+ where
+   tokenizeSource (pos, t) = totoks pos t
 
 tokenize :: SourceName -> Text -> [Tok]
 tokenize sourcename = totoks (initialPos sourcename)
@@ -458,7 +463,7 @@ satisfyTok f = do
 doMacros :: PandocMonad m => LP m ()
 doMacros = do
   st <- getState
-  unless (sVerbatimMode st || M.null (sMacros st)) $ do
+  unless (sVerbatimMode st) $
     getInput >>= doMacros' 1 >>= setInput
 
 doMacros' :: PandocMonad m => Int -> [Tok] -> LP m [Tok]
@@ -520,7 +525,7 @@ doMacros' n inp =
         $ throwError $ PandocMacroLoop name
       macros <- sMacros <$> getState
       case M.lookup name macros of
-           Nothing -> mzero
+           Nothing -> trySpecialMacro name ts
            Just (Macro expansionPoint argspecs optarg newtoks) -> do
              let getargs' = do
                    args <-
@@ -547,6 +552,41 @@ doMacros' n inp =
                  case expansionPoint of
                    ExpandWhenUsed    -> doMacros' (n' + 1) result
                    ExpandWhenDefined -> return result
+
+-- | Certain macros do low-level tex manipulations that can't
+-- be represented in our Macro type, so we handle them here.
+trySpecialMacro :: PandocMonad m => Text -> [Tok] -> LP m [Tok]
+trySpecialMacro "xspace" ts = do
+  ts' <- doMacros' 1 ts
+  case ts' of
+    Tok pos Word t : _
+      | startsWithAlphaNum t -> return $ Tok pos Spaces " " : ts'
+    _ -> return ts'
+trySpecialMacro "iftrue" ts = handleIf True ts
+trySpecialMacro "iffalse" ts = handleIf False ts
+trySpecialMacro _ _ = mzero
+
+handleIf :: PandocMonad m => Bool -> [Tok] -> LP m [Tok]
+handleIf b ts = do
+  res' <- lift $ runParserT (ifParser b) defaultLaTeXState "tokens" ts
+  case res' of
+    Left _ -> Prelude.fail "Could not parse conditional"
+    Right ts' -> return ts'
+
+ifParser :: PandocMonad m => Bool -> LP m [Tok]
+ifParser b = do
+  ifToks <- many (notFollowedBy (controlSeq "else" <|> controlSeq "fi")
+                    *> anyTok)
+  elseToks <- (controlSeq "else" >> manyTill anyTok (controlSeq "fi"))
+                 <|> ([] <$ controlSeq "fi")
+  rest <- getInput
+  return $ (if b then ifToks else elseToks) ++ rest
+
+startsWithAlphaNum :: Text -> Bool
+startsWithAlphaNum t =
+  case T.uncons t of
+       Just (c, _) | isAlphaNum c -> True
+       _           -> False
 
 setpos :: SourcePos -> Tok -> Tok
 setpos spos (Tok _ tt txt) = Tok spos tt txt
@@ -783,7 +823,8 @@ withRaw parser = do
 
 keyval :: PandocMonad m => LP m (Text, Text)
 keyval = try $ do
-  Tok _ Word key <- satisfyTok isWordTok
+  key <- untokenize <$> many1 (notFollowedBy (symbol '=') >>
+                         (symbol '-' <|> symbol '_' <|> satisfyTok isWordTok))
   sp
   val <- option mempty $ do
            symbol '='

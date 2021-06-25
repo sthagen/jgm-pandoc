@@ -33,20 +33,24 @@ tableToOpenXML :: PandocMonad m
                -> WS m [Content]
 tableToOpenXML blocksToOpenXML gridTable = do
   setFirstPara
-  modify $ \s -> s { stInTable = True }
   let (Grid.Table _attr caption colspecs _rowheads thead tbodies tfoot) =
         gridTable
   let (Caption _maybeShortCaption captionBlocks) = caption
   let captionStr = stringify captionBlocks
+  let aligns = map fst $ elems colspecs
   captionXml <- if null captionBlocks
                 then return []
                 else withParaPropM (pStyleM "Table Caption")
                      $ blocksToOpenXML captionBlocks
-  head' <- cellGridToOpenXML blocksToOpenXML thead
-  bodies <- mapM (cellGridToOpenXML blocksToOpenXML) tbodies
-  foot' <- cellGridToOpenXML blocksToOpenXML tfoot
+  -- We set "in table" after processing the caption, because we don't
+  -- want the "Table Caption" style to be overwritten with "Compact".
+  modify $ \s -> s { stInTable = True }
+  head' <- cellGridToOpenXML blocksToOpenXML HeadRow aligns thead
+  bodies <- mapM (cellGridToOpenXML blocksToOpenXML BodyRow aligns) tbodies
+  foot' <- cellGridToOpenXML blocksToOpenXML FootRow aligns tfoot
 
   let hasHeader = not . null . indices . partRowAttrs $ thead
+  let hasFooter = not . null . indices . partRowAttrs $ tfoot
   -- for compatibility with Word <= 2007, we include a val with a bitmask
   -- 0×0020  Apply first row conditional formatting
   -- 0×0040  Apply last row conditional formatting
@@ -61,7 +65,7 @@ tableToOpenXML blocksToOpenXML gridTable = do
           ( mknode "w:tblStyle" [("w:val","Table")] () :
             mknode "w:tblW" tblWattr () :
             mknode "w:tblLook" [("w:firstRow",if hasHeader then "1" else "0")
-                               ,("w:lastRow","0")
+                               ,("w:lastRow",if hasFooter then "1" else "0")
                                ,("w:firstColumn","0")
                                ,("w:lastColumn","0")
                                ,("w:noHBand","0")
@@ -76,6 +80,9 @@ tableToOpenXML blocksToOpenXML gridTable = do
         )
   modify $ \s -> s { stInTable = False }
   return $ captionXml ++ [Elem tbl]
+
+-- | Parts of a table
+data RowType = HeadRow | BodyRow | FootRow
 
 alignmentToString :: Alignment -> Text
 alignmentToString = \case
@@ -104,27 +111,34 @@ tableLayout specs =
           , [ ("w:type", "pct"), ("w:w", tshow rowwidth) ])
 
 cellGridToOpenXML :: PandocMonad m
-                   => ([Block] -> WS m [Content])
-                   -> Part
-                   -> WS m [Element]
-cellGridToOpenXML blocksToOpenXML part@(Part _ _ rowAttrs) =
-  if null (indices rowAttrs)
+                  => ([Block] -> WS m [Content])
+                  -> RowType
+                  -> [Alignment]
+                  -> Part
+                  -> WS m [Element]
+cellGridToOpenXML blocksToOpenXML rowType aligns part@(Part _ cellArray _) =
+  if null (elems cellArray)
   then return mempty
-  else mapM (rowToOpenXML blocksToOpenXML) $ partToRows part
+  else mapM (rowToOpenXML blocksToOpenXML) $
+       partToRows rowType aligns part
 
 data OOXMLCell
   = OOXMLCell Attr Alignment RowSpan ColSpan [Block]
   | OOXMLCellMerge ColSpan
 
-data OOXMLRow = OOXMLRow Attr [OOXMLCell]
+data OOXMLRow = OOXMLRow RowType Attr [OOXMLCell]
 
-partToRows :: Part -> [OOXMLRow]
-partToRows part =
+partToRows :: RowType -> [Alignment] -> Part -> [OOXMLRow]
+partToRows rowType aligns part =
   let
-    toOOXMLCell :: RowIndex -> ColIndex -> GridCell -> [OOXMLCell]
-    toOOXMLCell ridx cidx = \case
+    toOOXMLCell :: Alignment -> RowIndex -> ColIndex -> GridCell -> [OOXMLCell]
+    toOOXMLCell columnAlign ridx cidx = \case
       ContentCell attr align rowspan colspan blocks ->
-        [OOXMLCell attr align rowspan colspan blocks]
+        -- Respect non-default, cell specific alignment.
+        let align' = case align of
+              AlignDefault -> columnAlign
+              _            -> align
+        in [OOXMLCell attr align' rowspan colspan blocks]
       ContinuationCell idx'@(ridx',cidx') | ridx /= ridx', cidx == cidx' ->
         case (partCellArray part)!idx' of
           (ContentCell _ _ _ colspan _) -> [OOXMLCellMerge colspan]
@@ -132,8 +146,10 @@ partToRows part =
                        " at index " ++ show idx'
       _ -> mempty
     mkRow :: (RowIndex, Attr) -> OOXMLRow
-    mkRow (ridx, attr) = OOXMLRow attr
-                       . concatMap (uncurry $ toOOXMLCell ridx)
+    mkRow (ridx, attr) = OOXMLRow rowType attr
+                       . mconcat
+                       . zipWith (\align -> uncurry $ toOOXMLCell align ridx)
+                                 aligns
                        . assocs
                        . rowArray ridx
                        $ partCellArray part
@@ -143,12 +159,14 @@ rowToOpenXML :: PandocMonad m
              => ([Block] -> WS m [Content])
              -> OOXMLRow
              -> WS m Element
-rowToOpenXML blocksToOpenXML (OOXMLRow _attr cells) = do
+rowToOpenXML blocksToOpenXML (OOXMLRow rowType _attr cells) = do
   xmlcells <- mapM (ooxmlCellToOpenXML blocksToOpenXML) cells
-  -- let align' = case align of
-  --       AlignDefault -> colAlign
-  --       _            -> align
-  return $ mknode "w:tr" [] xmlcells
+  let addTrPr = case rowType of
+        HeadRow -> (mknode "w:trPr" []
+                    [mknode "w:tblHeader" [("w:val", "true")] ()] :)
+        BodyRow -> id
+        FootRow -> id
+  return $ mknode "w:tr" [] (addTrPr xmlcells)
 
 ooxmlCellToOpenXML :: PandocMonad m
                    => ([Block] -> WS m [Content])
@@ -161,8 +179,6 @@ ooxmlCellToOpenXML blocksToOpenXML = \case
                            , mknode "w:vMerge"   [("w:val", "continue")] () ]
       , mknode "w:p" [] [mknode "w:pPr" [] ()]]
   OOXMLCell _attr align rowspan (ColSpan colspan) contents -> do
-    -- we handle rowspans via 'leftpad', so we can ignore those here
-
     compactStyle <- pStyleM "Compact"
     es <- withParaProp (alignmentFor align) $ blocksToOpenXML contents
     -- Table cells require a <w:p> element, even an empty one!

@@ -160,9 +160,11 @@ convertWithOpts opts = do
                                     else optTabStop opts)
 
 
-    let readSources :: [FilePath] -> PandocIO Text
-        readSources srcs = convertTabs . T.intercalate (T.pack "\n") <$>
-                              mapM readSource srcs
+    let readSources :: [FilePath] -> PandocIO [(FilePath, Text)]
+        readSources srcs =
+          mapM (\fp -> do
+                   t <- readSource fp
+                   return (if fp == "-" then "" else fp, convertTabs t)) srcs
 
 
     outputSettings <- optToOutputSettings opts
@@ -255,13 +257,17 @@ convertWithOpts opts = do
     let sourceToDoc :: [FilePath] -> PandocIO Pandoc
         sourceToDoc sources' =
            case reader of
-                TextReader r
-                  | optFileScope opts || readerNameBase == "json" ->
-                      mconcat <$> mapM (readSource >=> r readerOpts) sources'
-                  | otherwise ->
-                      readSources sources' >>= r readerOpts
-                ByteStringReader r ->
-                  mconcat <$> mapM (readFile' >=> r readerOpts) sources'
+             TextReader r
+               | readerNameBase == "json" ->
+                   mconcat <$> mapM (readSource >=> r readerOpts) sources'
+               | optFileScope opts  ->
+                   -- Read source and convert tabs (see #6709)
+                   let readSource' = fmap convertTabs . readSource
+                   in mconcat <$> mapM (readSource' >=> r readerOpts) sources'
+               | otherwise ->
+                   readSources sources' >>= r readerOpts
+             ByteStringReader r ->
+               mconcat <$> mapM (readFile' >=> r readerOpts) sources'
 
 
     when (readerNameBase == "markdown_github" ||

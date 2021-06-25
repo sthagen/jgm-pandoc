@@ -469,12 +469,27 @@ writeDocx opts doc = do
   -- adds references to footnotes or endnotes we don't have...
   -- we do, however, copy some settings over from reference
   let settingsPath = "word/settings.xml"
-      settingsList = [ "w:autoHyphenation"
-                     , "w:consecutiveHyphenLimit"
-                     , "w:hyphenationZone"
-                     , "w:doNotHyphenateCap"
-                     , "w:evenAndOddHeaders"
-                     , "w:proofState"
+      settingsList = [ "zoom"
+                     , "embedSystemFonts"
+                     , "doNotTrackMoves"
+                     , "defaultTabStop"
+                     , "drawingGridHorizontalSpacing"
+                     , "drawingGridVerticalSpacing"
+                     , "displayHorizontalDrawingGridEvery"
+                     , "displayVerticalDrawingGridEvery"
+                     , "characterSpacingControl"
+                     , "savePreviewPicture"
+                     , "mathPr"
+                     , "themeFontLang"
+                     , "decimalSymbol"
+                     , "listSeparator"
+                     , "autoHyphenation"
+                     , "consecutiveHyphenLimit"
+                     , "hyphenationZone"
+                     , "doNotHyphenateCap"
+                     , "evenAndOddHeaders"
+                     , "proofState"
+                     , "compat"
                      ]
   settingsEntry <- copyChildren refArchive distArchive settingsPath epochtime settingsList
 
@@ -577,16 +592,17 @@ copyChildren :: (PandocMonad m)
 copyChildren refArchive distArchive path timestamp elNames = do
   ref  <- parseXml refArchive distArchive path
   dist <- parseXml distArchive distArchive path
+  let elsToCopy =
+        map cleanElem $ filterChildrenName (\e -> qName e `elem` elNames) ref
+  let elsToKeep =
+        [e | Elem e <- elContent dist, not (any (hasSameNameAs e) elsToCopy)]
   return $ toEntry path timestamp $ renderXml dist{
-      elContent = elContent dist ++ copyContent ref
+      elContent = map Elem elsToKeep ++ map Elem elsToCopy
     }
   where
-    strName QName{qName=name, qPrefix=prefix}
-      | Just p <- prefix = p <> ":" <> name
-      | otherwise        = name
-    shouldCopy = (`elem` elNames) . strName
-    cleanElem el@Element{elName=name} = Elem el{elName=name{qURI=Nothing}}
-    copyContent = map cleanElem . filterChildrenName shouldCopy
+    hasSameNameAs (Element {elName = n1}) (Element {elName = n2}) =
+      qName n1 == qName n2
+    cleanElem el@Element{elName=name} = el{elName=name{qURI=Nothing}}
 
 -- this is the lowest number used for a list numId
 baseListId :: Int
@@ -1273,6 +1289,7 @@ inlineToOpenXML' opts (Image attr@(imgident, _, _) alt (src, title)) = do
             Just Eps  -> ".eps"
             Just Svg  -> ".svg"
             Just Emf  -> ".emf"
+            Just Tiff -> ".tiff"
             Nothing   -> ""
         imgpath = "media/" <> ident <> imgext
         mbMimeType = mt <|> getMimeType (T.unpack imgpath)
