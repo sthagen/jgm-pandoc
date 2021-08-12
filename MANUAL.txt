@@ -259,6 +259,7 @@ header when requesting a document from a URL:
     - `odt` ([ODT])
     - `opml` ([OPML])
     - `org` ([Emacs Org mode])
+    - `rtf` ([Rich Text Format])
     - `rst` ([reStructuredText])
     - `t2t` ([txt2tags])
     - `textile` ([Textile])
@@ -1025,13 +1026,13 @@ header when requesting a document from a URL:
 
 :   Specifies that headings with the specified level create
     slides (for `beamer`, `s5`, `slidy`, `slideous`, `dzslides`).  Headings
-    above this level in the hierarchy are used to divide the
-    slide show into sections; headings below this level create
-    subheads within a slide.  Note that content that is
-    not contained under slide-level headings will not appear in
-    the slide show.  The default is to set the slide level based
-    on the contents of the document; see [Structuring the slide
-    show].
+    above this level in the hierarchy are used to divide the slide show
+    into sections; headings below this level create subheads within a slide.
+    Valid values are 0-6.  If a slide level of 0 is specified, slides will
+    not be split automatically on headings, and horizontal rules must be used
+    to indicate slide boundaries.  If a slide level is not specified
+    explicitly, the slide level will be set automatically based on
+    the contents of the document; see [Structuring the slide show].
 
 `--section-divs`
 
@@ -1931,7 +1932,7 @@ ${ styles.html() }
 ```
 
 (If a partial is not found in the directory of the
-template and the template path is given as a relative 
+template and the template path is given as a relative
 path, it will also be sought in the `templates`
 subdirectory of the user data directory.)
 
@@ -4983,13 +4984,16 @@ See the [CSL user documentation] for more information about CSL
 styles and how they affect rendering.
 
 Unless a citation key start with a letter, digit, or `_`,
-and contains only alphanumerics and internal punctuation
+and contains only alphanumerics and single internal punctuation
 characters (`:.#$%&-+?<>~/`), it must be surrounded
 by curly braces, which are not considered part of the key.
-In `@Foo_bar.baz.`, the key is `Foo_bar.baz`. The final
+In `@Foo_bar.baz.`, the key is `Foo_bar.baz` because the final
 period is not *internal* punctuation, so it is not included in
 the key.  In `@{Foo_bar.baz.}`, the key is `Foo_bar.baz.`, including
-the final period.  The curly braces are recommended if you use URLs as
+the final period.
+In `@Foo_bar--baz`, the key is `Foo_bar` because the repeated internal
+punctuation characters terminate the key.
+The curly braces are recommended if you use URLs as
 keys: `[@{https://example.com/bib?name=foobar&date=2000}, p.  33]`.
 
 Citation items may optionally include a prefix, a locator, and
@@ -6085,7 +6089,7 @@ The following fields are recognized:
 
 `rights`
   ~ A string value.
-  
+
 `belongs-to-collection`
   ~ A string value.  identifies the name of a collection to which
     the EPUB Publication belongs.
