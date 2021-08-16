@@ -3068,7 +3068,7 @@ starts at 1.
 This extension can be enabled/disabled for the following formats:
 
 output formats
-:  `odt`, `opendocument`
+:  `odt`, `opendocument`, `docx`
 
 #### Extension: `xrefs_name` ####
 
@@ -4398,7 +4398,7 @@ Attributes can be attached to verbatim text, just as with
 
 ### Underline ###
 
-To underline text, use the `underline` (or `ul`) class:
+To underline text, use the `underline` class:
 
     [Underline]{.underline}
 
@@ -5303,6 +5303,18 @@ Include source position attributes when parsing `commonmark`.
 For elements that accept attributes, a `data-pos` attribute
 is added; other elements are placed in a surrounding
 Div or Span elemnet with a `data-pos` attribute.
+
+#### Extension: `short_subsuperscript` ####
+
+Parse multimarkdown style subscripts and superscripts, which start with
+a '~' or '^' character, respectively, and include the alphanumeric sequence
+that follows. For example:
+
+    x^2 = 4
+
+or
+
+    Oxygen is O~2.
 
 ## Markdown variants
 
