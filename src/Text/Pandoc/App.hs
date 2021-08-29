@@ -26,7 +26,7 @@ module Text.Pandoc.App (
           , applyFilters
           ) where
 import qualified Control.Exception as E
-import Control.Monad ( (>=>), when )
+import Control.Monad ( (>=>), when, forM_ )
 import Control.Monad.Trans ( MonadIO(..) )
 import Control.Monad.Except (throwError, catchError)
 import qualified Data.ByteString as BS
@@ -45,12 +45,14 @@ import qualified Data.Text.Encoding.Error as TSE
 import Network.URI (URI (..), parseURI)
 import System.Directory (doesDirectoryExist)
 import System.Exit (exitSuccess)
-import System.FilePath ( takeBaseName, takeExtension )
+import System.FilePath ( takeBaseName, takeExtension)
 import System.IO (nativeNewline, stdout)
 import qualified System.IO as IO (Newline (..))
 import Text.Pandoc
 import Text.Pandoc.Builder (setMeta)
+import Text.Pandoc.MediaBag (mediaItems)
 import Text.Pandoc.MIME (getCharset, MimeType)
+import Text.Pandoc.Image (svgToPng)
 import Text.Pandoc.App.FormatHeuristics (formatFromFilePaths)
 import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), defaultOpts,
                             IpynbOutput (..))
@@ -71,7 +73,6 @@ import qualified Text.Pandoc.UTF8 as UTF8
 import System.Posix.IO (stdOutput)
 import System.Posix.Terminal (queryTerminal)
 #endif
--- import Debug.Trace
 
 convertWithOpts :: Opt -> IO ()
 convertWithOpts opts = do
@@ -138,7 +139,26 @@ convertWithOpts opts = do
             <> "` instead of `pandoc " <> inputFile <> " -o " <> outputFile <> "`."
         _ -> return ()
 
-    (reader, readerExts) <- getReader readerName
+
+    let makeSandboxed pureReader =
+          let files = maybe id (:) (optReferenceDoc opts) .
+                      maybe id (:) (optEpubMetadata opts) .
+                      maybe id (:) (optEpubCoverImage opts) .
+                      maybe id (:) (optCSL opts) .
+                      maybe id (:) (optCitationAbbreviations opts) $
+                      optEpubFonts opts ++
+                      optBibliography opts
+           in  case pureReader of
+                 TextReader r -> TextReader $ \o t -> sandbox files (r o t)
+                 ByteStringReader r
+                            -> ByteStringReader $ \o t -> sandbox files (r o t)
+
+    (reader, readerExts) <-
+      if optSandbox opts
+         then case runPure (getReader readerName) of
+                Left e -> throwError e
+                Right (r, rexts) -> return (makeSandboxed r, rexts)
+         else getReader readerName
 
     outputSettings <- optToOutputSettings opts
     let format = outputFormat outputSettings
@@ -273,7 +293,9 @@ convertWithOpts opts = do
              ByteStringReader r ->
                mconcat <$> mapM (r readerOpts . inputToLazyByteString) inputs)
             >>=
-              (   (if isJust (optExtractMedia opts)
+              (   (if not (optSandbox opts) &&
+                      (isJust (optExtractMedia opts)
+                       || writerNameBase == "docx") -- for fallback pngs
                       then fillMediaBag
                       else return)
               >=> return . adjustMetadata (metadataFromFile <>)
@@ -283,6 +305,20 @@ convertWithOpts opts = do
               >=> applyFilters readerOpts filters [T.unpack format]
               >=> maybe return extractMedia (optExtractMedia opts)
               )
+
+    when (writerNameBase == "docx" && not (optSandbox opts)) $ do
+      -- create fallback pngs for svgs
+      items <- mediaItems <$> getMediaBag
+      forM_ items $ \(fp, mt, bs) ->
+        case T.takeWhile (/=';') mt of
+          "image/svg+xml" -> do
+            res <- svgToPng (writerDpi writerOptions) bs
+            case res of
+              Right bs' -> do
+                let fp' = fp <> ".png"
+                insertMedia fp' (Just "image/png") bs'
+              Left e -> report $ CouldNotConvertImage (T.pack fp) (tshow e)
+          _ -> return ()
 
     output <- case writer of
       ByteStringWriter f -> BinaryOutput <$> f writerOptions doc
