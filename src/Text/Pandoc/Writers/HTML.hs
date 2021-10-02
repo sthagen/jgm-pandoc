@@ -730,7 +730,6 @@ adjustNumbers opts doc =
    showSecNum = T.intercalate "." . map tshow
 
 blockToHtmlInner :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
-blockToHtmlInner _ Null = return mempty
 blockToHtmlInner opts (Plain lst) = inlineListToHtml opts lst
 blockToHtmlInner opts (Para [Image attr@(_,classes,_) txt (src,tit)])
   | "stretch" `elem` classes = do
@@ -1468,14 +1467,17 @@ inlineToHtml opts inline = do
       ishtml <- isRawHtml f
       if ishtml
          then return $ preEscapedText str
-         else if (f == Format "latex" || f == Format "tex") &&
-                 ((allowsMathEnvironments (writerHTMLMathMethod opts) &&
-                   isMathEnvironment str) ||
-                  (allowsRef (writerHTMLMathMethod opts) && isRef str))
-                then inlineToHtml opts $ Math DisplayMath str
-                else do
-                  report $ InlineNotRendered inline
-                  return mempty
+         else do
+           let istex = f == Format "latex" || f == Format "tex"
+           let mm = writerHTMLMathMethod opts
+           case istex of
+             True
+               | allowsMathEnvironments mm && isMathEnvironment str
+                 -> inlineToHtml opts $ Math DisplayMath str
+               | allowsRef mm && isRef str
+                 -> inlineToHtml opts $ Math InlineMath str
+             _ -> do report $ InlineNotRendered inline
+                     return mempty
     (Link attr txt (s,_)) | "mailto:" `T.isPrefixOf` s -> do
                         linkText <- inlineListToHtml opts txt
                         obfuscateLink opts attr linkText s
