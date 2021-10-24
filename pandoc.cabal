@@ -1,6 +1,6 @@
 cabal-version:   2.2
 name:            pandoc
-version:         2.14.2
+version:         2.15
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -429,6 +429,8 @@ extra-source-files:
                  test/pptx/inline-formatting/*.pptx
                  test/pptx/lists/input.native
                  test/pptx/lists/*.pptx
+                 test/pptx/list-level/input.native
+                 test/pptx/list-level/*.pptx
                  test/pptx/raw-ooxml/input.native
                  test/pptx/raw-ooxml/*.pptx
                  test/pptx/remove-empty-slides/input.native
@@ -524,7 +526,7 @@ library
                  JuicyPixels           >= 3.1.6.1  && < 3.4,
                  SHA                   >= 1.6      && < 1.7,
                  aeson                 >= 0.7      && < 2.1,
-                 aeson-pretty          >= 0.8.5    && < 0.9,
+                 aeson-pretty          >= 0.8.9    && < 0.9,
                  array                 >= 0.5      && < 0.6,
                  attoparsec            >= 0.12     && < 0.15,
                  base64-bytestring     >= 0.1      && < 1.3,
@@ -533,9 +535,9 @@ library
                  blaze-markup          >= 0.8      && < 0.9,
                  bytestring            >= 0.9      && < 0.12,
                  case-insensitive      >= 1.2      && < 1.3,
-                 citeproc              >= 0.5      && < 0.6,
-                 commonmark            >= 0.2.1    && < 0.3,
-                 commonmark-extensions >= 0.2.1.2  && < 0.3,
+                 citeproc              >= 0.6      && < 0.7,
+                 commonmark            >= 0.2.1.1  && < 0.3,
+                 commonmark-extensions >= 0.2.2    && < 0.3,
                  commonmark-pandoc     >= 0.2.1.1  && < 0.3,
                  connection            >= 0.3.1,
                  containers            >= 0.4.2.1  && < 0.7,
@@ -549,19 +551,21 @@ library
                  file-embed            >= 0.0      && < 0.1,
                  filepath              >= 1.1      && < 1.5,
                  haddock-library       >= 1.10     && < 1.11,
-                 hslua                 >= 1.1      && < 1.4,
-                 hslua-module-path     >= 0.1.0    && < 0.2.0,
-                 hslua-module-system   >= 0.2      && < 0.3,
-                 hslua-module-text     >= 0.2.1    && < 0.4,
+                 hslua                 >= 2.0      && < 2.1,
+                 hslua-marshalling     >= 2.0      && < 2.1,
+                 hslua-module-path     >= 1.0      && < 1.1,
+                 hslua-module-system   >= 1.0      && < 1.1,
+                 hslua-module-text     >= 1.0      && < 1.1,
+                 hslua-module-version  >= 1.0      && < 1.1,
                  http-client           >= 0.4.30   && < 0.8,
                  http-client-tls       >= 0.2.4    && < 0.4,
                  http-types            >= 0.8      && < 0.13,
-                 ipynb                 >= 0.1      && < 0.2,
+                 ipynb                 >= 0.1.0.2  && < 0.2,
                  jira-wiki-markup      >= 1.4      && < 1.5,
                  mtl                   >= 2.2      && < 2.3,
                  network               >= 2.6,
                  network-uri           >= 2.6      && < 2.8,
-                 pandoc-types          >= 1.22     && < 1.23,
+                 pandoc-types          >= 1.22.1   && < 1.23,
                  parsec                >= 3.1      && < 3.2,
                  process               >= 1.2.3    && < 1.7,
                  random                >= 1        && < 1.3,
@@ -573,7 +577,7 @@ library
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
                  temporary             >= 1.1      && < 1.4,
-                 texmath               >= 0.12.3.1 && < 0.12.4,
+                 texmath               >= 0.12.3.2 && < 0.12.4,
                  text                  >= 1.1.1.0  && < 1.3,
                  text-conversions      >= 0.3      && < 0.4,
                  time                  >= 1.5      && < 1.13,
@@ -773,15 +777,13 @@ library
                    Text.Pandoc.Lua.Init,
                    Text.Pandoc.Lua.Marshaling,
                    Text.Pandoc.Lua.Marshaling.AST,
-                   Text.Pandoc.Lua.Marshaling.AnyValue,
+                   Text.Pandoc.Lua.Marshaling.Attr,
                    Text.Pandoc.Lua.Marshaling.CommonState,
                    Text.Pandoc.Lua.Marshaling.Context,
                    Text.Pandoc.Lua.Marshaling.List,
-                   Text.Pandoc.Lua.Marshaling.MediaBag,
                    Text.Pandoc.Lua.Marshaling.PandocError,
                    Text.Pandoc.Lua.Marshaling.ReaderOptions,
                    Text.Pandoc.Lua.Marshaling.SimpleTable,
-                   Text.Pandoc.Lua.Marshaling.Version,
                    Text.Pandoc.Lua.Module.MediaBag,
                    Text.Pandoc.Lua.Module.Pandoc,
                    Text.Pandoc.Lua.Module.System,
@@ -845,14 +847,14 @@ test-suite test-pandoc
                   doctemplates      >= 0.10    && < 0.11,
                   exceptions        >= 0.8     && < 0.11,
                   filepath          >= 1.1     && < 1.5,
-                  hslua             >= 1.1     && < 1.4,
+                  hslua             >= 2.0     && < 2.1,
                   mtl               >= 2.2     && < 2.3,
-                  pandoc-types      >= 1.22    && < 1.23,
+                  pandoc-types      >= 1.22.1  && < 1.23,
                   process           >= 1.2.3   && < 1.7,
                   tasty             >= 0.11    && < 1.5,
                   tasty-golden      >= 2.3     && < 2.4,
                   tasty-hunit       >= 0.9     && < 0.11,
-                  tasty-lua         >= 0.2     && < 0.3,
+                  tasty-lua         >= 1.0     && < 1.1,
                   tasty-quickcheck  >= 0.8     && < 0.11,
                   text              >= 1.1.1.0  && < 1.3,
                   time              >= 1.5     && < 1.13,

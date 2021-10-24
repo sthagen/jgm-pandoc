@@ -21,7 +21,7 @@ AsciiDoc:  <http://www.methods.co.nz/asciidoc/>
 module Text.Pandoc.Writers.AsciiDoc (writeAsciiDoc, writeAsciiDoctor) where
 import Control.Monad.State.Strict
 import Data.Char (isPunctuation, isSpace)
-import Data.List (intercalate, intersperse)
+import Data.List (delete, intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
@@ -149,9 +149,8 @@ blockToAsciiDoc opts (Div (id',"section":_,_)
 blockToAsciiDoc opts (Plain inlines) = do
   contents <- inlineListToAsciiDoc opts inlines
   return $ contents <> blankline
-blockToAsciiDoc opts (Para [Image attr alternate (src,tgt)])
+blockToAsciiDoc opts (SimpleFigure attr alternate (src, tit))
   -- image::images/logo.png[Company logo, title="blah"]
-  | Just tit <- T.stripPrefix "fig:" tgt
   = (\args -> "image::" <> args <> blankline) <$>
     imageArguments opts attr alternate src tit
 blockToAsciiDoc opts (Para inlines) = do
@@ -193,7 +192,10 @@ blockToAsciiDoc _ (CodeBlock (_,classes,_) str) = return $ flush (
      then "...." $$ literal str $$ "...."
      else attrs $$ "----" $$ literal str $$ "----")
   <> blankline
-    where attrs = "[" <> literal (T.intercalate "," ("source" : classes)) <> "]"
+    where attrs = "[" <> literal (T.intercalate "," classes') <> "]"
+          classes' = if "numberLines" `elem` classes
+                        then "source%linesnum" : delete "numberLines" classes
+                        else "source" : classes
 blockToAsciiDoc opts (BlockQuote blocks) = do
   contents <- blockListToAsciiDoc opts blocks
   let isBlock (BlockQuote _) = True

@@ -148,6 +148,18 @@ tests = [ testGroup "document"
             "docx/instrText_hyperlink.docx"
             "docx/instrText_hyperlink.native"
           , testCompare
+            "nested fields with <w:instrText> tag"
+            "docx/nested_instrText.docx"
+            "docx/nested_instrText.native"
+          , testCompare
+            "empty fields with <w:instrText> tag"
+            "docx/empty_field.docx"
+            "docx/empty_field.native"
+          , testCompare
+            "pageref hyperlinks in <w:instrText> tag"
+            "docx/pageref.docx"
+            "docx/pageref.native"
+          , testCompare
             "inline image"
             "docx/image.docx"
             "docx/image_no_embed.native"

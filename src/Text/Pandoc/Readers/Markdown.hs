@@ -198,6 +198,7 @@ inlinesInBalancedBrackets =
         go openBrackets =
           (() <$ (escapedChar <|>
                 code <|>
+                math <|>
                 rawHtmlInline <|>
                 rawLaTeXInline') >> go openBrackets)
           <|>
@@ -326,6 +327,7 @@ referenceKey :: PandocMonad m => MarkdownParser m (F Blocks)
 referenceKey = try $ do
   pos <- getPosition
   skipNonindentSpaces
+  notFollowedBy (void cite)
   (_,raw) <- reference
   char ':'
   skipSpaces >> optional newline >> skipSpaces >> notFollowedBy (char '[')
@@ -1013,19 +1015,18 @@ normalDefinitionList = do
 para :: PandocMonad m => MarkdownParser m (F Blocks)
 para = try $ do
   exts <- getOption readerExtensions
-  let implicitFigures x
-       | extensionEnabled Ext_implicit_figures exts = do
-         x' <- x
-         case B.toList x' of
-               [Image attr alt (src,tit)]
-                 | not (null alt) ->
-                    -- the fig: at beginning of title indicates a figure
-                    return $ B.singleton
-                           $ Image attr alt (src, "fig:" <> tit)
-               _ -> return x'
-       | otherwise = x
-  result <- implicitFigures . trimInlinesF <$> inlines1
-  option (B.plain <$> result)
+
+  result <- trimInlinesF <$> inlines1
+  let figureOr constr inlns =
+        case B.toList inlns of
+          [Image attr figCaption (src, tit)]
+            | extensionEnabled Ext_implicit_figures exts
+            , not (null figCaption) -> do
+                B.simpleFigureWith attr (B.fromList figCaption) src tit
+
+          _ -> constr inlns
+
+  option (figureOr B.plain <$> result)
     $ try $ do
             newline
             (mempty <$ blanklines)
@@ -1047,7 +1048,7 @@ para = try $ do
                      if divLevel > 0
                         then lookAhead divFenceEnd
                         else mzero
-            return $ B.para <$> result
+            return $ figureOr B.para <$> result
 
 plain :: PandocMonad m => MarkdownParser m (F Blocks)
 plain = fmap B.plain . trimInlinesF <$> inlines1
@@ -1780,8 +1781,8 @@ endline = try $ do
 -- a reference label for a link
 reference :: PandocMonad m => MarkdownParser m (F Inlines, Text)
 reference = do
-  guardDisabled Ext_footnotes <|> notFollowedBy' (string "[^")
-  guardDisabled Ext_citations <|> notFollowedBy' (string "[@")
+  -- guardDisabled Ext_footnotes <|> notFollowedBy' (string "[^")
+  -- guardDisabled Ext_citations <|> notFollowedBy' (string "[@")
   withRaw $ trimInlinesF <$> inlinesInBalancedBrackets
 
 parenthesizedChars :: PandocMonad m => MarkdownParser m Text
@@ -2200,6 +2201,7 @@ normalCite = try $ do
   citations <- citeList
   spnl
   char ']'
+  notFollowedBy (oneOf "{([")  -- not a link or a bracketed span
   return citations
 
 suffix :: PandocMonad m => MarkdownParser m (F Inlines)
