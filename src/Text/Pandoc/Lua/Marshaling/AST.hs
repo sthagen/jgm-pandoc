@@ -19,33 +19,40 @@ Marshaling/unmarshaling instances for document AST elements.
 module Text.Pandoc.Lua.Marshaling.AST
   ( peekAttr
   , peekBlock
+  , peekBlockFuzzy
   , peekBlocks
+  , peekBlocksFuzzy
   , peekCaption
   , peekCitation
+  , peekColSpec
+  , peekDefinitionItem
   , peekFormat
   , peekInline
+  , peekInlineFuzzy
   , peekInlines
-  , peekListAttributes
+  , peekInlinesFuzzy
   , peekMeta
   , peekMetaValue
   , peekPandoc
   , peekMathType
   , peekQuoteType
-
-  , peekFuzzyInlines
-  , peekFuzzyBlocks
+  , peekTableBody
+  , peekTableHead
+  , peekTableFoot
 
   , pushAttr
   , pushBlock
+  , pushCitation
   , pushInline
   , pushListAttributes
+  , pushMeta
   , pushMetaValue
   , pushPandoc
   ) where
 
 import Control.Applicative ((<|>), optional)
 import Control.Monad.Catch (throwM)
-import Control.Monad ((<$!>), (>=>))
+import Control.Monad ((<$!>))
 import Data.Data (showConstr, toConstr)
 import Data.Text (Text)
 import Data.Version (Version)
@@ -53,9 +60,11 @@ import HsLua hiding (Operation (Div))
 import HsLua.Module.Version (peekVersionFuzzy)
 import Text.Pandoc.Definition
 import Text.Pandoc.Error (PandocError (PandocLuaError))
-import Text.Pandoc.Lua.Util (pushViaConstr', pushViaConstructor)
+import Text.Pandoc.Lua.Util (pushViaConstr')
 import Text.Pandoc.Lua.Marshaling.Attr (peekAttr, pushAttr)
 import Text.Pandoc.Lua.Marshaling.List (pushPandocList)
+import Text.Pandoc.Lua.Marshaling.ListAttributes
+  (peekListAttributes, pushListAttributes)
 
 import qualified HsLua as Lua
 import qualified Text.Pandoc.Lua.Util as LuaUtil
@@ -101,32 +110,35 @@ instance Pushable MetaValue where
 instance Pushable Block where
   push = pushBlock
 
--- Inline
-instance Pushable Inline where
-  push = pushInline
-
--- Citation
-instance Pushable Citation where
-  push = pushCitation
-
-pushCitation :: LuaError e => Pusher e Citation
-pushCitation (Citation cid prefix suffix mode noteNum hash) =
-  pushViaConstr' "Citation"
-  [ push cid, push mode, push prefix, push suffix, push noteNum, push hash
+typeCitation :: LuaError e => DocumentedType e Citation
+typeCitation = deftype "Citation" []
+  [ property "id" "citation ID / key"
+      (pushText, citationId)
+      (peekText, \citation cid -> citation{ citationId = cid })
+  , property "mode" "citation mode"
+      (pushString . show, citationMode)
+      (peekRead, \citation mode -> citation{ citationMode = mode })
+  , property "prefix" "citation prefix"
+      (pushInlines, citationPrefix)
+      (peekInlines, \citation prefix -> citation{ citationPrefix = prefix })
+  , property "suffix" "citation suffix"
+      (pushInlines, citationSuffix)
+      (peekInlines, \citation suffix -> citation{ citationPrefix = suffix })
+  , property "note_num" "note number"
+      (pushIntegral, citationNoteNum)
+      (peekIntegral, \citation noteNum -> citation{ citationNoteNum = noteNum })
+  , property "hash" "hash number"
+      (pushIntegral, citationHash)
+      (peekIntegral, \citation hash -> citation{ citationHash = hash })
+  , method $ defun "clone" ### return <#> udparam typeCitation "obj" ""
+    =#> functionResult pushCitation "Citation" "copy of obj"
   ]
 
-peekCitation :: LuaError e => Peeker e Citation
-peekCitation = fmap (retrieving "Citation")
-  . typeChecked "table" Lua.istable $ \idx -> do
-      idx' <- liftLua $ absindex idx
-      Citation
-        <$!> peekFieldRaw peekText "id" idx'
-        <*>  peekFieldRaw (peekList peekInline) "prefix" idx'
-        <*>  peekFieldRaw (peekList peekInline) "suffix" idx'
-        <*>  peekFieldRaw peekRead "mode" idx'
-        <*>  peekFieldRaw peekIntegral "note_num" idx'
-        <*>  peekFieldRaw peekIntegral "hash" idx'
+pushCitation :: LuaError e => Pusher e Citation
+pushCitation = pushUD typeCitation
 
+peekCitation :: LuaError e => Peeker e Citation
+peekCitation = peekUD typeCitation
 
 instance Pushable Alignment where
   push = Lua.pushString . show
@@ -220,74 +232,206 @@ peekMetaValue = retrieving "MetaValue $ " . \idx -> do
         Nothing  -> peekUntagged
     _        -> failPeek "could not get meta value"
 
+typeBlock :: LuaError e => DocumentedType e Block
+typeBlock = deftype "Block"
+  [ operation Eq $ lambda
+    ### liftPure2 (==)
+    <#> parameter peekBlockFuzzy "Block" "a" ""
+    <#> parameter peekBlockFuzzy "Block" "b" ""
+    =#> boolResult "whether the two values are equal"
+  , operation Tostring $ lambda
+    ### liftPure show
+    <#> udparam typeBlock "self" ""
+    =#> functionResult pushString "string" "Haskell representation"
+  ]
+  [ possibleProperty "attr" "element attributes"
+      (pushAttr, \case
+          CodeBlock attr _     -> Actual attr
+          Div attr _           -> Actual attr
+          Header _ attr _      -> Actual attr
+          Table attr _ _ _ _ _ -> Actual attr
+          _                    -> Absent)
+      (peekAttr, \case
+          CodeBlock _ code     -> Actual . flip CodeBlock code
+          Div _ blks           -> Actual . flip Div blks
+          Header lvl _ blks    -> Actual . (\attr -> Header lvl attr blks)
+          Table _ c cs h bs f  -> Actual . (\attr -> Table attr c cs h bs f)
+          _                    -> const Absent)
+  , possibleProperty "bodies" "table bodies"
+      (pushPandocList pushTableBody, \case
+          Table _ _ _ _ bs _ -> Actual bs
+          _                  -> Absent)
+      (peekList peekTableBody, \case
+          Table attr c cs h _ f -> Actual . (\bs -> Table attr c cs h bs f)
+          _                     -> const Absent)
+  , possibleProperty "caption" "element caption"
+      (pushCaption, \case {Table _ capt _ _ _ _ -> Actual capt; _ -> Absent})
+      (peekCaption, \case
+          Table attr _ cs h bs f -> Actual . (\c -> Table attr c cs h bs f)
+          _                      -> const Absent)
+  , possibleProperty "colspecs" "column alignments and widths"
+      (pushPandocList pushColSpec, \case
+          Table _ _ cs _ _ _     -> Actual cs
+          _                      -> Absent)
+      (peekList peekColSpec, \case
+          Table attr c _ h bs f  -> Actual . (\cs -> Table attr c cs h bs f)
+          _                      -> const Absent)
+  , possibleProperty "content" "element content"
+      (pushContent, getBlockContent)
+      (peekContent, setBlockContent)
+  , possibleProperty "foot" "table foot"
+      (pushTableFoot, \case {Table _ _ _ _ _ f -> Actual f; _ -> Absent})
+      (peekTableFoot, \case
+          Table attr c cs h bs _ -> Actual . (\f -> Table attr c cs h bs f)
+          _                      -> const Absent)
+  , possibleProperty "format" "format of raw content"
+      (pushFormat, \case {RawBlock f _ -> Actual f; _ -> Absent})
+      (peekFormat, \case
+          RawBlock _ txt -> Actual . (`RawBlock` txt)
+          _              -> const Absent)
+  , possibleProperty "head" "table head"
+      (pushTableHead, \case {Table _ _ _ h _ _ -> Actual h; _ -> Absent})
+      (peekTableHead, \case
+          Table attr c cs _ bs f  -> Actual . (\h -> Table attr c cs h bs f)
+          _                       -> const Absent)
+  , possibleProperty "level" "heading level"
+      (pushIntegral, \case {Header lvl _ _ -> Actual lvl; _ -> Absent})
+      (peekIntegral, \case
+          Header _ attr inlns -> Actual . \lvl -> Header lvl attr inlns
+          _                   -> const Absent)
+  , possibleProperty "listAttributes" "ordered list attributes"
+      (pushListAttributes, \case
+          OrderedList listAttr _ -> Actual listAttr
+          _                      -> Absent)
+      (peekListAttributes, \case
+          OrderedList _ content -> Actual . (`OrderedList` content)
+          _                     -> const Absent)
+  , possibleProperty "text" "text contents"
+      (pushText, getBlockText)
+      (peekText, setBlockText)
+
+  , readonly "tag" "type of Block"
+      (pushString, showConstr . toConstr )
+
+  , alias "t" "tag" ["tag"]
+  , alias "c" "content" ["content"]
+  , alias "identifier" "element identifier"       ["attr", "identifier"]
+  , alias "classes"    "element classes"          ["attr", "classes"]
+  , alias "attributes" "other element attributes" ["attr", "attributes"]
+  , alias "start"      "ordered list start number" ["listAttributes", "start"]
+  , alias "style"      "ordered list style"       ["listAttributes", "style"]
+  , alias "delimiter"  "numbering delimiter"      ["listAttributes", "delimiter"]
+
+  , method $ defun "clone"
+    ### return
+    <#> parameter peekBlock "Block" "block" "self"
+    =#> functionResult pushBlock "Block" "cloned Block"
+
+  , method $ defun "show"
+    ### liftPure show
+    <#> parameter peekBlock "Block" "self" ""
+    =#> functionResult pushString "string" "Haskell string representation"
+  ]
+ where
+  boolResult = functionResult pushBool "boolean"
+
+getBlockContent :: Block -> Possible Content
+getBlockContent = \case
+  -- inline content
+  Para inlns          -> Actual $ ContentInlines inlns
+  Plain inlns         -> Actual $ ContentInlines inlns
+  -- inline content
+  BlockQuote blks     -> Actual $ ContentBlocks blks
+  Div _ blks          -> Actual $ ContentBlocks blks
+  -- lines content
+  LineBlock lns       -> Actual $ ContentLines lns
+  -- list items content
+  BulletList itms     -> Actual $ ContentListItems itms
+  OrderedList _ itms  -> Actual $ ContentListItems itms
+  -- definition items content
+  DefinitionList itms -> Actual $ ContentDefItems itms
+  _                   -> Absent
+
+setBlockContent :: Block -> Content -> Possible Block
+setBlockContent = \case
+  -- inline content
+  Para _           -> Actual . Para . inlineContent
+  Plain _          -> Actual . Plain . inlineContent
+  -- block content
+  BlockQuote _     -> Actual . BlockQuote . blockContent
+  Div attr _       -> Actual . Div attr . blockContent
+  -- lines content
+  LineBlock _      -> Actual . LineBlock . lineContent
+  -- list items content
+  BulletList _     -> Actual . BulletList . listItemContent
+  OrderedList la _ -> Actual . OrderedList la . listItemContent
+  -- definition items content
+  DefinitionList _ -> Actual . DefinitionList . defItemContent
+  _                -> const Absent
+  where
+    inlineContent = \case
+      ContentInlines inlns -> inlns
+      c -> throwM . PandocLuaError $ "expected Inlines, got " <>
+           contentTypeDescription c
+    blockContent = \case
+      ContentBlocks blks   -> blks
+      ContentInlines inlns -> [Plain inlns]
+      c -> throwM . PandocLuaError $ "expected Blocks, got " <>
+           contentTypeDescription c
+    lineContent = \case
+      ContentLines lns     -> lns
+      c -> throwM . PandocLuaError $ "expected list of lines, got " <>
+           contentTypeDescription c
+    defItemContent = \case
+      ContentDefItems itms -> itms
+      c -> throwM . PandocLuaError $ "expected definition items, got " <>
+           contentTypeDescription c
+    listItemContent = \case
+      ContentBlocks blks    -> [blks]
+      ContentLines lns      -> map ((:[]) . Plain) lns
+      ContentListItems itms -> itms
+      c -> throwM . PandocLuaError $ "expected list of items, got " <>
+           contentTypeDescription c
+
+getBlockText :: Block -> Possible Text
+getBlockText = \case
+  CodeBlock _ lst -> Actual lst
+  RawBlock _ raw  -> Actual raw
+  _               -> Absent
+
+setBlockText :: Block -> Text -> Possible Block
+setBlockText = \case
+  CodeBlock attr _ -> Actual . CodeBlock attr
+  RawBlock f _     -> Actual . RawBlock f
+  _                -> const Absent
+
 -- | Push a block element to the top of the Lua stack.
 pushBlock :: forall e. LuaError e => Block -> LuaE e ()
-pushBlock = \case
-  BlockQuote blcks         -> pushViaConstructor @e "BlockQuote" blcks
-  BulletList items         -> pushViaConstructor @e "BulletList" items
-  CodeBlock attr code      -> pushViaConstr' @e "CodeBlock"
-                              [ push code, pushAttr attr ]
-  DefinitionList items     -> pushViaConstructor @e "DefinitionList" items
-  Div attr blcks           -> pushViaConstr' @e "Div"
-                              [push blcks, pushAttr attr]
-  Header lvl attr inlns    -> pushViaConstr' @e "Header"
-                              [push lvl, push inlns, pushAttr attr]
-  HorizontalRule           -> pushViaConstructor @e "HorizontalRule"
-  LineBlock blcks          -> pushViaConstructor @e "LineBlock" blcks
-  OrderedList lstAttr list -> pushViaConstr' @e "OrderedList"
-                              [ push list, pushListAttributes @e lstAttr ]
-  Null                     -> pushViaConstructor @e "Null"
-  Para blcks               -> pushViaConstructor @e "Para" blcks
-  Plain blcks              -> pushViaConstructor @e "Plain" blcks
-  RawBlock f cs            -> pushViaConstructor @e "RawBlock" f cs
-  Table attr blkCapt specs thead tbody tfoot ->
-    pushViaConstr' @e "Table"
-    [ pushCaption blkCapt, push specs, push thead, push tbody
-    , push tfoot, pushAttr attr]
+pushBlock = pushUD typeBlock
 
 -- | Return the value at the given index as block if possible.
 peekBlock :: forall e. LuaError e => Peeker e Block
-peekBlock = fmap (retrieving "Block")
-  . typeChecked "table" Lua.istable
-  $ \idx -> do
-  -- Get the contents of an AST element.
-  let mkBlock :: (a -> Block) -> Peeker e a -> Peek e Block
-      mkBlock f p = f <$!> peekFieldRaw p "c" idx
-  LuaUtil.getTag idx >>= \case
-      "BlockQuote"     -> mkBlock BlockQuote peekBlocks
-      "BulletList"     -> mkBlock BulletList (peekList peekBlocks)
-      "CodeBlock"      -> mkBlock (uncurry CodeBlock)
-                                  (peekPair peekAttr peekText)
-      "DefinitionList" -> mkBlock DefinitionList
-                          (peekList (peekPair peekInlines (peekList peekBlocks)))
-      "Div"            -> mkBlock (uncurry Div) (peekPair peekAttr peekBlocks)
-      "Header"         -> mkBlock (\(lvl, attr, lst) -> Header lvl attr lst)
-                          (peekTriple peekIntegral peekAttr peekInlines)
-      "HorizontalRule" -> return HorizontalRule
-      "LineBlock"      -> mkBlock LineBlock (peekList peekInlines)
-      "OrderedList"    -> mkBlock (uncurry OrderedList)
-                          (peekPair peekListAttributes (peekList peekBlocks))
-      "Null"           -> return Null
-      "Para"           -> mkBlock Para peekInlines
-      "Plain"          -> mkBlock Plain peekInlines
-      "RawBlock"       -> mkBlock (uncurry RawBlock)
-                                  (peekPair peekFormat peekText)
-      "Table"          -> mkBlock id
-        (retrieving "Table" . (liftLua . absindex >=> (\idx' -> cleanup $ do
-          attr  <- liftLua (rawgeti idx' 1) *> peekAttr top
-          capt  <- liftLua (rawgeti idx' 2) *> peekCaption top
-          cs    <- liftLua (rawgeti idx' 3) *> peekList peekColSpec top
-          thead <- liftLua (rawgeti idx' 4) *> peekTableHead top
-          tbods <- liftLua (rawgeti idx' 5) *> peekList peekTableBody top
-          tfoot <- liftLua (rawgeti idx' 6) *> peekTableFoot top
-          return $! Table attr capt cs thead tbods tfoot)))
-      Name tag -> failPeek ("Unknown block type: " <> tag)
+peekBlock = retrieving "Block" . peekUD typeBlock
 
+-- | Retrieves a list of Block elements.
 peekBlocks :: LuaError e => Peeker e [Block]
 peekBlocks = peekList peekBlock
 
 peekInlines :: LuaError e => Peeker e [Inline]
 peekInlines = peekList peekInline
+
+pushInlines :: LuaError e => Pusher e [Inline]
+pushInlines = pushPandocList pushInline
+
+-- | Retrieves a single definition item from a the stack; it is expected
+-- to be a pair of a list of inlines and a list of list of blocks. Uses
+-- fuzzy parsing, i.e., tries hard to convert mismatching types into the
+-- expected result.
+peekDefinitionItem :: LuaError e => Peeker e ([Inline], [[Block]])
+peekDefinitionItem = peekPair peekInlinesFuzzy $ choice
+  [ peekList peekBlocksFuzzy
+  , \idx -> (:[]) <$!> peekBlocksFuzzy idx
+  ]
 
 -- | Push Caption element
 pushCaption :: LuaError e => Caption -> LuaE e ()
@@ -303,37 +447,48 @@ peekCaption = retrieving "Caption" . \idx -> do
   long <- peekFieldRaw peekBlocks "long" idx
   return $! Caption short long
 
+-- | Push a ColSpec value as a pair of Alignment and ColWidth.
+pushColSpec :: LuaError e => Pusher e ColSpec
+pushColSpec = pushPair (pushString . show) pushColWidth
+
+-- | Peek a ColSpec value as a pair of Alignment and ColWidth.
+peekColSpec :: LuaError e => Peeker e ColSpec
+peekColSpec = peekPair peekRead peekColWidth
+
 peekColWidth :: LuaError e => Peeker e ColWidth
 peekColWidth = retrieving "ColWidth" . \idx -> do
   maybe ColWidthDefault ColWidth <$!> optional (peekRealFloat idx)
 
-peekColSpec :: LuaError e => Peeker e ColSpec
-peekColSpec = peekPair peekRead peekColWidth
+-- | Push a ColWidth value by pushing the width as a plain number, or
+-- @nil@ for ColWidthDefault.
+pushColWidth :: LuaError e => Pusher e ColWidth
+pushColWidth = \case
+  (ColWidth w)    -> Lua.push w
+  ColWidthDefault -> Lua.pushnil
 
-instance Pushable ColWidth where
-  push = \case
-    (ColWidth w)    -> Lua.push w
-    ColWidthDefault -> Lua.pushnil
+-- | Push a table row as a pair of attr and the list of cells.
+pushRow :: LuaError e => Pusher e Row
+pushRow (Row attr cells) =
+  pushPair pushAttr (pushPandocList pushCell) (attr, cells)
 
-instance Pushable Row where
-  push (Row attr cells) = Lua.push (attr, cells)
-
-instance Peekable Row where
-  peek = forcePeek . peekRow
-
+-- | Push a table row from a pair of attr and the list of cells.
 peekRow :: LuaError e => Peeker e Row
 peekRow = ((uncurry Row) <$!>)
   . retrieving "Row"
   . peekPair peekAttr (peekList peekCell)
 
-instance Pushable TableBody where
-  push (TableBody attr (RowHeadColumns rowHeadColumns) head' body) = do
+-- | Pushes a 'TableBody' value as a Lua table with fields @attr@,
+-- @row_head_columns@, @head@, and @body@.
+pushTableBody :: LuaError e => Pusher e TableBody
+pushTableBody (TableBody attr (RowHeadColumns rowHeadColumns) head' body) = do
     Lua.newtable
     LuaUtil.addField "attr" attr
     LuaUtil.addField "row_head_columns" rowHeadColumns
     LuaUtil.addField "head" head'
     LuaUtil.addField "body" body
 
+-- | Retrieves a 'TableBody' value from a Lua table with fields @attr@,
+-- @row_head_columns@, @head@, and @body@.
 peekTableBody :: LuaError e => Peeker e TableBody
 peekTableBody = fmap (retrieving "TableBody")
   . typeChecked "table" Lua.istable
@@ -343,17 +498,25 @@ peekTableBody = fmap (retrieving "TableBody")
   <*>  peekFieldRaw (peekList peekRow) "head" idx
   <*>  peekFieldRaw (peekList peekRow) "body" idx
 
-instance Pushable TableHead where
-  push (TableHead attr rows) = Lua.push (attr, rows)
+-- | Push a table head value as the pair of its Attr and rows.
+pushTableHead :: LuaError e => Pusher e TableHead
+pushTableHead (TableHead attr rows) =
+  pushPair pushAttr (pushPandocList pushRow) (attr, rows)
 
+-- | Peek a table head value from a pair of Attr and rows.
 peekTableHead :: LuaError e => Peeker e TableHead
 peekTableHead = ((uncurry TableHead) <$!>)
   . retrieving "TableHead"
   . peekPair peekAttr (peekList peekRow)
 
-instance Pushable TableFoot where
-  push (TableFoot attr cells) = Lua.push (attr, cells)
+-- | Pushes a 'TableFoot' value as a pair of the Attr value and the list
+-- of table rows.
+pushTableFoot :: LuaError e => Pusher e TableFoot
+pushTableFoot (TableFoot attr rows) =
+  pushPair pushAttr (pushPandocList pushRow) (attr, rows)
 
+-- | Retrieves a 'TableFoot' value from a pair containing an Attr value
+-- and a list of table rows.
 peekTableFoot :: LuaError e => Peeker e TableFoot
 peekTableFoot = ((uncurry TableFoot) <$!>)
   . retrieving "TableFoot"
@@ -365,6 +528,8 @@ instance Pushable Cell where
 instance Peekable Cell where
   peek = forcePeek . peekCell
 
+-- | Push a table cell as a table with fields @attr@, @alignment@,
+-- @row_span@, @col_span@, and @contents@.
 pushCell :: LuaError e => Cell -> LuaE e ()
 pushCell (Cell attr align (RowSpan rowSpan) (ColSpan colSpan) contents) = do
   Lua.newtable
@@ -401,15 +566,49 @@ setInlineText = \case
   Str _           -> Actual . Str
   _               -> const Absent
 
+-- | Helper type to represent all the different types a `content`
+-- attribute can have.
 data Content
   = ContentBlocks [Block]
   | ContentInlines [Inline]
+  | ContentLines [[Inline]]
+  | ContentDefItems [([Inline], [[Block]])]
+  | ContentListItems [[Block]]
+
+contentTypeDescription :: Content -> Text
+contentTypeDescription = \case
+  ContentBlocks {}    -> "list of Block items"
+  ContentInlines {}   -> "list of Inline items"
+  ContentLines {}     -> "list of Inline lists (i.e., a list of lines)"
+  ContentDefItems {}  -> "list of definition items items"
+  ContentListItems {} -> "list items (i.e., list of list of Block elements)"
+
+pushContent :: LuaError e => Pusher e Content
+pushContent = \case
+  ContentBlocks blks -> pushPandocList pushBlock blks
+  ContentInlines inlns -> pushPandocList pushInline inlns
+  ContentLines lns -> pushPandocList (pushPandocList pushInline) lns
+  ContentDefItems itms ->
+    let pushItem = pushPair (pushPandocList pushInline)
+                            (pushPandocList (pushPandocList pushBlock))
+    in pushPandocList pushItem itms
+  ContentListItems itms ->
+    pushPandocList (pushPandocList pushBlock) itms
+
+peekContent :: LuaError e => Peeker e Content
+peekContent idx =
+  (ContentInlines <$!> peekInlinesFuzzy idx) <|>
+  (ContentLines  <$!> peekList (peekList peekInlineFuzzy) idx) <|>
+  (ContentBlocks  <$!> peekBlocksFuzzy idx ) <|>
+  (ContentListItems <$!> peekList peekBlocksFuzzy idx) <|>
+  (ContentDefItems  <$!> peekList (peekDefinitionItem) idx)
 
 setInlineContent :: Inline -> Content -> Possible Inline
 setInlineContent = \case
   -- inline content
   Cite cs _     -> Actual . Cite cs . inlineContent
   Emph _        -> Actual . Emph . inlineContent
+  Link a _ tgt  -> Actual . (\inlns -> Link a inlns tgt) . inlineContent
   Quoted qt _   -> Actual . Quoted qt . inlineContent
   SmallCaps _   -> Actual . SmallCaps . inlineContent
   Span attr _   -> Actual . Span attr . inlineContent
@@ -423,18 +622,19 @@ setInlineContent = \case
   where
     inlineContent = \case
       ContentInlines inlns -> inlns
-      ContentBlocks _      -> throwM $
-                              PandocLuaError "expected Inlines, got Blocks"
+      c -> throwM . PandocLuaError $ "expected Inlines, got " <>
+           contentTypeDescription c
     blockContent = \case
       ContentBlocks blks -> blks
       ContentInlines []  -> []
-      ContentInlines _   -> throwM $
-                            PandocLuaError "expected Blocks, got Inlines"
+      c -> throwM . PandocLuaError $ "expected Blocks, got " <>
+           contentTypeDescription c
 
 getInlineContent :: Inline -> Possible Content
 getInlineContent = \case
   Cite _ inlns      -> Actual $ ContentInlines inlns
   Emph inlns        -> Actual $ ContentInlines inlns
+  Link _ inlns _    -> Actual $ ContentInlines inlns
   Quoted _ inlns    -> Actual $ ContentInlines inlns
   SmallCaps inlns   -> Actual $ ContentInlines inlns
   Span _ inlns      -> Actual $ ContentInlines inlns
@@ -480,16 +680,6 @@ showInline = defun "show"
   ### liftPure (show @Inline)
   <#> parameter peekInline "inline" "Inline" "Object"
   =#> functionResult pushString "string" "stringified Inline"
-
-pushContent :: LuaError e => Pusher e Content
-pushContent = \case
-  ContentBlocks blks -> pushPandocList pushBlock blks
-  ContentInlines inlns -> pushPandocList pushInline inlns
-
-peekContent :: LuaError e => Peeker e Content
-peekContent idx =
-  (ContentInlines <$!> peekList peekInline idx) <|>
-  (ContentBlocks  <$!> peekList peekBlock idx)
 
 typeInline :: LuaError e => DocumentedType e Inline
 typeInline = deftype "Inline"
@@ -545,7 +735,7 @@ typeInline = deftype "Inline"
           Link _ _ (tgt, _) -> Actual tgt
           _                 -> Absent)
       (peekText, \case
-          Link attr capt (_, title) -> Actual . Image attr capt . (,title)
+          Link attr capt (_, title) -> Actual . Link attr capt . (,title)
           _                         -> const Absent)
   , possibleProperty "title" "title text"
       (pushText, getInlineTitle)
@@ -576,33 +766,57 @@ pushInline = pushUD typeInline
 peekInline :: forall e. LuaError e => Peeker e Inline
 peekInline = retrieving "Inline" . \idx -> peekUD typeInline idx
 
+-- | Try extra hard to retrieve an Inline value from the stack. Treats
+-- bare strings as @Str@ values.
+peekInlineFuzzy :: LuaError e => Peeker e Inline
+peekInlineFuzzy = retrieving "Inline" . choice
+  [ peekUD typeInline
+  , \idx -> Str <$!> peekText idx
+  ]
+
 -- | Try extra-hard to return the value at the given index as a list of
 -- inlines.
-peekFuzzyInlines :: LuaError e => Peeker e [Inline]
-peekFuzzyInlines = choice
-  [ peekList peekInline
-  , fmap pure . peekInline
-  , \idx -> pure . Str <$!> peekText idx
+peekInlinesFuzzy :: LuaError e => Peeker e [Inline]
+peekInlinesFuzzy = choice
+  [ peekList peekInlineFuzzy
+  , fmap pure . peekInlineFuzzy
   ]
 
-peekFuzzyBlocks :: LuaError e => Peeker e [Block]
-peekFuzzyBlocks = choice
-  [ peekList peekBlock
-  , fmap pure . peekBlock
-  , \idx -> pure . Plain . pure . Str <$!> peekText idx
+-- | Try extra hard to retrieve a Block value from the stack. Treats bar
+-- Inline elements as if they were wrapped in 'Plain'.
+peekBlockFuzzy :: LuaError e => Peeker e Block
+peekBlockFuzzy = choice
+  [ peekBlock
+  , (\idx -> Plain <$!> peekInlinesFuzzy idx)
   ]
 
+-- | Try extra-hard to return the value at the given index as a list of
+-- blocks.
+peekBlocksFuzzy :: LuaError e => Peeker e [Block]
+peekBlocksFuzzy = choice
+  [ peekList peekBlockFuzzy
+  , (<$!>) pure . peekBlockFuzzy
+  ]
 
-pushListAttributes :: forall e. LuaError e => ListAttributes -> LuaE e ()
-pushListAttributes (start, style, delimiter) =
-    pushViaConstr' "ListAttributes"
-    [ push start, push style, push delimiter ]
+-- * Orphan Instances
 
-peekListAttributes :: LuaError e => Peeker e ListAttributes
-peekListAttributes = retrieving "ListAttributes" . peekTriple
-  peekIntegral
-  peekRead
-  peekRead
+instance Pushable Inline where
+  push = pushInline
+
+instance Pushable Citation where
+  push = pushCitation
+
+instance Pushable Row where
+  push = pushRow
+
+instance Pushable TableBody where
+  push = pushTableBody
+
+instance Pushable TableFoot where
+  push = pushTableFoot
+
+instance Pushable TableHead where
+  push = pushTableHead
 
 -- These instances exist only for testing. It's a hack to avoid making
 -- the marshalling modules public.
@@ -617,6 +831,9 @@ instance Peekable Meta where
 
 instance Peekable Pandoc where
   peek = forcePeek . peekPandoc
+
+instance Peekable Row where
+  peek = forcePeek . peekRow
 
 instance Peekable Version where
   peek = forcePeek . peekVersionFuzzy

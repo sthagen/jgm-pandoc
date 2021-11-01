@@ -13,7 +13,8 @@
 Utility module for Lua, exposing internal helper functions.
 -}
 module Text.Pandoc.Lua.Module.Utils
-  ( pushModule
+  ( documentedModule
+  , sha1
   ) where
 
 import Control.Applicative ((<|>))
@@ -21,7 +22,7 @@ import Control.Monad ((<$!>))
 import Data.Data (showConstr, toConstr)
 import Data.Default (def)
 import Data.Version (Version)
-import HsLua as Lua hiding (pushModule)
+import HsLua as Lua
 import HsLua.Class.Peekable (PeekError)
 import HsLua.Module.Version (peekVersionFuzzy, pushVersion)
 import Text.Pandoc.Definition
@@ -29,7 +30,8 @@ import Text.Pandoc.Error (PandocError)
 import Text.Pandoc.Lua.Marshaling ()
 import Text.Pandoc.Lua.Marshaling.AST
   ( peekBlock, peekInline, peekPandoc, pushBlock, pushInline, pushPandoc
-  , peekAttr, peekListAttributes, peekMeta, peekMetaValue)
+  , peekAttr, peekMeta, peekMetaValue)
+import Text.Pandoc.Lua.Marshaling.ListAttributes (peekListAttributes)
 import Text.Pandoc.Lua.Marshaling.List (pushPandocList)
 import Text.Pandoc.Lua.Marshaling.SimpleTable
   ( SimpleTable (..), peekSimpleTable, pushSimpleTable )
@@ -38,7 +40,6 @@ import Text.Pandoc.Lua.PandocLua (PandocLua (unPandocLua))
 import qualified Data.Digest.Pure.SHA as SHA
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
-import qualified HsLua.Packaging as Lua
 import qualified Text.Pandoc.Builder as B
 import qualified Text.Pandoc.Filter.JSON as JSONFilter
 import qualified Text.Pandoc.Shared as Shared
@@ -46,8 +47,8 @@ import qualified Text.Pandoc.UTF8 as UTF8
 import qualified Text.Pandoc.Writers.Shared as Shared
 
 -- | Push the "pandoc.utils" module to the Lua stack.
-pandocUtilsModule :: Module PandocError
-pandocUtilsModule = Module
+documentedModule :: Module PandocError
+documentedModule = Module
   { moduleName = "pandoc.utils"
   , moduleDescription = "pandoc utility functions"
   , moduleFields = []
@@ -91,12 +92,7 @@ pandocUtilsModule = Module
       , "Returns nil instead of a string if the conversion failed."
       ]
 
-    , defun "sha1"
-      ### liftPure (SHA.showDigest . SHA.sha1)
-      <#> parameter (fmap BSL.fromStrict . peekByteString) "string"
-            "input" ""
-      =#> functionResult pushString "string" "hexadecimal hash value"
-      #? "Compute the hash of the given string value."
+    , sha1
 
     , defun "Version"
       ### liftPure (id @Version)
@@ -145,8 +141,13 @@ pandocUtilsModule = Module
     ]
   }
 
-pushModule :: LuaE PandocError NumResults
-pushModule = 1 <$ Lua.pushModule pandocUtilsModule
+-- | Documented Lua function to compute the hash of a string.
+sha1 :: DocumentedFunction e
+sha1 = defun "sha1"
+  ### liftPure (SHA.showDigest . SHA.sha1)
+  <#> parameter (fmap BSL.fromStrict . peekByteString) "string" "input" ""
+  =#> functionResult pushString "string" "hexadecimal hash value"
+  #? "Compute the hash of the given string value."
 
 
 -- | Convert pandoc structure to a string with formatting removed.
@@ -184,10 +185,10 @@ peekAstElement = retrieving "pandoc AST element" . choice
   [ (fmap PandocElement . peekPandoc)
   , (fmap InlineElement . peekInline)
   , (fmap BlockElement . peekBlock)
+  , (fmap MetaValueElement . peekMetaValue)
   , (fmap AttrElement . peekAttr)
   , (fmap ListAttributesElement . peekListAttributes)
   , (fmap MetaElement . peekMeta)
-  , (fmap MetaValueElement . peekMetaValue)
   ]
 
 -- | Converts an old/simple table into a normal table block element.

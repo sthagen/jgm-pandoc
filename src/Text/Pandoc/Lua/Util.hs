@@ -18,8 +18,6 @@ Lua utility functions.
 module Text.Pandoc.Lua.Util
   ( getTag
   , addField
-  , addFunction
-  , pushViaConstructor
   , callWithTraceback
   , dofileWithTraceback
   , pushViaConstr'
@@ -35,41 +33,6 @@ addField key value = do
   Lua.push key
   Lua.push value
   Lua.rawset (Lua.nth 3)
-
--- | Add a function to the table at the top of the stack, using the
--- given name.
-addFunction :: Exposable e a => String -> a -> LuaE e ()
-addFunction name fn = do
-  Lua.push name
-  Lua.pushHaskellFunction $ toHaskellFunction fn
-  Lua.rawset (-3)
-
--- | Helper class for pushing a single value to the stack via a lua
--- function. See @pushViaCall@.
-class LuaError e => PushViaCall e a where
-  pushViaCall' :: LuaError e => Name -> LuaE e () -> NumArgs -> a
-
-instance LuaError e => PushViaCall e (LuaE e ()) where
-  pushViaCall' fn pushArgs num = do
-    Lua.pushName @e fn
-    Lua.rawget Lua.registryindex
-    pushArgs
-    Lua.call num 1
-
-instance (LuaError e, Pushable a, PushViaCall e b) =>
-         PushViaCall e (a -> b) where
-  pushViaCall' fn pushArgs num x =
-    pushViaCall' @e fn (pushArgs *> Lua.push x) (num + 1)
-
--- | Push an value to the stack via a lua function. The lua function is called
--- with all arguments that are passed to this function and is expected to return
--- a single value.
-pushViaCall :: forall e a. LuaError e => PushViaCall e a => Name -> a
-pushViaCall fn = pushViaCall' @e fn (return ()) 0
-
--- | Call a pandoc element constructor within Lua, passing all given arguments.
-pushViaConstructor :: forall e a. LuaError e => PushViaCall e a => Name -> a
-pushViaConstructor pandocFn = pushViaCall @e ("pandoc." <> pandocFn)
 
 -- | Get the tag of a value. This is an optimized and specialized version of
 -- @Lua.getfield idx "tag"@. It only checks for the field on the table at index
