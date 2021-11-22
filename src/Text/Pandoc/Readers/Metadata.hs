@@ -42,6 +42,7 @@ yamlBsToMeta :: (PandocMonad m, HasLastStrPosition st)
 yamlBsToMeta pMetaValue bstr = do
   case Yaml.decodeAllEither' bstr of
        Right (Object o:_) -> fmap Meta <$> yamlMap pMetaValue o
+       Right [] -> return . return $ mempty
        Right [Null] -> return . return $ mempty
        Right _  -> Prelude.fail "expected YAML object"
        Left err' -> do
@@ -55,8 +56,8 @@ yamlBsToRefs :: (PandocMonad m, HasLastStrPosition st)
              -> B.ByteString
              -> ParserT Sources st m (Future st [MetaValue])
 yamlBsToRefs pMetaValue idpred bstr =
-  case Yaml.decodeEither' bstr of
-       Right (Object m) -> do
+  case Yaml.decodeAllEither' bstr of
+       Right (Object m : _) -> do
          let isSelected (String t) = idpred t
              isSelected _ = False
          let hasSelectedId (Object o) =

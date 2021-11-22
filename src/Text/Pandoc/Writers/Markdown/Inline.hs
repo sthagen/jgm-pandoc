@@ -459,7 +459,8 @@ inlineToMarkdown opts il@(RawInline f str) = do
          literal (T.replicate numticks "`") <> literal "{=" <> literal fmt <> literal "}"
   let renderEmpty = mempty <$ report (InlineNotRendered il)
   case variant of
-    PlainText -> renderEmpty
+    PlainText
+      | f == "plain" -> return $ literal str
     Commonmark
       | f `elem` ["gfm", "commonmark", "commonmark_x", "markdown"]
          -> return $ literal str
@@ -530,7 +531,7 @@ inlineToMarkdown opts (Cite (c:cs) lst)
            return $ pdoc <+> r
         modekey SuppressAuthor = "-"
         modekey _              = ""
-inlineToMarkdown opts lnk@(Link attr txt (src, tit)) = do
+inlineToMarkdown opts lnk@(Link attr@(ident,classes,kvs) txt (src, tit)) = do
   variant <- asks envVariant
   linktext <- inlineListToMarkdown opts txt
   let linktitle = if T.null tit
@@ -538,6 +539,9 @@ inlineToMarkdown opts lnk@(Link attr txt (src, tit)) = do
                      else literal $ " \"" <> tit <> "\""
   let srcSuffix = fromMaybe src (T.stripPrefix "mailto:" src)
   let useAuto = isURI src &&
+                T.null ident &&
+                null kvs &&
+               (null classes || classes == ["uri"] || classes == ["email"]) &&
                 case txt of
                       [Str s] | escapeURI s == srcSuffix -> True
                       _       -> False

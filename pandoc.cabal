@@ -1,6 +1,6 @@
-cabal-version:   2.2
+cabal-version:   2.4
 name:            pandoc
-version:         2.16.1
+version:         2.16.2
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -11,8 +11,7 @@ bug-reports:     https://github.com/jgm/pandoc/issues
 stability:       alpha
 homepage:        https://pandoc.org
 category:        Text
-tested-with:     GHC == 8.2.2, GHC == 8.4.4, GHC == 8.6.5,
-                 GHC == 8.8.4, GHC == 8.10.2, GHC == 9.0.1
+tested-with:     GHC == 8.6.5, GHC == 8.8.4, GHC == 8.10.7, GHC == 9.0.1
 synopsis:        Conversion between markup formats
 description:     Pandoc is a Haskell library for converting from one markup
                  format to another, and a command-line tool that uses
@@ -174,6 +173,8 @@ data-files:
                  data/abbreviations
                  -- sample lua custom writer
                  data/sample.lua
+                 -- sample lua custom reader
+                 data/creole.lua
                  -- lua init script
                  data/init.lua
                  -- pandoc lua module
@@ -380,89 +381,8 @@ extra-source-files:
                  test/rtf/*.native
                  test/rtf/*.rtf
                  test/pptx/*.pptx
-                 test/pptx/background-image/input.native
-                 test/pptx/background-image/*.pptx
-                 test/pptx/blanks/just-speaker-notes/input.native
-                 test/pptx/blanks/just-speaker-notes/*.pptx
-                 test/pptx/blanks/nbsp-in-body/input.native
-                 test/pptx/blanks/nbsp-in-body/*.pptx
-                 test/pptx/blanks/nbsp-in-heading/input.native
-                 test/pptx/blanks/nbsp-in-heading/*.pptx
-                 test/pptx/code-custom/*.pptx
-                 test/pptx/code/input.native
-                 test/pptx/code/*.pptx
-                 test/pptx/content-with-caption/heading-text-image/input.native
-                 test/pptx/content-with-caption/heading-text-image/*.pptx
-                 test/pptx/content-with-caption/image-text/input.native
-                 test/pptx/content-with-caption/image-text/*.pptx
-                 test/pptx/content-with-caption/text-image/input.native
-                 test/pptx/content-with-caption/text-image/*.pptx
-                 test/pptx/comparison/both-columns/input.native
-                 test/pptx/comparison/both-columns/*.pptx
-                 test/pptx/comparison/extra-image/input.native
-                 test/pptx/comparison/extra-image/*.pptx
-                 test/pptx/comparison/extra-text/input.native
-                 test/pptx/comparison/extra-text/*.pptx
-                 test/pptx/comparison/non-text-first/input.native
-                 test/pptx/comparison/non-text-first/*.pptx
-                 test/pptx/comparison/one-column/input.native
-                 test/pptx/comparison/one-column/*.pptx
-                 test/pptx/document-properties-short-desc/input.native
-                 test/pptx/document-properties-short-desc/*.pptx
-                 test/pptx/document-properties/input.native
-                 test/pptx/document-properties/*.pptx
-                 test/pptx/endnotes-toc/*.pptx
-                 test/pptx/endnotes/input.native
-                 test/pptx/endnotes/*.pptx
-                 test/pptx/footer/input.native
-                 test/pptx/footer/basic/*.pptx
-                 test/pptx/footer/fixed-date/*.pptx
-                 test/pptx/footer/higher-slide-number/*.pptx
-                 test/pptx/footer/no-title-slide/*.pptx
-                 test/pptx/images/input.native
-                 test/pptx/images/*.pptx
-                 test/pptx/incremental-lists/with-flag/input.native
-                 test/pptx/incremental-lists/with-flag/*.pptx
-                 test/pptx/incremental-lists/without-flag/input.native
-                 test/pptx/incremental-lists/without-flag/*.pptx
-                 test/pptx/inline-formatting/input.native
-                 test/pptx/inline-formatting/*.pptx
-                 test/pptx/lists/input.native
-                 test/pptx/lists/*.pptx
-                 test/pptx/list-level/input.native
-                 test/pptx/list-level/*.pptx
-                 test/pptx/raw-ooxml/input.native
-                 test/pptx/raw-ooxml/*.pptx
-                 test/pptx/remove-empty-slides/input.native
-                 test/pptx/remove-empty-slides/*.pptx
-                 test/pptx/slide-breaks-slide-level-1/*.pptx
-                 test/pptx/slide-breaks-toc/*.pptx
-                 test/pptx/slide-breaks/input.native
-                 test/pptx/slide-breaks/*.pptx
-                 test/pptx/slide-level-0/h1-h2-with-table/input.native
-                 test/pptx/slide-level-0/h1-h2-with-table/*.pptx
-                 test/pptx/slide-level-0/h1-with-image/input.native
-                 test/pptx/slide-level-0/h1-with-image/*.pptx
-                 test/pptx/slide-level-0/h1-with-table/input.native
-                 test/pptx/slide-level-0/h1-with-table/*.pptx
-                 test/pptx/slide-level-0/h2-with-image/input.native
-                 test/pptx/slide-level-0/h2-with-image/*.pptx
-                 test/pptx/speaker-notes-after-metadata/input.native
-                 test/pptx/speaker-notes-after-metadata/*.pptx
-                 test/pptx/speaker-notes-afterheader/input.native
-                 test/pptx/speaker-notes-afterheader/*.pptx
-                 test/pptx/speaker-notes-afterseps/input.native
-                 test/pptx/speaker-notes-afterseps/*.pptx
-                 test/pptx/speaker-notes/input.native
-                 test/pptx/speaker-notes/*.pptx
-                 test/pptx/start-numbering-at/input.native
-                 test/pptx/start-numbering-at/*.pptx
-                 test/pptx/tables/input.native
-                 test/pptx/tables/*.pptx
-                 test/pptx/two-column/all-text/input.native
-                 test/pptx/two-column/all-text/*.pptx
-                 test/pptx/two-column/text-and-image/input.native
-                 test/pptx/two-column/text-and-image/*.pptx
+                 test/pptx/**/*.pptx
+                 test/pptx/**/*.native
                  test/ipynb/*.in.native
                  test/ipynb/*.out.native
                  test/ipynb/*.ipynb
@@ -488,30 +408,26 @@ flag trypandoc
 
 common common-options
   default-language: Haskell2010
-  build-depends:    base         >= 4.9 && < 5
+  build-depends:    base         >= 4.12 && < 5
   ghc-options:      -Wall -fno-warn-unused-do-bind
                     -Wincomplete-record-updates
                     -Wnoncanonical-monad-instances
+                    -Wcpp-undef
+                    -Wincomplete-uni-patterns
+                    -Widentities
+                    -Wpartial-fields
+                    -Wmissing-signatures
+                    -fhide-source-paths
+                    -- -Wmissing-export-lists
 
-  if impl(ghc < 8.6)
-    hs-source-dirs:   prelude
-    other-modules:    Prelude
-    build-depends:    base-compat >= 0.10.5
-    other-extensions: NoImplicitPrelude
+  if impl(ghc >= 8.10)
+    ghc-options:    -Wunused-packages
+
+  if impl(ghc >= 9.0)
+    ghc-options:    -Winvalid-haddock
 
   if os(windows)
     cpp-options:      -D_WINDOWS
-
-  -- Later:
-  -- -Wpartial-fields        (currently used in Powerpoint writer)
-  -- -Wmissing-export-lists  (currently some Odt modules violate this)
-  -- -Wredundant-constraints (problematic if we want to support older base)
-  if impl(ghc >= 8.2)
-    ghc-options:      -Wcpp-undef
-  if impl(ghc >= 8.4)
-    ghc-options:      -Wincomplete-uni-patterns
-                      -Widentities
-                      -fhide-source-paths
 
 common common-executable
   import:           common-options
@@ -561,6 +477,7 @@ library
                  http-types            >= 0.8      && < 0.13,
                  ipynb                 >= 0.1.0.2  && < 0.2,
                  jira-wiki-markup      >= 1.4      && < 1.5,
+                 lpeg                  >= 1.0.1    && < 1.1,
                  mtl                   >= 2.2      && < 2.3,
                  network               >= 2.6,
                  network-uri           >= 2.6      && < 2.8,
@@ -589,10 +506,6 @@ library
                  yaml                  >= 0.11     && < 0.12,
                  zip-archive           >= 0.2.3.4  && < 0.5,
                  zlib                  >= 0.5      && < 0.7
-  if os(windows) && arch(i386)
-     build-depends: basement >= 0.0.10,
-                    foundation >= 0.0.23
-                    -- basement 0.0.9 won't build on 32-bit windows.
   if !os(windows)
     build-depends:  unix >= 2.4 && < 2.8
   if flag(embed_data_files)
@@ -641,6 +554,7 @@ library
                    Text.Pandoc.Readers.Ipynb,
                    Text.Pandoc.Readers.CSV,
                    Text.Pandoc.Readers.RTF,
+                   Text.Pandoc.Readers.Custom,
                    Text.Pandoc.Writers,
                    Text.Pandoc.Writers.Native,
                    Text.Pandoc.Writers.Docbook,
@@ -924,12 +838,9 @@ benchmark benchmark-pandoc
   main-is:         benchmark-pandoc.hs
   hs-source-dirs:  benchmark
   build-depends:   bytestring,
-                   containers,
-                   -- gauge       >= 0.2     && < 0.3,
                    tasty-bench >= 0.2     && <= 0.4,
                    mtl         >= 2.2     && < 2.3,
                    text        >= 1.1.1.0 && < 1.3,
-                   time,
                    deepseq
   -- we increase heap size to avoid benchmarking garbage collection:
   ghc-options:     -rtsopts -with-rtsopts=-A8m -threaded

@@ -151,17 +151,17 @@ return {
   group "Inline elements" {
     group 'Cite' {
       test('has property `content`', function ()
-        local cite = pandoc.Cite({}, {pandoc.Emph 'important'})
+        local cite = pandoc.Cite({pandoc.Emph 'important'}, {})
         assert.are_same(cite.content, {pandoc.Emph {pandoc.Str 'important'}})
 
         cite.content = 'boring'
-        assert.are_equal(cite, pandoc.Cite({}, {pandoc.Str 'boring'}))
+        assert.are_equal(cite, pandoc.Cite({pandoc.Str 'boring'}, {}))
       end),
       test('has list of citations in property `cite`', function ()
         local citations = {
           pandoc.Citation('einstein1905', 'NormalCitation')
         }
-        local cite = pandoc.Cite(citations, 'relativity')
+        local cite = pandoc.Cite('relativity', citations)
         assert.are_same(cite.citations, citations)
 
         local new_citations = {
@@ -169,7 +169,7 @@ return {
           pandoc.Citation('Poincaré1905', 'NormalCitation')
         }
         cite.citations = new_citations
-        assert.are_equal(cite, pandoc.Cite(new_citations, {'relativity'}))
+        assert.are_equal(cite, pandoc.Cite({'relativity'}, new_citations))
       end),
     },
     group 'Code' {
@@ -809,7 +809,25 @@ return {
         )
         assert.are_same(expected_table, new_table)
       end)
-    }
+    },
+    group 'ReaderOptions' {
+      test('returns a userdata value', function ()
+        local opts = pandoc.ReaderOptions {}
+        assert.are_equal(type(opts), 'userdata')
+      end),
+      test('can construct from table', function ()
+        local opts = pandoc.ReaderOptions {columns = 66}
+        assert.are_equal(opts.columns, 66)
+      end),
+      test('can construct from other ReaderOptions value', function ()
+        local orig = pandoc.ReaderOptions{columns = 65}
+        local copy = pandoc.ReaderOptions(orig)
+        for k, v in pairs(orig) do
+          assert.are_same(copy[k], v)
+        end
+        assert.are_equal(copy.columns, 65)
+      end),
+    },
   },
 
   group 'clone' {
@@ -894,6 +912,16 @@ return {
       assert.error_matches(
         function () pandoc.read('foo', 'gfm+empty_paragraphs') end,
         'Extension empty_paragraphs not supported for gfm'
+      )
+    end),
+    test('read with other indented code classes', function()
+      local indented_code = '    return true'
+      local expected = pandoc.Pandoc({
+          pandoc.CodeBlock('return true', {class='foo'})
+      })
+      assert.are_same(
+        expected,
+        pandoc.read(indented_code, 'markdown', {indented_code_classes={'foo'}})
       )
     end),
     test('failing read', function ()

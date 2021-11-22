@@ -12,6 +12,7 @@ extra-deps:
 - doctemplates-0.10
 - emojis-0.1.2
 - doclayout-0.3.1.1
+- lpeg-1.0.1
 - hslua-2.0.1
 - hslua-classes-2.0.0
 - hslua-core-2.0.0.2
@@ -26,12 +27,12 @@ extra-deps:
 - tasty-hslua-1.0.0
 - tasty-lua-1.0.0
 - pandoc-types-1.22.1
-- texmath-0.12.3.2
 - commonmark-0.2.1.1
 - commonmark-extensions-0.2.2
 - citeproc-0.6
 - aeson-pretty-0.8.9
 - ipynb-0.1.0.2
+- texmath-0.12.3.3
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
 resolver: lts-18.10
