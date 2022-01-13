@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {- |
 Module      : Text.Pandoc.Writers.Docx
-Copyright   : Copyright (C) 2012-2021 John MacFarlane
+Copyright   : Copyright (C) 2012-2022 John MacFarlane
 License     : GNU GPL, version 2 or above
 Maintainer  : John MacFarlane <jgm@berkeley.edu>
 
@@ -111,6 +111,8 @@ data WriterState = WriterState{
        , stDelId          :: Int
        , stStyleMaps      :: StyleMaps
        , stFirstPara      :: Bool
+       , stNumIdUsed      :: Bool  -- ^ True if the current numId (envListNumId) has been used.
+                                   --   Should only be used once, for the first paragraph.
        , stInTable        :: Bool
        , stInList         :: Bool
        , stTocTitle       :: [Inline]
@@ -133,6 +135,7 @@ defaultWriterState = WriterState{
       , stDelId          = 1
       , stStyleMaps      = StyleMaps M.empty M.empty
       , stFirstPara      = False
+      , stNumIdUsed      = False
       , stInTable        = False
       , stInList         = False
       , stTocTitle       = [Str "Table of Contents"]

@@ -4,7 +4,7 @@
 {-# LANGUAGE RecordWildCards   #-}
 {- |
    Module      : Text.Pandoc.Readers.Org.Blocks
-   Copyright   : Copyright (C) 2014-2021 Albert Krewinkel
+   Copyright   : Copyright (C) 2014-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -167,9 +167,8 @@ keyValues = try $
    value = skipSpaces *> manyTillChar anyChar endOfValue
 
    endOfValue :: Monad m => OrgParser m ()
-   endOfValue =
-     lookAhead $ (() <$ try (many1 spaceChar <* key))
-              <|> () <$ newline
+   endOfValue = lookAhead (void $ try (many1 spaceChar <* key))
+            <|> try (skipSpaces <* lookAhead newline)
 
 
 --
@@ -803,7 +802,7 @@ paraOrPlain = try $ do
   -- is directly followed by a list item, in which case the block is read as
   -- plain text.
   try (guard nl
-       *> notFollowedBy (inList *> (orderedListStart <|> bulletListStart))
+       *> notFollowedBy (inList *> (void orderedListStart <|> void bulletListStart))
        $> (B.para <$> ils))
     <|>  return (B.plain <$> ils)
 
@@ -835,9 +834,12 @@ indented indentedMarker minIndent = try $ do
 
 orderedList :: PandocMonad m => OrgParser m (F Blocks)
 orderedList = try $ do
-  indent <- lookAhead orderedListStart
-  fmap (B.orderedList . compactify) . sequence
-    <$> many1 (listItem (orderedListStart `indented` indent))
+  (indent, attr) <- lookAhead orderedListStart
+  attr' <- option (fst3 attr, DefaultStyle, DefaultDelim) $
+           guardEnabled Ext_fancy_lists $> attr
+  fmap (B.orderedListWith attr' . compactify) . sequence
+    <$> many1 (listItem ((fst <$> orderedListStart) `indented` indent))
+  where fst3 (x,_,_) = x
 
 definitionListItem :: PandocMonad m
                    => OrgParser m Int

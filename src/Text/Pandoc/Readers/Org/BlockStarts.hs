@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Readers.Org.BlockStarts
-   Copyright   : Copyright (C) 2014-2021 Albert Krewinkel
+   Copyright   : Copyright (C) 2014-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -25,8 +25,11 @@ module Text.Pandoc.Readers.Org.BlockStarts
 
 import Control.Monad (void)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Text.Pandoc.Readers.Org.Parsing
+import Text.Pandoc.Definition as Pandoc
+import Text.Pandoc.Shared (safeRead)
+import Text.Pandoc.Parsing (lowerAlpha, upperAlpha)
+import Data.Functor (($>))
 
 -- | Horizontal Line (five -- dashes or more)
 hline :: Monad m => OrgParser m ()
@@ -60,30 +63,45 @@ latexEnvStart = try $
    latexEnvName :: Monad m => OrgParser m Text
    latexEnvName = try $ mappend <$> many1Char alphaNum <*> option "" (textStr "*")
 
+listCounterCookie :: Monad m => OrgParser m Int
+listCounterCookie = try $
+  string "[@"
+  *> parseNum
+  <* char ']'
+  <* (skipSpaces <|> lookAhead eol)
+  where parseNum = (safeRead =<< many1Char digit)
+                   <|> snd <$> lowerAlpha
+                   <|> snd <$> upperAlpha
+
 bulletListStart :: Monad m => OrgParser m Int
 bulletListStart = try $ do
   ind <- length <$> many spaceChar
    -- Unindented lists cannot use '*' bullets.
   oneOf (if ind == 0 then "+-" else "*+-")
   skipSpaces1 <|> lookAhead eol
-  return (ind + 1)
-
-genericListStart :: Monad m
-                 => OrgParser m Text
-                 -> OrgParser m Int
-genericListStart listMarker = try $ do
-  ind <- length <$> many spaceChar
-  void listMarker
-  skipSpaces1 <|> lookAhead eol
+  optionMaybe listCounterCookie
   return (ind + 1)
 
 eol :: Monad m => OrgParser m ()
 eol = void (char '\n')
 
-orderedListStart :: Monad m => OrgParser m Int
-orderedListStart = genericListStart orderedListMarker
+orderedListStart :: Monad m => OrgParser m (Int, ListAttributes)
+orderedListStart = try $ do
+  ind <- length <$> many spaceChar
+  style <- choice styles
+  delim <- choice delims
+  skipSpaces1 <|> lookAhead eol
+  start <- option 1 listCounterCookie
+  return (ind + 1, (start, style, delim))
   -- Ordered list markers allowed in org-mode
-  where orderedListMarker = T.snoc <$> many1Char digit <*> oneOf ".)"
+  where
+    styles = [ many1Char digit $> Decimal
+             , fst <$> lowerAlpha
+             , fst <$> upperAlpha
+             ]
+    delims = [ char '.' $> Period
+             , char ')' $> OneParen
+             ]
 
 drawerStart :: Monad m => OrgParser m Text
 drawerStart = try $ skipSpaces *> drawerName <* skipSpaces <* newline

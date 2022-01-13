@@ -7,13 +7,13 @@
 module Text.Pandoc.Citeproc
   ( processCitations,
     getReferences,
-    getStyle
   )
 where
 
 import Citeproc
 import Citeproc.Pandoc ()
-import Text.Pandoc.Citeproc.Locator (parseLocator)
+import Text.Pandoc.Citeproc.Locator (parseLocator, toLocatorMap,
+                                     LocatorInfo(..))
 import Text.Pandoc.Citeproc.CslJson (cslJsonToReferences)
 import Text.Pandoc.Citeproc.BibTeX (readBibtexString, Variant(..))
 import Text.Pandoc.Citeproc.MetaValue (metaValueToReference, metaValueToText)
@@ -49,15 +49,16 @@ import qualified Data.Text as T
 import System.FilePath (takeExtension)
 import Safe (lastMay, initSafe)
 
-
 processCitations  :: PandocMonad m => Pandoc -> m Pandoc
 processCitations (Pandoc meta bs) = do
   style <- getStyle (Pandoc meta bs)
-
-  mblang <- getLang meta
+  mblang <- getCiteprocLang meta
   let locale = Citeproc.mergeLocales mblang style
 
-  refs <- getReferences (Just locale) (Pandoc meta bs)
+  let addQuoteSpan (Quoted _ xs) = Span ("",["csl-quoted"],[]) xs
+      addQuoteSpan x = x
+  refs <- map (walk addQuoteSpan) <$>
+          getReferences (Just locale) (Pandoc meta bs)
 
   let otherIdsMap = foldr (\ref m ->
                              case T.words . extractText <$>
@@ -92,8 +93,8 @@ processCitations (Pandoc meta bs) = do
                      B.divWith ("ref-" <> ident,["csl-entry"],[]) . B.para .
                          insertSpace $ out)
                       (resultBibliography result)
-  let moveNotes = styleIsNoteStyle sopts &&
-           maybe True truish (lookupMeta "notes-after-punctuation" meta)
+  let moveNotes = maybe (styleIsNoteStyle sopts) truish
+                   (lookupMeta "notes-after-punctuation" meta)
   let cits = resultCitations result
 
   let metanocites = lookupMeta "nocite" meta
@@ -166,10 +167,9 @@ getStyle (Pandoc meta _) = do
 
 
 -- Retrieve citeproc lang based on metadata.
-getLang :: PandocMonad m => Meta -> m (Maybe Lang)
-getLang meta = maybe (return Nothing) bcp47LangToIETF
-                 ((lookupMeta "lang" meta <|> lookupMeta "locale" meta) >>=
-                   metaValueToText)
+getCiteprocLang :: PandocMonad m => Meta -> m (Maybe Lang)
+getCiteprocLang meta = maybe (return Nothing) bcp47LangToIETF
+  ((lookupMeta "lang" meta <|> lookupMeta "locale" meta) >>= metaValueToText)
 
 -- | Get references defined inline in the metadata and via an external
 -- bibliography.  Only references that are actually cited in the document
@@ -181,7 +181,7 @@ getReferences mblocale (Pandoc meta bs) = do
   locale <- case mblocale of
                 Just l  -> return l
                 Nothing -> do
-                  mblang <- getLang meta
+                  mblang <- getCiteprocLang meta
                   case mblang of
                     Just lang -> return $ either mempty id $ getLocale lang
                     Nothing   -> return mempty
@@ -209,10 +209,7 @@ getReferences mblocale (Pandoc meta bs) = do
                         Just fp -> getRefsFromBib locale idpred fp
                         Nothing -> return []
                     Nothing -> return []
-  let addQuoteSpan (Quoted _ xs) = Span ("",["csl-quoted"],[]) xs
-      addQuoteSpan x = x
-  return $ map (legacyDateRanges . walk addQuoteSpan)
-               (externalRefs ++ inlineRefs)
+  return $ map legacyDateRanges (externalRefs ++ inlineRefs)
             -- note that inlineRefs can override externalRefs
 
 
@@ -307,17 +304,15 @@ fromPandocCitations :: Locale
                     -> [CitationItem Inlines]
 fromPandocCitations locale otherIdsMap = concatMap go
  where
+  locmap = toLocatorMap locale
   go c =
-    let (loclab, suffix) = parseLocator locale (citationSuffix c)
-        (mblab, mbloc) = case loclab of
-                           Just (loc, lab) -> (Just loc, Just lab)
-                           Nothing         -> (Nothing, Nothing)
+    let (mblocinfo, suffix) = parseLocator locmap (citationSuffix c)
         cit = CitationItem
                { citationItemId = fromMaybe
                    (ItemId $ Pandoc.citationId c)
                    (M.lookup (Pandoc.citationId c) otherIdsMap)
-               , citationItemLabel = mblab
-               , citationItemLocator = mbloc
+               , citationItemLabel = locatorLabel <$> mblocinfo
+               , citationItemLocator = locatorLoc <$> mblocinfo
                , citationItemType = NormalCite
                , citationItemPrefix = case citationPrefix c of
                                         [] -> Nothing
@@ -357,6 +352,7 @@ formatFromExtension fp = case dropWhile (== '.') $ takeExtension fp of
                            "bib"      -> Just Format_biblatex
                            "json"     -> Just Format_json
                            "yaml"     -> Just Format_yaml
+                           "yml"      -> Just Format_yaml
                            _          -> Nothing
 
 
@@ -547,7 +543,7 @@ deNote (Note bs) =
   addParens [] = []
   addParens (Cite (c:cs) ils : zs)
     | citationMode c == AuthorInText
-      = Cite (c:cs) (concatMap (noteAfterComma (needsPeriod zs)) ils) :
+      = Cite (c:cs) (addCommas (needsPeriod zs) ils) :
         addParens zs
     | otherwise
       = Cite (c:cs) (concatMap noteInParens ils) : addParens zs
@@ -568,13 +564,19 @@ deNote (Note bs) =
          removeFinalPeriod ils ++ [Str ")"]
   noteInParens x = [x]
 
-  noteAfterComma needsPer (Span ("",["csl-note"],[]) ils)
-    | not (null ils)
-       = Str "," : Space :
-         if needsPer
-            then ils
-            else removeFinalPeriod ils
-  noteAfterComma _ x = [x]
+  -- We want to add a comma before a CSL note citation, but not
+  -- before the author name, and not before the first citation
+  -- if it doesn't begin with an author name.
+  addCommas = addCommas' True -- boolean == "at beginning"
+
+  addCommas' _ _ [] = []
+  addCommas' atBeginning needsPer
+    (Span ("",["csl-note"],[]) ils : rest)
+      | not (null ils)
+       = (if atBeginning then id else ([Str "," , Space] ++)) $
+         (if needsPer then ils else removeFinalPeriod ils) ++
+         addCommas' False needsPer rest
+  addCommas' _ needsPer (il : rest) = il : addCommas' False needsPer rest
 
 deNote x = x
 

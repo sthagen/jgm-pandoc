@@ -3,7 +3,7 @@ pandoc=$(shell find dist -name pandoc -type f -exec ls -t {} \; | head -1)
 SOURCEFILES?=$(shell git ls-tree -r master --name-only | grep "\.hs$$")
 BRANCH?=master
 ARCH=$(shell uname -m)
-DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:8.10.4
+DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:8.10.7
 COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
 LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
@@ -42,6 +42,21 @@ ghci:
 
 haddock:
 	stack haddock
+
+check: check-cabal checkdocs
+	cabal check # check cabal file
+	cabal outdated # check cabal dependencies
+	stack-lint-extra-deps # check that stack.yaml dependencies are up to date
+	! grep 'git:' stack.yaml # use only released versions
+	! grep 'git:' cabal.project # use only released versions
+
+check-cabal: git-files.txt sdist-files.txt
+	@echo "Checking to see if all committed test/data files are in sdist."
+	diff -u $^
+
+checkdocs:
+	@echo "Checking for tabs in manual."
+	! grep -q -n -e "\t" MANUAL.txt changelog.md
 
 # Note:  to accept current results of golden tests,
 # make test TESTARGS='--accept'
@@ -82,10 +97,6 @@ dist: man/pandoc.1
 	cd pandoc-${version}
 	stack setup && stack test && cd .. && rm -rf "pandoc-${version}"
 
-check: checkdocs check-cabal
-
-checkdocs:
-	! grep -q -n -e "\t" MANUAL.txt changelog.md
 
 debpkg:
 	docker run -v `pwd`:/mnt \
@@ -135,14 +146,10 @@ update-website:
 clean:
 	stack clean
 
-check-cabal: git-files.txt sdist-files.txt
-	echo "Checking to see if all committed test/data files are in sdist."
-	diff -u $^
-
 sdist-files.txt: .FORCE
 	cabal sdist --list-only | sed 's/\.\///' | grep '^\(test\|data\)\/' | sort > $@
 
 git-files.txt: .FORCE
 	git ls-tree -r --name-only HEAD | grep '^\(test\|data\)\/' | sort > $@
 
-.PHONY: .FORCE deps quick full haddock install clean test bench changes_github dist prof download_stats reformat lint weigh doc/lua-filters.md pandoc-templates trypandoc update-website debpkg checkdocs ghcid ghci fix_spacing hlint check check-cabal
+.PHONY: .FORCE deps quick full haddock install clean test bench changes_github dist prof download_stats reformat lint weigh doc/lua-filters.md pandoc-templates trypandoc update-website debpkg checkdocs ghcid ghci fix_spacing hlint check check-cabal check

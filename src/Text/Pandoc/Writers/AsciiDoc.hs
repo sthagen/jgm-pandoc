@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.AsciiDoc
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -454,7 +454,7 @@ inlineListToAsciiDoc opts lst = do
                                    _           -> False
        isSpacy Start (Str xs)
          | Just (c, _) <- T.uncons xs = isPunctuation c || isSpace c
-       isSpacy _ _ = False
+       isSpacy _ _ = True
 
 setIntraword :: PandocMonad m => Bool -> ADW m ()
 setIntraword b = modify $ \st -> st{ intraword = b }

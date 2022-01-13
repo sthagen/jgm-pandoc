@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts    #-}
 {- |
    Module      : Text.Pandoc.App.CommandLineOptions
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -842,20 +842,23 @@ options =
                            case arg of
                              Nothing  -> extensionsFromList extList
                              Just fmt -> getAllExtensions $ T.pack fmt
-                     let defExts =
-                           case arg of
-                             Nothing   -> getDefaultExtensions
-                                           "markdown"
-                             Just fmt  -> getDefaultExtensions $ T.pack fmt
-                     let showExt x =
-                           (if extensionEnabled x defExts
-                               then '+'
-                               else if extensionEnabled x allExts
-                                       then '-'
-                                       else ' ') : drop 4 (show x)
-                     mapM_ (UTF8.hPutStrLn stdout . T.pack . showExt)
-                       [ex | ex <- extList, extensionEnabled ex allExts]
-                     exitSuccess )
+                     let formatName = maybe "markdown" T.pack arg
+                     if formatName `notElem`
+                         (map fst (readers :: [(Text, Reader PandocPure)]) ++
+                          map fst (writers :: [(Text, Writer PandocPure)]))
+                        then E.throwIO $ PandocOptionError $ formatName <>
+                               " is not a recognized reader or writer format"
+                        else do
+                          let defExts = getDefaultExtensions formatName
+                          let showExt x =
+                               (if extensionEnabled x defExts
+                                   then '+'
+                                   else if extensionEnabled x allExts
+                                           then '-'
+                                           else ' ') : drop 4 (show x)
+                          mapM_ (UTF8.hPutStrLn stdout . T.pack . showExt)
+                             [ex | ex <- extList, extensionEnabled ex allExts]
+                          exitSuccess )
                   "FORMAT")
                  ""
 
@@ -973,7 +976,7 @@ usageMessage programName = usageInfo (programName ++ " [OPTIONS] [FILES]")
 
 copyrightMessage :: String
 copyrightMessage = intercalate "\n" [
- "Copyright (C) 2006-2021 John MacFarlane. Web:  https://pandoc.org",
+ "Copyright (C) 2006-2022 John MacFarlane. Web:  https://pandoc.org",
  "This is free software; see the source for copying conditions. There is no",
  "warranty, not even for merchantability or fitness for a particular purpose." ]
 

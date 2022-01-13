@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Readers.DocBook
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -843,7 +843,7 @@ parseBlock (Elem e) =
         "answer" -> addToStart (strong (str "A:") <> str " ") <$> getBlocks e
         "abstract" -> blockQuote <$> getBlocks e
         "calloutlist" -> bulletList <$> callouts
-        "itemizedlist" -> bulletList <$> listitems
+        "itemizedlist" -> bulletList . handleCompact <$> listitems
         "orderedlist" -> do
           let listStyle = case attrValue "numeration" e of
                                "arabic"     -> Decimal
@@ -855,7 +855,7 @@ parseBlock (Elem e) =
           let start = fromMaybe 1 $
                       filterElement (named "listitem") e
                        >>= safeRead . attrValue "override"
-          orderedListWith (start,listStyle,DefaultDelim)
+          orderedListWith (start,listStyle,DefaultDelim) . handleCompact
             <$> listitems
         "variablelist" -> definitionList <$> deflistitems
         "procedure" -> bulletList <$> steps
@@ -902,6 +902,14 @@ parseBlock (Elem e) =
                          else qn
            lift $ report $ IgnoredElement name
            return mempty
+
+         compactSpacing = case attrValue "spacing" e of
+                            "compact" -> True
+                            _         -> False
+
+         handleCompact = if compactSpacing
+                            then map (fmap paraToPlain)
+                            else id
 
          codeBlockWithLang = do
            let classes' = case attrValue "language" e of
@@ -1007,13 +1015,12 @@ parseBlock (Elem e) =
            b <- getBlocks e
            modify $ \st -> st{ dbSectionLevel = n - 1 }
            return $ headerWith (elId, classes, maybeToList titleabbrevElAsAttr++attrs) n' headerText <> b
-         titleabbrevElAsAttr = do
-           txt <- case filterChild (named "titleabbrev") e `mplus`
-                            (filterChild (named "info") e >>=
-                                filterChild (named "titleabbrev")) of
-                            Just t  -> Just ("titleabbrev", strContentRecursive t)
-                            Nothing -> Nothing
-           return txt
+         titleabbrevElAsAttr =
+           case filterChild (named "titleabbrev") e `mplus`
+                (filterChild (named "info") e >>=
+                 filterChild (named "titleabbrev")) of
+             Just t  -> Just ("titleabbrev", strContentRecursive t)
+             Nothing -> Nothing
          lineItems = mapM getInlines $ filterChildren (named "line") e
          -- | Admonitions are parsed into a div. Following other Docbook tools that output HTML,
          -- we parse the optional title as a div with the @title@ class, and give the
@@ -1234,7 +1241,9 @@ parseInline (Elem e) =
            let classes' = case attrValue "language" e of
                                "" -> []
                                l  -> [l]
-           return $ codeWith (attrValue "id" e,classes',[]) $ strContentRecursive e
+           return $ codeWith (attrValue "id" e,classes',[]) $
+             T.unwords $ T.words $ strContentRecursive e
+             -- collapse internal spaces/newlines, see #7821
          simpleList = mconcat . intersperse (str "," <> space) <$> mapM getInlines
                          (filterChildren (named "member") e)
          segmentedList = do
@@ -1321,3 +1330,8 @@ showVerbatimCData c = showContent c
 -- | Set the prefix of a name to 'Nothing'
 removePrefix :: QName -> QName
 removePrefix elname = elname { qPrefix = Nothing }
+
+paraToPlain :: Block -> Block
+paraToPlain (Para ils) = Plain ils
+paraToPlain x = x
+

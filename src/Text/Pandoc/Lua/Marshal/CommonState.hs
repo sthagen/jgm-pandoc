@@ -1,15 +1,15 @@
 {-# LANGUAGE OverloadedStrings    #-}
 {- |
-   Module      : Text.Pandoc.Lua.Marshaling.CommonState
-   Copyright   : © 2012-2021 John MacFarlane
-                 © 2017-2021 Albert Krewinkel
+   Module      : Text.Pandoc.Lua.Marshal.CommonState
+   Copyright   : © 2012-2022 John MacFarlane
+                 © 2017-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
    Stability   : alpha
 
 Instances to marshal (push) and unmarshal (peek) the common state.
 -}
-module Text.Pandoc.Lua.Marshaling.CommonState
+module Text.Pandoc.Lua.Marshal.CommonState
   ( typeCommonState
   , peekCommonState
   , pushCommonState
@@ -20,7 +20,7 @@ import HsLua.Marshalling
 import HsLua.Packaging
 import Text.Pandoc.Class (CommonState (..))
 import Text.Pandoc.Logging (LogMessage, showLogMessage)
-import Text.Pandoc.Lua.Marshaling.List (pushPandocList)
+import Text.Pandoc.Lua.Marshal.List (pushPandocList)
 
 -- | Lua type used for the @CommonState@ object.
 typeCommonState :: LuaError e => DocumentedType e CommonState

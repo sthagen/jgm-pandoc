@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {- |
    Module      : Text.Pandoc
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -25,7 +25,6 @@ module Text.Pandoc.Writers
     , writeBibLaTeX
     , writeCommonMark
     , writeConTeXt
-    , writeCustom
     , writeCslJson
     , writeDZSlides
     , writeDocbook4
@@ -51,6 +50,7 @@ module Text.Pandoc.Writers
     , writeLaTeX
     , writeMan
     , writeMarkdown
+    , writeMarkua
     , writeMediaWiki
     , writeMs
     , writeMuse
@@ -92,7 +92,6 @@ import Text.Pandoc.Writers.BibTeX
 import Text.Pandoc.Writers.CommonMark
 import Text.Pandoc.Writers.ConTeXt
 import Text.Pandoc.Writers.CslJson
-import Text.Pandoc.Writers.Custom
 import Text.Pandoc.Writers.Docbook
 import Text.Pandoc.Writers.Docx
 import Text.Pandoc.Writers.DokuWiki
@@ -190,6 +189,7 @@ writers = [
   ,("csljson"      , TextWriter writeCslJson)
   ,("bibtex"       , TextWriter writeBibTeX)
   ,("biblatex"     , TextWriter writeBibLaTeX)
+  ,("markua"       , TextWriter writeMarkua)
   ]
 
 -- | Retrieve writer, extensions based on formatSpec (format+extensions).

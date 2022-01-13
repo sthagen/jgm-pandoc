@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.App.FormatHeuristics
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -54,6 +54,7 @@ formatFromFilePath x =
     ".lhs"      -> Just "markdown+lhs"
     ".ltx"      -> Just "latex"
     ".markdown" -> Just "markdown"
+    ".markua"   -> Just "markua"
     ".mkdn"     -> Just "markdown"
     ".mkd"      -> Just "markdown"
     ".mdwn"     -> Just "markdown"

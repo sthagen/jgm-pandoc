@@ -450,7 +450,6 @@ parPartToInlines' (Field info children) =
     HyperlinkField url -> parPartToInlines' $ ExternalHyperLink url children
     PagerefField fieldAnchor True -> parPartToInlines' $ InternalHyperLink fieldAnchor children
     _ -> smushInlines <$> mapM parPartToInlines' children
-parPartToInlines' NullParPart = return mempty
 
 isAnchorSpan :: Inline -> Bool
 isAnchorSpan (Span (_, ["anchor"], []) _) = True
@@ -527,7 +526,7 @@ splitHeaderRows hasFirstRowFormatting rs = bimap reverse reverse $ fst
 
 -- like trimInlines, but also take out linebreaks
 trimSps :: Inlines -> Inlines
-trimSps (Many ils) = Many $ Seq.dropWhileL isSp $Seq.dropWhileR isSp ils
+trimSps (Many ils) = Many $ Seq.dropWhileL isSp $ Seq.dropWhileR isSp ils
   where isSp Space     = True
         isSp SoftBreak = True
         isSp LineBreak = True

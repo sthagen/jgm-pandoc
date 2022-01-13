@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.MediaWiki
-   Copyright   : Copyright (C) 2008-2021 John MacFarlane
+   Copyright   : Copyright (C) 2008-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -449,10 +449,13 @@ inlineToMediaWiki (Link _ txt (src, _)) = do
   case txt of
      [Str s] | isURI src && escapeURI s == src -> return src
      _  -> return $ if isURI src
-              then "[" <> src <> " " <> label <> "]"
-              else "[[" <> src' <> "|" <> label <> "]]"
-                     -- with leading / it's a link to a help page
-                     where src' = fromMaybe src $ T.stripPrefix "/" src
+       then "[" <> src <> " " <> label <> "]"
+       else
+         if src == label
+           then "[[" <> src' <> "]]"
+           else "[[" <> src' <> "|" <> label <> "]]"
+       -- with leading / it's a link to a help page
+       where src' = fromMaybe src $ T.stripPrefix "/" src
 
 inlineToMediaWiki (Image attr alt (source, tit)) = do
   img  <- imageToMediaWiki attr

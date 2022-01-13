@@ -5,7 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.App
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -60,7 +60,8 @@ import Text.Pandoc.App.CommandLineOptions (parseOptions, parseOptionsFromArgs,
                                            options)
 import Text.Pandoc.App.OutputSettings (OutputSettings (..), optToOutputSettings)
 import Text.Collate.Lang (Lang (..), parseLang)
-import Text.Pandoc.Filter (Filter (JSONFilter, LuaFilter), applyFilters)
+import Text.Pandoc.Filter (Filter (JSONFilter, LuaFilter), Environment (..),
+                           applyFilters)
 import Text.Pandoc.PDF (makePDF)
 import Text.Pandoc.SelfContained (makeSelfContained)
 import Text.Pandoc.Shared (eastAsianLineBreakFilter, stripEmptyParagraphs,
@@ -114,8 +115,6 @@ convertWithOpts opts = do
 
     setInputFiles (fromMaybe ["-"] (optInputFiles opts))
     setOutputFile (optOutputFile opts)
-
-    inputs <- readSources sources
 
     -- assign reader and writer based on options and filenames
     readerName <- case optFrom opts of
@@ -280,6 +279,10 @@ convertWithOpts opts = do
           maybe id (setMeta "citation-abbreviations")
                          (optCitationAbbreviations opts) $ mempty
 
+    let filterEnv = Environment readerOpts writerOptions
+
+    inputs <- readSources sources
+
     doc <- (case reader of
              TextReader r
                | readerNameBase == "json" ->
@@ -305,7 +308,7 @@ convertWithOpts opts = do
               >=> return . adjustMetadata (<> optMetadata opts)
               >=> return . adjustMetadata (<> cslMetadata)
               >=> applyTransforms transforms
-              >=> applyFilters readerOpts filters [T.unpack format]
+              >=> applyFilters filterEnv filters [T.unpack format]
               >=> maybe return extractMedia (optExtractMedia opts)
               )
 

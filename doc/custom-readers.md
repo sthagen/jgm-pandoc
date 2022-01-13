@@ -14,10 +14,10 @@ install any additional software to do this.
 
 [Lua]: https://www.lua.org
 
-A custom writer is a Lua file that defines a function
+A custom reader is a Lua file that defines a function
 called `Reader`, which takes two arguments:
 
-- a string, the raw input to be parsed
+- the raw input to be parsed, as a list of sources
 - optionally, a table of reader options, e.g.
   `{ columns = 62, standalone = true }`.
 
@@ -27,6 +27,16 @@ which is automatically in scope.  (Indeed, all of the utility
 functions that are available for [Lua filters] are available
 in custom readers, too.)
 
+Each source item corresponds to a file or stream passed to pandoc
+containing its text and name. E.g., if a single file `input.txt`
+is passed to pandoc, then the list of sources will contain just a
+single element `s`, where `s.name == 'input.txt'` and `s.text`
+contains the file contents as a string.
+
+The sources list, as well as each of its elements, can be
+converted to a string via the Lua standard library function
+`tostring`.
+
 [Lua filters]: https://pandoc.org/lua-filters.html
 [`pandoc` module]: https://pandoc.org/lua-filters.html#module-pandoc
 
@@ -34,12 +44,20 @@ A minimal example would be
 
 ```lua
 function Reader(input)
-  return pandoc.Pandoc({ pandoc.CodeBlock(input) })
+  return pandoc.Pandoc({ pandoc.CodeBlock(tostring(input)) })
 end
 ```
 
-This just returns a document containing a big code block with
-all of the input.
+This just returns a document containing a big code block with all
+of the input. Or, to create a separate code block for each input
+file, one might write
+
+``` lua
+function Reader(input)
+  return pandoc.Pandoc(input:map(
+    function (s) return pandoc.CodeBlock(s.text) end))
+end
+```
 
 In a nontrivial reader, you'll want to parse the input.
 You can do this using standard Lua library functions
@@ -47,6 +65,13 @@ You can do this using standard Lua library functions
 and fast [lpeg] parsing library, which is automatically in scope.
 You can also use external Lua libraries (for example,
 an XML parser).
+
+A previous pandoc version passed a raw string instead of a list
+of sources to the Reader function. Reader functions that rely on
+this are obsolete, but still supported: Pandoc analyzes any
+script error, detecting when code assumed the old behavior. The
+code is rerun with raw string input in this case, thereby
+ensuring backwards compatibility.
 
 [patterns]: http://lua-users.org/wiki/PatternsTutorial
 [lpeg]: http://www.inf.puc-rio.br/~roberto/lpeg/
@@ -84,7 +109,7 @@ G = P{ "Pandoc",
 }
 
 function Reader(input)
-  return lpeg.match(G, input)
+  return lpeg.match(G, tostring(input))
 end
 ```
 
@@ -208,19 +233,6 @@ local types =
     VIDEO = "graphic"
   }
 
-local function inlines(s)
-  local ils = {}
-  for t in string.gmatch(s, "%S+") do
-    if #ils == 0 then
-      ils = {pandoc.Str(t)}
-    else
-      table.insert(ils, pandoc.Space())
-      table.insert(ils, pandoc.Str(t))
-    end
-  end
-  return pandoc.MetaInlines(ils)
-end
-
 local function clean(refpairs)
   local ref = {}
   for i = 1, #refpairs do
@@ -249,28 +261,28 @@ local function clean(refpairs)
       end
     elseif k == "AU" or k == "A1" or k == "A2" or k == "A3" then
       if ref.author then
-        table.insert(ref.author, inlines(v))
+        table.insert(ref.author, v)
       else
-        ref.author = {inlines(v)}
+        ref.author = {v}
       end
     elseif k == "TI" or k == "T1" or k == "CT" or
             (k == "BT" and ref.type == "book") then
-      ref.title = inlines(v)
+      ref.title = v
     elseif k == "ET" then
-      ref.edition = inlines(v)
+      ref.edition = v
     elseif k == "NV" then
-      ref["number-of-volumes"] = inlines(v)
+      ref["number-of-volumes"] = v
     elseif k == "AB" then
-      ref.abstract = inlines(v)
+      ref.abstract = v
     elseif k == "ED" then
       if ref.editor then
-        table.insert(ref.editor, inlines(v))
+        table.insert(ref.editor, v)
       else
-        ref.editor = {inlines(v)}
+        ref.editor = {v}
       end
     elseif k == "JO" or k == "JF" or k == "T2" or
              (k == "BT" and ref.type ~= "book") then
-      ref["container-title"] = inlines(v)
+      ref["container-title"] = v
     elseif k == "PY" or k == "Y1" then
       ref.issued = v
     elseif k == "IS" then
@@ -290,7 +302,7 @@ function Reader(input, reader_options)
   local refs = {}
   local thisref = {}
   local ids = {}
-  for line in string.gmatch(input, "[^\n]*") do
+  for line in string.gmatch(tostring(input), "[^\n]*") do
     key, val = string.match(line, "([A-Z][A-Z0-9])  %- (.*)")
     if key == "ER" then
       -- clean up fields
@@ -563,7 +575,7 @@ G = P{ "Doc",
 }
 
 function Reader(input, reader_options)
-  return lpeg.match(G, input)
+  return lpeg.match(G, tostring(input))
 end
 ```
 
@@ -597,3 +609,76 @@ links](http://www.wikicreole.org), give the link a
 [different](internal links) name.
 ```
 
+# Example: parsing JSON from an API
+
+This custom reader consumes the JSON output of
+<https://www.reddit.com/r/haskell.json> and produces
+a document containing the current top articles on the
+Haskell subreddit.
+
+It assumes that the `luajson` library is available.  (It can be
+installed using `luarocks install luajson`---but be sure you are
+installing it for Lua 5.3, which is the version packaged with
+pandoc.)
+
+
+```lua
+-- consumes the output of https://www.reddit.com/r/haskell.json
+
+local json = require'json'  -- luajson must be available
+
+local function read_inlines(raw)
+  local doc = pandoc.read(raw, "commonmark")
+  return pandoc.utils.blocks_to_inlines(doc.blocks)
+end
+
+local function read_blocks(raw)
+  local doc = pandoc.read(raw, "commonmark")
+  return doc.blocks
+end
+
+function Reader(input)
+
+  local parsed = json.decode(tostring(input))
+  local blocks = {}
+
+  for _,entry in ipairs(parsed.data.children) do
+    local d = entry.data
+    table.insert(blocks, pandoc.Header(2,
+                  pandoc.Link(read_inlines(d.title), d.url)))
+    for _,block in ipairs(read_blocks(d.selftext)) do
+      table.insert(blocks, block)
+    end
+  end
+
+  return pandoc.Pandoc(blocks)
+
+end
+```
+
+Similar code can be used to consume JSON output from other APIs.
+
+Note that the content of the text fields is markdown, so we
+convert it using `pandoc.read()`.
+
+
+# Example: syntax-highlighted code files
+
+This is a reader that puts the content of each input file into a
+code block, sets the file's extension as the block's class to
+enable code highlighting, and places the filename as a header
+above each code block.
+
+``` lua
+function to_code_block (source)
+  local _, lang = pandoc.path.split_extension(source.name)
+  return pandoc.Div{
+    pandoc.Header(1, source.name == '' and '<stdin>' or source.name),
+    pandoc.CodeBlock(source.text, {class=lang}),
+  }
+end
+
+function Reader (input, opts)
+  return pandoc.Pandoc(input:map(to_code_block))
+end
+```

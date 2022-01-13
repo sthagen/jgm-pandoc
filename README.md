@@ -87,6 +87,9 @@ library. It can convert *from*
 -   `twiki` ([TWiki
     markup](https://twiki.org/cgi-bin/view/TWiki/TextFormattingRules))
 -   `vimwiki` ([Vimwiki](https://vimwiki.github.io))
+-   the path of a custom Lua reader, see [Custom readers and
+    writers](https://pandoc.org/MANUAL.html#custom-readers-and-writers)
+    below
 
 </div>
 
@@ -152,6 +155,7 @@ It can convert *to*
     Extra](https://michelf.ca/projects/php-markdown/extra/))
 -   `markdown_strict` (original unextended
     [Markdown](https://daringfireball.net/projects/markdown/))
+-   `markua` ([Markua](https://leanpub.com/markua/read))
 -   `mediawiki` ([MediaWiki
     markup](https://www.mediawiki.org/wiki/Help:Formatting))
 -   `ms` ([roff ms](https://man.cx/groff_ms(7)))
@@ -188,8 +192,9 @@ It can convert *to*
     markup](https://www.xwiki.org/xwiki/bin/view/Documentation/UserGuide/Features/XWikiSyntax/))
 -   `zimwiki` ([ZimWiki
     markup](https://zim-wiki.org/manual/Help/Wiki_Syntax.html))
--   the path of a custom Lua writer, see [Custom
-    writers](https://pandoc.org/MANUAL.html#custom-writers) below
+-   the path of a custom Lua writer, see [Custom readers and
+    writers](https://pandoc.org/MANUAL.html#custom-readers-and-writers)
+    below
 
 </div>
 
@@ -240,7 +245,7 @@ opening a new issue.
 
 ## License
 
-© 2006-2021 John MacFarlane (jgm@berkeley.edu). Released under the
+© 2006-2022 John MacFarlane (jgm@berkeley.edu). Released under the
 [GPL](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html "GNU General Public License"),
 version 2 or greater. This software carries no warranty of any kind.
 (See COPYRIGHT for full copyright and warranty notices.)

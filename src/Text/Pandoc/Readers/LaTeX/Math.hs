@@ -142,14 +142,15 @@ newtheorem inline = do
 theoremEnvironment :: PandocMonad m
                    => LP m Blocks -> LP m Inlines -> Text -> LP m Blocks
 theoremEnvironment blocks opt name = do
+  resetCaption
   tmap <- sTheoremMap <$> getState
   case M.lookup name tmap of
     Nothing -> mzero
     Just tspec -> do
        optTitle <- option mempty $ (\x -> space <> "(" <> x <> ")") <$> opt
-       mblabel <- option Nothing $ Just . untokenize <$>
-                   try (spaces >> controlSeq "label" >> spaces >> braced)
        bs <- env name blocks
+       mblabel <- sLastLabel <$> getState
+
        number <-
          if theoremNumber tspec
             then do
@@ -169,9 +170,7 @@ theoremEnvironment blocks opt name = do
                  Just ident ->
                    updateState $ \s ->
                      s{ sLabels = M.insert ident
-                         (B.toList $
-                           theoremName tspec <> "\160" <>
-                           str (renderDottedNum num)) (sLabels s) }
+                         (B.toList $ str (renderDottedNum num)) (sLabels s) }
                  Nothing -> return ()
                return $ space <> B.text (renderDottedNum num)
             else return mempty
@@ -181,11 +180,12 @@ theoremEnvironment blocks opt name = do
                          RemarkStyle     -> B.emph
        let title = titleEmph (theoremName tspec <> number)
                       <> optTitle <> "." <> space
-       return $ divWith (fromMaybe "" mblabel, [name], []) $ addTitle title
+       return $ divWith (fromMaybe "" mblabel, [name], [])
+              $ addTitle title
+              $ maybe id removeLabel mblabel
               $ case theoremStyle tspec of
                   PlainStyle -> walk italicize bs
                   _          -> bs
-
 
 
 proof :: PandocMonad m => LP m Blocks -> LP m Inlines -> LP m Blocks

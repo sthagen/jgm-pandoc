@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeApplications  #-}
 {- |
    Module      : Text.Pandoc.Lua.Packages
-   Copyright   : Copyright © 2017-2021 Albert Krewinkel
+   Copyright   : Copyright © 2017-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -17,7 +17,8 @@ module Text.Pandoc.Lua.Packages
 
 import Control.Monad (forM_)
 import Text.Pandoc.Error (PandocError)
-import Text.Pandoc.Lua.PandocLua (PandocLua, liftPandocLua, loadDefaultModule)
+import Text.Pandoc.Lua.Marshal.List (pushListModule)
+import Text.Pandoc.Lua.PandocLua (PandocLua, liftPandocLua)
 
 import qualified HsLua as Lua
 import qualified HsLua.Module.Path as Path
@@ -25,6 +26,7 @@ import qualified HsLua.Module.Text as Text
 import qualified Text.Pandoc.Lua.Module.Pandoc as Pandoc
 import qualified Text.Pandoc.Lua.Module.MediaBag as MediaBag
 import qualified Text.Pandoc.Lua.Module.System as System
+import qualified Text.Pandoc.Lua.Module.Template as Template
 import qualified Text.Pandoc.Lua.Module.Types as Types
 import qualified Text.Pandoc.Lua.Module.Utils as Utils
 
@@ -45,15 +47,16 @@ installPandocPackageSearcher = liftPandocLua $ do
 pandocPackageSearcher :: String -> PandocLua Lua.NumResults
 pandocPackageSearcher pkgName =
   case pkgName of
-    "pandoc"          -> pushWrappedHsFun $ Lua.toHaskellFunction @PandocError Pandoc.pushModule
+    "pandoc"          -> pushModuleLoader Pandoc.documentedModule
     "pandoc.mediabag" -> pushModuleLoader MediaBag.documentedModule
     "pandoc.path"     -> pushModuleLoader Path.documentedModule
     "pandoc.system"   -> pushModuleLoader System.documentedModule
+    "pandoc.template" -> pushModuleLoader Template.documentedModule
     "pandoc.types"    -> pushModuleLoader Types.documentedModule
     "pandoc.utils"    -> pushModuleLoader Utils.documentedModule
     "text"            -> pushModuleLoader Text.documentedModule
     "pandoc.List"     -> pushWrappedHsFun . Lua.toHaskellFunction @PandocError $
-                         loadDefaultModule pkgName
+                         (Lua.NumResults 1 <$ pushListModule @PandocError)
     _                 -> reportPandocSearcherFailure
  where
   pushModuleLoader mdl = liftPandocLua $ do

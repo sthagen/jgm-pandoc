@@ -4,7 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {- |
    Module      : Text.Pandoc.MediaBag
-   Copyright   : Copyright (C) 2014-2015, 2017-2021 John MacFarlane
+   Copyright   : Copyright (C) 2014-2015, 2017-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -80,7 +80,7 @@ insertMedia fp mbMime contents (MediaBag mediamap) =
         uri = parseURI fp
         newpath = if isRelative fp
                        && isNothing uri
-                       && ".." `notElem` splitPath fp
+                       && ".." `notElem` splitDirectories fp
                      then T.unpack fp'
                      else showDigest (sha1 contents) <> "." <> ext
         fallback = case takeExtension fp of

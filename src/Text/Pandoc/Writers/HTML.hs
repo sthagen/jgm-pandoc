@@ -6,7 +6,7 @@
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.HTML
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -39,10 +39,11 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import Network.URI (URI (..), parseURIReference)
 import Numeric (showHex)
-import Text.DocLayout (render, literal)
+import Text.DocLayout (render, literal, Doc)
 import Text.Blaze.Internal (MarkupM (Empty), customLeaf, customParent)
 import Text.DocTemplates (FromContext (lookupContext), Context (..))
 import Text.Blaze.Html hiding (contents)
+import Text.Pandoc.Translations (Term(Abstract))
 import Text.Pandoc.Definition
 import Text.Pandoc.Highlighting (formatHtmlBlock, formatHtmlInline, highlight,
                                  styleToCss)
@@ -65,11 +66,13 @@ import System.FilePath (takeBaseName)
 import Text.Blaze.Html.Renderer.Text (renderHtml)
 import qualified Text.Blaze.XHtml1.Transitional as H
 import qualified Text.Blaze.XHtml1.Transitional.Attributes as A
-import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
+import Text.Pandoc.Class.PandocMonad (PandocMonad, report,
+                                      translateTerm)
 import Text.Pandoc.Class.PandocPure (runPure)
 import Text.Pandoc.Error
 import Text.Pandoc.Logging
 import Text.Pandoc.MIME (mediaCategory)
+import Text.Pandoc.Writers.Blaze (layoutMarkup)
 import Text.TeXMath
 import Text.XML.Light (elChildren, unode, unqual)
 import qualified Text.XML.Light as XML
@@ -131,10 +134,8 @@ needsVariationSelector '↔' = True
 needsVariationSelector _   = False
 
 -- | Hard linebreak.
-nl :: WriterOptions -> Html
-nl opts = if writerWrapText opts == WrapNone
-             then mempty
-             else preEscapedString "\n"
+nl :: Html
+nl = preEscapedString "\n"
 
 -- | Convert Pandoc document to Html 5 string.
 writeHtml5String :: PandocMonad m => WriterOptions -> Pandoc -> m Text
@@ -160,7 +161,8 @@ writeHtmlStringForEPUB :: PandocMonad m
                        -> m Text
 writeHtmlStringForEPUB version o = writeHtmlString'
                       defaultWriterState{ stHtml5 = version == EPUB3,
-                                          stEPUBVersion = Just version } o
+                                          stEPUBVersion = Just version }
+                      o{ writerWrapText = WrapNone }
 
 -- | Convert Pandoc document to Reveal JS HTML slide show.
 writeRevealJs :: PandocMonad m
@@ -207,17 +209,23 @@ writeHtmlString' :: PandocMonad m
                  => WriterState -> WriterOptions -> Pandoc -> m Text
 writeHtmlString' st opts d = do
   (body, context) <- evalStateT (pandocToHtml opts d) st
+  let colwidth = case writerWrapText opts of
+                    WrapAuto -> Just (writerColumns opts)
+                    _ -> Nothing
   (if writerPreferAscii opts
       then toEntities
       else id) <$>
     case writerTemplate opts of
-       Nothing -> return $ renderHtml' body
+       Nothing -> return $
+         case colwidth of
+           Nothing -> renderHtml' body  -- optimization, skip layout
+           Just cols -> render (Just cols) $ layoutMarkup body
        Just tpl -> do
          -- warn if empty lang
          when (isNothing (getField "lang" context :: Maybe Text)) $
            report NoLangSpecified
          -- check for empty pagetitle
-         context' <-
+         (context' :: Context Text) <-
             case getField "pagetitle" context of
                  Just (s :: Text) | not (T.null s) -> return context
                  _ -> do
@@ -228,9 +236,9 @@ writeHtmlString' st opts d = do
                            Just []    -> "Untitled"
                            Just (x:_) -> takeBaseName $ T.unpack x
                    report $ NoTitleElement fallback
-                   return $ resetField "pagetitle" fallback context
-         return $ render Nothing $ renderTemplate tpl
-             (defField "body" (renderHtml' body) context')
+                   return $ resetField "pagetitle" (literal fallback) context
+         return $ render colwidth $ renderTemplate tpl
+             (defField "body" (layoutMarkup body) context')
 
 writeHtml' :: PandocMonad m => WriterState -> WriterOptions -> Pandoc -> m Html
 writeHtml' st opts d =
@@ -252,22 +260,23 @@ pandocToHtml opts (Pandoc meta blocks) = do
   let slideLevel = fromMaybe (getSlideLevel blocks) $ writerSlideLevel opts
   modify $ \st -> st{ stSlideLevel = slideLevel }
   metadata <- metaToContext opts
-              (fmap (literal . renderHtml') . blockListToHtml opts)
-              (fmap (literal . renderHtml') . inlineListToHtml opts)
+              (fmap layoutMarkup . blockListToHtml opts)
+              (fmap layoutMarkup . inlineListToHtml opts)
               meta
   let stringifyHTML = escapeStringForXML . stringify
-  let authsMeta = map stringifyHTML $ docAuthors meta
+  let authsMeta = map (literal . stringifyHTML) $ docAuthors meta
   let dateMeta  = stringifyHTML $ docDate meta
-  let descriptionMeta = escapeStringForXML $
+  let descriptionMeta = literal $ escapeStringForXML $
                           lookupMetaString "description" meta
   slideVariant <- gets stSlideVariant
+  abstractTitle <- translateTerm Abstract
   let sects = adjustNumbers opts $
               makeSections (writerNumberSections opts) Nothing $
               if slideVariant == NoSlides
                  then blocks
                  else prepSlides slideLevel blocks
   toc <- if writerTableOfContents opts && slideVariant /= S5Slides
-            then fmap renderHtml' <$> tableOfContents opts sects
+            then fmap layoutMarkup <$> tableOfContents opts sects
             else return Nothing
   blocks' <- blockListToHtml opts sects
   notes <- do
@@ -276,12 +285,12 @@ pandocToHtml opts (Pandoc meta blocks) = do
     if null (stNotes st)
       then return mempty
       else do
-        notes <- footnoteSection opts EndOfDocument (stEmittedNotes st + 1) (reverse (stNotes st))
+        notes <- footnoteSection EndOfDocument (stEmittedNotes st + 1) (reverse (stNotes st))
         modify (\st' -> st'{ stNotes = mempty, stEmittedNotes = stEmittedNotes st' + length (stNotes st') })
         return notes
   st <- get
   let thebody = blocks' >> notes
-  let math = case writerHTMLMathMethod opts of
+  let math = layoutMarkup $ case writerHTMLMathMethod opts of
         MathJax url
           | slideVariant /= RevealJsSlides ->
           -- mathjax is handled via a special plugin in revealjs
@@ -294,11 +303,12 @@ pandocToHtml opts (Pandoc meta blocks) = do
                             _ -> mempty
         KaTeX url -> do
           H.script !
+            A.defer mempty !
             A.src (toValue $ url <> "katex.min.js") $ mempty
-          nl opts
+          nl
           let katexFlushLeft =
                 case lookupContext "classoption" metadata of
-                  Just clsops | "fleqn" `elem` (clsops :: [Text]) -> "true"
+                  Just clsops | "fleqn" `elem` (clsops :: [Doc Text]) -> "true"
                   _ -> "false"
           H.script $ text $ T.unlines [
               "document.addEventListener(\"DOMContentLoaded\", function () {"
@@ -315,7 +325,7 @@ pandocToHtml opts (Pandoc meta blocks) = do
             , "   });"
             , "}}});"
             ]
-          nl opts
+          nl
           H.link ! A.rel "stylesheet" !
             A.href (toValue $ url <> "katex.min.css")
 
@@ -324,15 +334,16 @@ pandocToHtml opts (Pandoc meta blocks) = do
                     Just s | not (stHtml5 st) ->
                       H.script ! A.type_ "text/javascript"
                         $ preEscapedString
-                          ("/*<![CDATA[*/\n" ++ T.unpack s ++
+                          ("/*<![CDATA[*/\n" <> T.unpack s <>
                           "/*]]>*/\n")
                           | otherwise -> mempty
                     Nothing -> mempty
   let mCss :: Maybe [Text] = lookupContext "css" metadata
-  let context =   (if stHighlighting st
+  let context :: Context Text
+      context =   (if stHighlighting st
                       then case writerHighlightStyle opts of
                                 Just sty -> defField "highlighting-css"
-                                              (T.pack $ styleToCss sty)
+                                            (literal $ T.pack $ styleToCss sty)
                                 Nothing  -> id
                       else id) .
                   (if stCsl st
@@ -342,15 +353,16 @@ pandocToHtml opts (Pandoc meta blocks) = do
                               Just 0  -> id
                               Just n  ->
                                 defField "csl-entry-spacing"
-                                  (tshow n <> "em"))
+                                  (literal $ tshow n <> "em"))
                       else id) .
                   (if stMath st
-                      then defField "math" (renderHtml' math)
+                      then defField "math" math
                       else id) .
+                  defField "abstract-title" abstractTitle .
                   (case writerHTMLMathMethod opts of
                         MathJax u -> defField "mathjax" True .
                                      defField "mathjaxurl"
-                                       (T.takeWhile (/='?') u)
+                                       (literal $ T.takeWhile (/='?') u)
                         _         -> defField "mathjax" False) .
                   (case writerHTMLMathMethod opts of
                         PlainMath -> defField "displaymath-css" True
@@ -361,11 +373,12 @@ pandocToHtml opts (Pandoc meta blocks) = do
                            -- template can't distinguish False/undefined
                          defField "controls" True .
                          defField "controlsTutorial" True .
-                         defField "controlsLayout" ("bottom-right" :: Text) .
-                         defField "controlsBackArrows" ("faded" :: Text) .
+                         defField "controlsLayout"
+                           ("bottom-right" :: Doc Text) .
+                         defField "controlsBackArrows" ("faded" :: Doc Text) .
                          defField "progress" True .
                          defField "slideNumber" False .
-                         defField "showSlideNumber" ("all" :: Text) .
+                         defField "showSlideNumber" ("all" :: Doc Text) .
                          defField "hashOneBasedIndex" False .
                          defField "hash" True .
                          defField "respondToHashChanges" True .
@@ -377,7 +390,7 @@ pandocToHtml opts (Pandoc meta blocks) = do
                          defField "touch" True .
                          defField "loop" False .
                          defField "rtl" False .
-                         defField "navigationMode" ("default" :: Text) .
+                         defField "navigationMode" ("default" :: Doc Text) .
                          defField "shuffle" False .
                          defField "fragments" True .
                          defField "fragmentInURL" True .
@@ -385,22 +398,22 @@ pandocToHtml opts (Pandoc meta blocks) = do
                          defField "help" True .
                          defField "pause" True .
                          defField "showNotes" False .
-                         defField "autoPlayMedia" ("null" :: Text) .
-                         defField "preloadIframes" ("null" :: Text) .
-                         defField "autoSlide" ("0" :: Text) .
+                         defField "autoPlayMedia" ("null" :: Doc Text) .
+                         defField "preloadIframes" ("null" :: Doc Text) .
+                         defField "autoSlide" ("0" :: Doc Text) .
                          defField "autoSlideStoppable" True .
-                         defField "autoSlideMethod" ("null" :: Text) .
-                         defField "defaultTiming" ("null" :: Text) .
+                         defField "autoSlideMethod" ("null" :: Doc Text) .
+                         defField "defaultTiming" ("null" :: Doc Text) .
                          defField "mouseWheel" False .
-                         defField "display" ("block" :: Text) .
+                         defField "display" ("block" :: Doc Text) .
                          defField "hideInactiveCursor" True .
-                         defField "hideCursorTime" ("5000" :: Text) .
+                         defField "hideCursorTime" ("5000" :: Doc Text) .
                          defField "previewLinks" False .
-                         defField "transition" ("slide" :: Text) .
-                         defField "transitionSpeed" ("default" :: Text) .
-                         defField "backgroundTransition" ("fade" :: Text) .
-                         defField "viewDistance" ("3" :: Text) .
-                         defField "mobileViewDistance" ("2" :: Text)
+                         defField "transition" ("slide" :: Doc Text) .
+                         defField "transitionSpeed" ("default" :: Doc Text) .
+                         defField "backgroundTransition" ("fade" :: Doc Text) .
+                         defField "viewDistance" ("3" :: Doc Text) .
+                         defField "mobileViewDistance" ("2" :: Doc Text)
                       else id) .
                   defField "document-css" (isNothing mCss && slideVariant == NoSlides) .
                   defField "quotes" (stQuotes st) .
@@ -410,18 +423,18 @@ pandocToHtml opts (Pandoc meta blocks) = do
                   maybe id (defField "toc") toc .
                   maybe id (defField "table-of-contents") toc .
                   defField "author-meta" authsMeta .
-                  maybe id (defField "date-meta")
+                  maybe id (defField "date-meta" . literal)
                     (normalizeDate dateMeta) .
                   defField "description-meta" descriptionMeta .
                   defField "pagetitle"
-                      (stringifyHTML . docTitle $ meta) .
-                  defField "idprefix" (writerIdentifierPrefix opts) .
+                      (literal . stringifyHTML . docTitle $ meta) .
+                  defField "idprefix" (literal $ writerIdentifierPrefix opts) .
                   -- these should maybe be set in pandoc.hs
                   defField "slidy-url"
-                    ("https://www.w3.org/Talks/Tools/Slidy2" :: Text) .
-                  defField "slideous-url" ("slideous" :: Text) .
-                  defField "revealjs-url" ("https://unpkg.com/reveal.js@^4/" :: Text) $
-                  defField "s5-url" ("s5/default" :: Text) .
+                    ("https://www.w3.org/Talks/Tools/Slidy2" :: Doc Text) .
+                  defField "slideous-url" ("slideous" :: Doc Text) .
+                  defField "revealjs-url" ("https://unpkg.com/reveal.js@^4/" :: Doc Text) $
+                  defField "s5-url" ("s5/default" :: Doc Text) .
                   defField "html5" (stHtml5 st) $
                   metadata
   return (thebody, context)
@@ -449,15 +462,15 @@ toList listop opts items = do
 
 unordList :: PandocMonad m
           => WriterOptions -> [Html] -> StateT WriterState m Html
-unordList opts = toList H.ul opts . toListItems opts
+unordList opts = toList H.ul opts . toListItems
 
 ordList :: PandocMonad m
         => WriterOptions -> [Html] -> StateT WriterState m Html
-ordList opts = toList H.ol opts . toListItems opts
+ordList opts = toList H.ol opts . toListItems
 
 defList :: PandocMonad m
         => WriterOptions -> [Html] -> StateT WriterState m Html
-defList opts items = toList H.dl opts (items ++ [nl opts])
+defList opts items = toList H.dl opts (items ++ [nl])
 
 isTaskListItem :: [Block] -> Bool
 isTaskListItem (Plain (Str "☐":Space:_):_) = True
@@ -479,7 +492,7 @@ listItemToHtml opts bls
       let checkbox  = if checked
                       then checkbox' ! A.checked ""
                       else checkbox'
-          checkbox' = H.input ! A.type_ "checkbox" ! A.disabled "" >> nl opts
+          checkbox' = H.input ! A.type_ "checkbox" ! A.disabled "" >> nl
       isContents <- inlineListToHtml opts is
       bsContents <- blockListToHtml opts bs
       return $ constr (checkbox >> isContents) >> bsContents
@@ -503,11 +516,13 @@ tableOfContents opts sects = do
 -- | Convert list of Note blocks to a footnote <div>.
 -- Assumes notes are sorted.
 footnoteSection ::
-  PandocMonad m => WriterOptions -> ReferenceLocation -> Int -> [Html] -> StateT WriterState m Html
-footnoteSection opts refLocation startCounter notes = do
+  PandocMonad m => ReferenceLocation -> Int -> [Html] -> StateT WriterState m Html
+footnoteSection refLocation startCounter notes = do
   html5 <- gets stHtml5
   slideVariant <- gets stSlideVariant
-  let hrtag = if refLocation /= EndOfBlock then (if html5 then H5.hr else H.hr) else mempty
+  let hrtag = if refLocation /= EndOfBlock
+                 then (if html5 then H5.hr else H.hr) <> nl
+                 else mempty
   let additionalClassName = case refLocation of
         EndOfBlock -> "footnotes-end-of-block"
         EndOfDocument -> "footnotes-end-of-document"
@@ -528,17 +543,17 @@ footnoteSection opts refLocation startCounter notes = do
     if null notes
        then mempty
        else do
-         nl opts
+         nl
          container $ do
-           nl opts
+           nl
            hrtag
-           nl opts
            -- Keep the previous output exactly the same if we don't
            -- have multiple notes sections
            if startCounter == 1
-             then H.ol $ mconcat notes >> nl opts
-             else H.ol ! A.start (fromString (show startCounter)) $ mconcat notes >> nl opts
-           nl opts
+             then H.ol $ mconcat notes >> nl
+             else H.ol ! A.start (fromString (show startCounter)) $
+                         mconcat notes >> nl
+           nl
 
 -- | Parse a mailto link; return Just (name, domain) or Nothing.
 parseMailto :: Text -> Maybe (Text, Text)
@@ -705,12 +720,11 @@ figure opts attr@(_, _, attrList) txt (s,tit) = do
   img <- inlineToHtml opts (Image attr alt (s,tit))
   capt <- if null txt
              then return mempty
-             else tocapt `fmap` inlineListToHtml opts txt
+             else (nl <>) . tocapt <$> inlineListToHtml opts txt
+  let inner = mconcat [nl, img, capt, nl]
   return $ if html5
-              then H5.figure $ mconcat
-                    [nl opts, img, capt, nl opts]
-              else H.div ! A.class_ "figure" $ mconcat
-                    [nl opts, img, nl opts, capt, nl opts]
+              then H5.figure inner
+              else H.div ! A.class_ "figure" $ inner
 
 
 adjustNumbers :: WriterOptions -> [Block] -> [Block]
@@ -734,7 +748,7 @@ blockToHtmlInner :: PandocMonad m => WriterOptions -> Block -> StateT WriterStat
 blockToHtmlInner _ Null = return mempty
 blockToHtmlInner opts (Plain lst) = inlineListToHtml opts lst
 blockToHtmlInner opts (Para [Image attr@(_,classes,_) txt (src,tit)])
-  | "stretch" `elem` classes = do
+  | "r-stretch" `elem` classes = do
   slideVariant <- gets stSlideVariant
   case slideVariant of
        RevealJsSlides ->
@@ -806,37 +820,39 @@ blockToHtmlInner opts (Div (ident, "section":dclasses, dkvs)
                   ["section" | (slide || writerSectionDivs opts) &&
                                not html5 ] ++
                   ["level" <> tshow level | slide || writerSectionDivs opts ]
-                  <> dclasses
+                  <> [d | d <- dclasses,
+                               slideVariant /= RevealJsSlides ||
+                               d /= "r-fit-text"] -- see #5965
   let attr = (ident, classes', dkvs)
   if titleSlide
      then do
        t <- addAttrs opts attr $
-             secttag $ nl opts <> header' <> nl opts <> titleContents <> nl opts
+             secttag $ nl <> header' <> nl <> titleContents <> nl
        -- ensure 2D nesting for revealjs, but only for one level;
        -- revealjs doesn't like more than one level of nesting
        return $
          if slideVariant == RevealJsSlides && not inSection &&
               not (null innerSecs)
-            then H5.section (nl opts <> t <> nl opts <> innerContents)
-            else t <> nl opts <> if null innerSecs
+            then H5.section (nl <> t <> nl <> innerContents)
+            else t <> nl <> if null innerSecs
                                     then mempty
-                                    else innerContents <> nl opts
+                                    else innerContents <> nl
      else if writerSectionDivs opts || slide ||
               (hident /= ident && not (T.null hident || T.null ident)) ||
               (hclasses /= dclasses) || (hkvs /= dkvs)
           then addAttrs opts attr
                $ secttag
-               $ nl opts <> header' <> nl opts <>
+               $ nl <> header' <> nl <>
                  if null innerSecs
                     then mempty
-                    else innerContents <> nl opts
+                    else innerContents <> nl
           else do
             let attr' = (ident, classes' \\ hclasses, dkvs \\ hkvs)
             t <- addAttrs opts attr' header'
             return $ t <>
                      if null innerSecs
                         then mempty
-                        else nl opts <> innerContents
+                        else nl <> innerContents
 blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
   html5 <- gets stHtml5
   slideVariant <- gets stSlideVariant
@@ -874,7 +890,7 @@ blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
                       -- off widths! see #4028
                       mconcat <$> mapM (blockToHtml opts) bs'
                  else blockListToHtml opts' bs'
-  let contents' = nl opts >> contents >> nl opts
+  let contents' = nl >> contents >> nl
   let (divtag, classes'') = if html5 && "section" `elem` classes'
                             then (H5.section, filter (/= "section") classes')
                             else (H.div, classes')
@@ -955,10 +971,10 @@ blockToHtmlInner opts (BlockQuote blocks) = do
                                   (DefinitionList lst)
              _                 -> do contents <- blockListToHtml opts blocks
                                      return $ H.blockquote
-                                            $ nl opts >> contents >> nl opts
+                                            $ nl >> contents >> nl
      else do
        contents <- blockListToHtml opts blocks
-       return $ H.blockquote $ nl opts >> contents >> nl opts
+       return $ H.blockquote $ nl >> contents >> nl
 blockToHtmlInner opts (Header level (ident,classes,kvs) lst) = do
   contents <- inlineListToHtml opts lst
   let secnum = fromMaybe mempty $ lookup "number" kvs
@@ -1013,10 +1029,10 @@ blockToHtmlInner opts (OrderedList (startnum, numstyle, _) lst) = do
 blockToHtmlInner opts (DefinitionList lst) = do
   contents <- mapM (\(term, defs) ->
                   do term' <- liftM H.dt $ inlineListToHtml opts term
-                     defs' <- mapM (liftM (\x -> H.dd (x >> nl opts)) .
+                     defs' <- mapM (liftM (\x -> H.dd (nl >> x >> nl)) .
                                     blockListToHtml opts) defs
-                     return $ mconcat $ nl opts : term' : nl opts :
-                                        intersperse (nl opts) defs') lst
+                     return $ mconcat $ nl : term' : nl :
+                                        intersperse (nl) defs') lst
   defList opts contents
 blockToHtmlInner opts (Table attr caption colspecs thead tbody tfoot) =
   tableToHtml opts (Ann.toTable attr caption colspecs thead tbody tfoot)
@@ -1043,7 +1059,7 @@ blockToHtml opts block = do
     then do
       notes <- if null (stNotes st)
         then return mempty
-        else footnoteSection opts (writerReferenceLocation opts) (stEmittedNotes st + 1) (reverse (stNotes st))
+        else footnoteSection (writerReferenceLocation opts) (stEmittedNotes st + 1) (reverse (stNotes st))
       modify (\st' -> st'{ stNotes = mempty, stEmittedNotes = stEmittedNotes st' + length (stNotes st') })
       return (doc <> notes)
     else return doc
@@ -1062,10 +1078,10 @@ tableToHtml opts (Ann.Table attr caption colspecs thead tbodies tfoot) = do
       cs <- blockListToHtml opts longCapt
       return $ do
         H.caption cs
-        nl opts
-  coltags <- colSpecListToHtml opts colspecs
+        nl
+  coltags <- colSpecListToHtml colspecs
   head' <- tableHeadToHtml opts thead
-  bodies <- intersperse (nl opts) <$> mapM (tableBodyToHtml opts) tbodies
+  bodies <- intersperse (nl) <$> mapM (tableBodyToHtml opts) tbodies
   foot' <- tableFootToHtml opts tfoot
   let (ident,classes,kvs) = attr
   -- When widths of columns are < 100%, we need to set width for the whole
@@ -1082,13 +1098,13 @@ tableToHtml opts (Ann.Table attr caption colspecs thead tbodies tfoot) = do
                          <> "%;"):kvs)
                 _ -> attr
   addAttrs opts attr' $ H.table $ do
-    nl opts
+    nl
     captionDoc
     coltags
     head'
     mconcat bodies
     foot'
-    nl opts
+    nl
 
 tableBodyToHtml :: PandocMonad m
                 => WriterOptions
@@ -1135,7 +1151,7 @@ tablePartToHtml opts tblpart attr rows =
     tablePartElement <- addAttrs opts attr $ tag' contents
     return $ do
       tablePartElement
-      nl opts
+      nl
   where
     isEmptyRow (Ann.HeaderRow _attr _rownum cells) = all isEmptyCell cells
     isEmptyCell (Ann.Cell _colspecs _colnum cell) =
@@ -1176,14 +1192,13 @@ rowListToHtml :: PandocMonad m
               -> [TableRow]
               -> StateT WriterState m Html
 rowListToHtml opts rows =
-  (\x -> nl opts *> mconcat x) <$>
+  (\x -> nl *> mconcat x) <$>
      mapM (tableRowToHtml opts) rows
 
 colSpecListToHtml :: PandocMonad m
-                  => WriterOptions
-                  -> [ColSpec]
+                  => [ColSpec]
                   -> StateT WriterState m Html
-colSpecListToHtml opts colspecs = do
+colSpecListToHtml colspecs = do
   html5 <- gets stHtml5
   let hasDefaultWidth (_, ColWidthDefault) = True
       hasDefaultWidth _                    = False
@@ -1197,16 +1212,16 @@ colSpecListToHtml opts colspecs = do
           ColWidth w -> if html5
                         then A.style (toValue $ "width: " <> percent w)
                         else A.width (toValue $ percent w)
-        nl opts
+        nl
 
   return $
     if all hasDefaultWidth colspecs
     then mempty
     else do
       H.colgroup $ do
-        nl opts
+        nl
         mapM_ (col . snd) colspecs
-      nl opts
+      nl
 
 tableRowToHtml :: PandocMonad m
                => WriterOptions
@@ -1225,12 +1240,12 @@ tableRowToHtml opts (TableRow tblpart attr rownum rowhead rowbody) = do
   headcells <- mapM (cellToHtml opts HeaderCell) rowhead
   bodycells <- mapM (cellToHtml opts celltype) rowbody
   rowHtml <- addAttrs opts attr' $ H.tr $ do
-    nl opts
+    nl
     mconcat headcells
     mconcat bodycells
   return $ do
     rowHtml
-    nl opts
+    nl
 
 alignmentToString :: Alignment -> Maybe Text
 alignmentToString = \case
@@ -1288,18 +1303,18 @@ tableCellToHtml opts ctype colAlign (Cell attr align rowspan colspan item) = do
               : otherAttribs
   return $ do
     tag' ! attribs $ contents
-    nl opts
+    nl
 
-toListItems :: WriterOptions -> [Html] -> [Html]
-toListItems opts items = map (toListItem opts) items ++ [nl opts]
+toListItems :: [Html] -> [Html]
+toListItems items = map toListItem items ++ [nl]
 
-toListItem :: WriterOptions -> Html -> Html
-toListItem opts item = nl opts *> H.li item
+toListItem :: Html -> Html
+toListItem item = nl *> H.li item
 
 blockListToHtml :: PandocMonad m
                 => WriterOptions -> [Block] -> StateT WriterState m Html
 blockListToHtml opts lst =
-  mconcat . intersperse (nl opts) . filter nonempty
+  mconcat . intersperse (nl) . filter nonempty
     <$> mapM (blockToHtml opts) lst
   where nonempty (Empty _) = False
         nonempty _         = True
@@ -1331,9 +1346,9 @@ inlineToHtml opts inline = do
     (Str str)      -> return $ strToHtml str
     Space          -> return $ strToHtml " "
     SoftBreak      -> return $ case writerWrapText opts of
-                                     WrapNone     -> preEscapedText " "
-                                     WrapAuto     -> preEscapedText " "
-                                     WrapPreserve -> preEscapedText "\n"
+                                     WrapNone     -> " "
+                                     WrapAuto     -> " "
+                                     WrapPreserve -> nl
     LineBreak      -> return $ do
                         if html5 then H5.br else H.br
                         strToHtml "\n"
@@ -1579,8 +1594,9 @@ blockListToNote opts ref blocks = do
                     else let lastBlock   = last blocks
                              otherBlocks = init blocks
                          in  case lastBlock of
-                                  Para [Image _ _ (_,tit)]
+                                  Para [Image (_,cls,_) _ (_,tit)]
                                       | "fig:" `T.isPrefixOf` tit
+                                        || "r-stretch" `elem` cls
                                             -> otherBlocks ++ [lastBlock,
                                                   Plain backlink]
                                   Para lst  -> otherBlocks ++
@@ -1598,7 +1614,7 @@ blockListToNote opts ref blocks = do
                        _ | html5  -> noteItem !
                                        customAttribute "role" "doc-endnote"
                        _          -> noteItem
-  return $ nl opts >> noteItem'
+  return $ nl >> noteItem'
 
 inDiv :: PandocMonad m=> Text -> Html -> StateT WriterState m Html
 inDiv cls x = do

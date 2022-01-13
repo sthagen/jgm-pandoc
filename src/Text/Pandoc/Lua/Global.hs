@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings  #-}
 {- |
    Module      : Text.Pandoc.Lua
-   Copyright   : Copyright © 2017-2021 Albert Krewinkel
+   Copyright   : Copyright © 2017-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -18,12 +18,14 @@ import HsLua as Lua
 import HsLua.Module.Version (pushVersion)
 import Paths_pandoc (version)
 import Text.Pandoc.Class.CommonState (CommonState)
-import Text.Pandoc.Definition (Pandoc (Pandoc), pandocTypesVersion)
+import Text.Pandoc.Definition (Pandoc, pandocTypesVersion)
 import Text.Pandoc.Error (PandocError)
-import Text.Pandoc.Lua.Marshaling ()
-import Text.Pandoc.Lua.Marshaling.CommonState (pushCommonState)
-import Text.Pandoc.Lua.Marshaling.ReaderOptions (pushReaderOptionsReadonly)
-import Text.Pandoc.Options (ReaderOptions)
+import Text.Pandoc.Lua.Marshal.CommonState (pushCommonState)
+import Text.Pandoc.Lua.Marshal.Pandoc (pushPandoc)
+import Text.Pandoc.Lua.Marshal.ReaderOptions (pushReaderOptionsReadonly)
+import Text.Pandoc.Lua.Marshal.WriterOptions (pushWriterOptions)
+import Text.Pandoc.Lua.Orphans ()
+import Text.Pandoc.Options (ReaderOptions, WriterOptions)
 
 import qualified Data.Text as Text
 
@@ -33,6 +35,7 @@ data Global =
   | PANDOC_API_VERSION
   | PANDOC_DOCUMENT Pandoc
   | PANDOC_READER_OPTIONS ReaderOptions
+  | PANDOC_WRITER_OPTIONS WriterOptions
   | PANDOC_SCRIPT_FILE FilePath
   | PANDOC_STATE CommonState
   | PANDOC_VERSION
@@ -46,19 +49,22 @@ setGlobal :: Global -> LuaE PandocError ()
 setGlobal global = case global of
   -- This could be simplified if Global was an instance of Data.
   FORMAT format -> do
-    Lua.push format
+    Lua.pushText format
     Lua.setglobal "FORMAT"
   PANDOC_API_VERSION -> do
     pushVersion pandocTypesVersion
     Lua.setglobal "PANDOC_API_VERSION"
   PANDOC_DOCUMENT doc -> do
-    pushUD typePandocLazy  doc
+    pushPandoc doc
     Lua.setglobal "PANDOC_DOCUMENT"
   PANDOC_READER_OPTIONS ropts -> do
     pushReaderOptionsReadonly ropts
     Lua.setglobal "PANDOC_READER_OPTIONS"
+  PANDOC_WRITER_OPTIONS wopts -> do
+    pushWriterOptions wopts
+    Lua.setglobal "PANDOC_WRITER_OPTIONS"
   PANDOC_SCRIPT_FILE filePath -> do
-    Lua.push filePath
+    Lua.pushString filePath
     Lua.setglobal "PANDOC_SCRIPT_FILE"
   PANDOC_STATE commonState -> do
     pushCommonState commonState
@@ -66,10 +72,3 @@ setGlobal global = case global of
   PANDOC_VERSION              -> do
     pushVersion version
     Lua.setglobal "PANDOC_VERSION"
-
--- | Readonly and lazy pandoc objects.
-typePandocLazy :: LuaError e => DocumentedType e Pandoc
-typePandocLazy = deftype "Pandoc (lazy)" []
-  [ readonly "meta" "document metadata" (push, \(Pandoc meta _) -> meta)
-  , readonly "blocks" "content blocks" (push, \(Pandoc _ blocks) -> blocks)
-  ]

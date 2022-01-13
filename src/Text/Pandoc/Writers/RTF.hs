@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {- |
    Module      : Text.Pandoc.Writers.RTF
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -43,10 +43,11 @@ rtfEmbedImage opts x@(Image attr _ (src,_)) = catchError
   (do result <- P.fetchItem src
       case result of
            (imgdata, Just mime)
-             | mime == "image/jpeg" || mime == "image/png" -> do
+             | mime' <- T.takeWhile (/=';') mime
+             , mime' == "image/jpeg" || mime' == "image/png" -> do
              let bytes = map (T.pack . printf "%02x") $ B.unpack imgdata
              filetype <-
-                case mime of
+                case mime' of
                      "image/jpeg" -> return "\\jpegblip"
                      "image/png"  -> return "\\pngblip"
                      _            -> throwError $
@@ -104,13 +105,13 @@ writeRTF options doc = do
   toc <- blocksToRTF 0 AlignDefault [toTableOfContents options blocks]
   let context = defField "body" body
               $ defField "spacer" spacer
-              $(if writerTableOfContents options
-                   then defField "table-of-contents" toc
-                        -- for backwards compatibility,
-                        -- we populate toc with the contents
-                        -- of the toc rather than a boolean:
-                        . defField "toc" toc
-                   else id) metadata
+              $ (if writerTableOfContents options
+                    then defField "table-of-contents" toc
+                         -- for backwards compatibility,
+                         -- we populate toc with the contents
+                         -- of the toc rather than a boolean:
+                         . defField "toc" toc
+                    else id) metadata
   return $
     case writerTemplate options of
        Just tpl -> render Nothing $ renderTemplate tpl context

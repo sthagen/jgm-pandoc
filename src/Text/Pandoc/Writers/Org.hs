@@ -3,8 +3,8 @@
 {- |
    Module      : Text.Pandoc.Writers.Org
    Copyright   : © 2010-2015 Puneeth Chaganti <punchagan@gmail.com>
-                   2010-2021 John MacFarlane <jgm@berkeley.edu>
-                   2016-2021 Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
+                   2010-2022 John MacFarlane <jgm@berkeley.edu>
+                   2016-2022 Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -22,6 +22,7 @@ import Data.List (intersect, intersperse, partition, transpose)
 import Data.List.NonEmpty (nonEmpty)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Map as M
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Definition
 import Text.Pandoc.Logging
@@ -29,6 +30,7 @@ import Text.Pandoc.Options
 import Text.DocLayout
 import Text.Pandoc.Shared
 import Text.Pandoc.Templates (renderTemplate)
+import Text.Pandoc.Citeproc.Locator (parseLocator, LocatorMap(..), LocatorInfo(..))
 import Text.Pandoc.Writers.Shared
 
 data WriterState =
@@ -103,7 +105,12 @@ blockToOrg :: PandocMonad m
            => Block         -- ^ Block element
            -> Org m (Doc Text)
 blockToOrg Null = return empty
-blockToOrg (Div attr bs) = divToOrg attr bs
+blockToOrg (Div attr@(ident,_,_) bs) = do
+  opts <- gets stOptions
+  -- Strip off bibliography if citations enabled
+  if ident == "refs" && isEnabled Ext_citations opts
+     then return mempty
+     else divToOrg attr bs
 blockToOrg (Plain inlines) = inlineListToOrg inlines
 blockToOrg (SimpleFigure attr txt (src, tit)) = do
       capt <- if null txt
@@ -190,9 +197,7 @@ blockToOrg (Table _ blkCapt specs thead tbody tfoot) =  do
   return $ head'' $$ body $$ caption $$ blankline
 blockToOrg (BulletList items) = do
   contents <- mapM bulletListItemToOrg items
-  -- ensure that sublists have preceding blank line
-  return $ blankline $$
-           (if isTightList items then vcat else vsep) contents $$
+  return $ (if isTightList items then vcat else vsep) contents $$
            blankline
 blockToOrg (OrderedList (start, _, delim) items) = do
   let delim' = case delim of
@@ -200,13 +205,10 @@ blockToOrg (OrderedList (start, _, delim) items) = do
                     x         -> x
   let markers = take (length items) $ orderedListMarkers
                                       (start, Decimal, delim')
-  let maxMarkerLength = maybe 0 maximum . nonEmpty $ map T.length markers
-  let markers' = map (\m -> let s = maxMarkerLength - T.length m
-                            in  m <> T.replicate s " ") markers
-  contents <- zipWithM orderedListItemToOrg markers' items
-  -- ensure that sublists have preceding blank line
-  return $ blankline $$
-           (if isTightList items then vcat else vsep) contents $$
+      counters = (case start of 1 -> Nothing; n -> Just n) : repeat Nothing
+  contents <- zipWithM (\x f -> f x) items $
+              zipWith orderedListItemToOrg markers counters
+  return $ (if isTightList items then vcat else vsep) contents $$
            blankline
 blockToOrg (DefinitionList items) = do
   contents <- mapM definitionListItemToOrg items
@@ -217,21 +219,38 @@ bulletListItemToOrg :: PandocMonad m => [Block] -> Org m (Doc Text)
 bulletListItemToOrg items = do
   exts <- gets $ writerExtensions . stOptions
   contents <- blockListToOrg (taskListItemToOrg exts items)
-  return $ hang 2 "- " contents $$
-          if endsWithPlain items
+  -- if list item starts with non-paragraph, it must go on
+  -- the next line:
+  let contents' = (case items of
+                    Plain{}:_ -> mempty
+                    Para{}:_ -> mempty
+                    _ -> cr) <> chomp contents
+  return $ hang 2 "- " contents' $$
+          if null items || endsWithPlain items
              then cr
              else blankline
 
 -- | Convert ordered list item (a list of blocks) to Org.
 orderedListItemToOrg :: PandocMonad m
                      => Text   -- ^ marker for list item
+                     -> Maybe Int -- ^ maybe number for a counter cookie
                      -> [Block]  -- ^ list item (list of blocks)
                      -> Org m (Doc Text)
-orderedListItemToOrg marker items = do
+orderedListItemToOrg marker counter items = do
   exts <- gets $ writerExtensions . stOptions
   contents <- blockListToOrg (taskListItemToOrg exts items)
-  return $ hang (T.length marker + 1) (literal marker <> space) contents $$
-          if endsWithPlain items
+  -- if list item starts with non-paragraph, it must go on
+  -- the next line:
+  let contents' = (case items of
+                    Plain{}:_ -> mempty
+                    Para{}:_ -> mempty
+                    _ -> cr) <> chomp contents
+  let cookie = maybe empty
+               (\n -> space <> literal "[@" <> literal (tshow n) <> literal "]")
+               counter
+  return $ hang (T.length marker + 1)
+                (literal marker <> cookie <> space) contents' $$
+          if null items || endsWithPlain items
              then cr
              else blankline
 
@@ -396,7 +415,35 @@ inlineToOrg (Quoted SingleQuote lst) = do
 inlineToOrg (Quoted DoubleQuote lst) = do
   contents <- inlineListToOrg lst
   return $ "\"" <> contents <> "\""
-inlineToOrg (Cite _  lst) = inlineListToOrg lst
+inlineToOrg (Cite cs lst) = do
+  opts <- gets stOptions
+  if isEnabled Ext_citations opts
+     then do
+       let renderCiteItem c = do
+             citePref <- inlineListToOrg (citationPrefix c)
+             let (locinfo, suffix) = parseLocator locmap (citationSuffix c)
+             citeSuff <- inlineListToOrg suffix
+             let locator = case locinfo of
+                            Just info -> literal $
+                              T.replace "\160" " " $
+                              T.replace "{" "" $
+                              T.replace "}" "" $ locatorRaw info
+                            Nothing -> mempty
+             return $ hsep [ citePref
+                           , ("@" <> literal (citationId c))
+                           , locator
+                           , citeSuff ]
+       citeItems <- mconcat . intersperse "; " <$> mapM renderCiteItem cs
+       let sty = case cs of
+                   (d:_)
+                     | citationMode d == AuthorInText
+                     -> literal "/t"
+                   [d]
+                     | citationMode d == SuppressAuthor
+                     -> literal "/na"
+                   _ -> mempty
+       return $ "[cite" <> sty <> ":" <> citeItems <> "]"
+     else inlineListToOrg lst
 inlineToOrg (Code _ str) = return $ "=" <> literal str <> "="
 inlineToOrg (Str str) = return . literal $ escapeString str
 inlineToOrg (Math t str) = do
@@ -508,3 +555,60 @@ orgLangIdentifiers =
   , "sqlite"
   , "lilypond"
   , "vala" ]
+
+-- taken from oc-csl.el in the org source tree:
+locmap :: LocatorMap
+locmap = LocatorMap $ M.fromList
+  [ ("bk."       , "book")
+  , ("bks."      , "book")
+  , ("book"      , "book")
+  , ("chap."     , "chapter")
+  , ("chaps."    , "chapter")
+  , ("chapter"   , "chapter")
+  , ("col."      , "column")
+  , ("cols."     , "column")
+  , ("column"    , "column")
+  , ("figure"    , "figure")
+  , ("fig."      , "figure")
+  , ("figs."     , "figure")
+  , ("folio"     , "folio")
+  , ("fol."      , "folio")
+  , ("fols."     , "folio")
+  , ("number"    , "number")
+  , ("no."       , "number")
+  , ("nos."      , "number")
+  , ("line"      , "line")
+  , ("l."        , "line")
+  , ("ll."       , "line")
+  , ("note"      , "note")
+  , ("n."        , "note")
+  , ("nn."       , "note")
+  , ("opus"      , "opus")
+  , ("op."       , "opus")
+  , ("opp."      , "opus")
+  , ("page"      , "page")
+  , ("p"         , "page")
+  , ("p."        , "page")
+  , ("pp."       , "page")
+  , ("paragraph" , "paragraph")
+  , ("para."     , "paragraph")
+  , ("paras."    , "paragraph")
+  , ("¶"         , "paragraph")
+  , ("¶¶"        , "paragraph")
+  , ("part"      , "part")
+  , ("pt."       , "part")
+  , ("pts."      , "part")
+  , ("§"         , "section")
+  , ("§§"        , "section")
+  , ("section"   , "section")
+  , ("sec."      , "section")
+  , ("secs."     , "section")
+  , ("sub verbo" , "sub verbo")
+  , ("s.v."      , "sub verbo")
+  , ("s.vv."     , "sub verbo")
+  , ("verse"     , "verse")
+  , ("v."        , "verse")
+  , ("vv."       , "verse")
+  , ("volume"    , "volume")
+  , ("vol."      , "volume")
+  , ("vols."     , "volume") ]

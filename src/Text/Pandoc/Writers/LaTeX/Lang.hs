@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.Writers.LaTeX.Lang
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -89,6 +89,7 @@ commonFromBcp47 (Lang l _ _ _ _ _) = fromIso l
     fromIso "gd"  = "scottish"
     fromIso "gez" = "ethiopic"
     fromIso "gl"  = "galician"
+    fromIso "gu"  = "gujarati"
     fromIso "he"  = "hebrew"
     fromIso "hi"  = "hindi"
     fromIso "hr"  = "croatian"
@@ -117,7 +118,8 @@ commonFromBcp47 (Lang l _ _ _ _ _) = fromIso l
     fromIso "no"  = "norsk"
     fromIso "nqo" = "nko"
     fromIso "oc"  = "occitan"
-    fromIso "pa"  = "panjabi"
+    fromIso "or"  = "oriya"
+    fromIso "pa"  = "punjabi"
     fromIso "pl"  = "polish"
     fromIso "pms" = "piedmontese"
     fromIso "pt"  = "portuguese"

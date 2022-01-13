@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Readers.LaTeX.Lang
-   Copyright   : Copyright (C) 2018-2021 John MacFarlane
+   Copyright   : Copyright (C) 2018-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -165,6 +165,7 @@ polyglossiaLangToBCP47 = M.fromList
   , ("croatian", \_ -> simpleLang "hr")
   , ("magyar", \_ -> simpleLang "hu")
   , ("armenian", \_ -> simpleLang "hy")
+  , ("gujarati", \_ -> simpleLang "gu")
   , ("interlingua", \_ -> simpleLang "ia")
   , ("indonesian", \_ -> simpleLang "id")
   , ("icelandic", \_ -> simpleLang "is")
@@ -185,7 +186,8 @@ polyglossiaLangToBCP47 = M.fromList
   , ("norsk", \_ -> simpleLang "no")
   , ("nko", \_ -> simpleLang "nqo")
   , ("occitan", \_ -> simpleLang "oc")
-  , ("panjabi", \_ -> simpleLang "pa")
+  , ("oriya", \_ -> simpleLang "or")
+  , ("punjabi", \_ -> simpleLang "pa")
   , ("polish", \_ -> simpleLang "pl")
   , ("piedmontese", \_ -> simpleLang "pms")
   , ("portuguese", \_ -> simpleLang "pt")

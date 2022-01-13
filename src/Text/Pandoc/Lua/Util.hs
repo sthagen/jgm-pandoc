@@ -1,13 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes   #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TypeApplications      #-}
 {- |
    Module      : Text.Pandoc.Lua.Util
-   Copyright   : © 2012-2021 John MacFarlane,
-                 © 2017-2021 Albert Krewinkel
+   Copyright   : © 2012-2022 John MacFarlane,
+                 © 2017-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -16,16 +11,20 @@
 Lua utility functions.
 -}
 module Text.Pandoc.Lua.Util
-  ( getTag
-  , addField
+  ( addField
   , callWithTraceback
+  , pcallWithTraceback
   , dofileWithTraceback
-  , pushViaConstr'
+  , peekViaJSON
+  , pushViaJSON
   ) where
 
-import Control.Monad (unless, when)
+import Control.Monad (when)
 import HsLua
+import HsLua.Aeson (peekValue, pushValue)
+import qualified Data.Aeson as Aeson
 import qualified HsLua as Lua
+import qualified Text.Pandoc.UTF8 as UTF8
 
 -- | Add a value to the table at the top of the stack at a string-index.
 addField :: (LuaError e, Pushable a) => String -> a -> LuaE e ()
@@ -33,26 +32,6 @@ addField key value = do
   Lua.push key
   Lua.push value
   Lua.rawset (Lua.nth 3)
-
--- | Get the tag of a value. This is an optimized and specialized version of
--- @Lua.getfield idx "tag"@. It only checks for the field on the table at index
--- @idx@ and on its metatable, also ignoring any @__index@ value on the
--- metatable.
-getTag :: LuaError e => Peeker e Name
-getTag idx = do
-  -- push metatable or just the table
-  liftLua $ do
-    Lua.getmetatable idx >>= \hasMT -> unless hasMT (Lua.pushvalue idx)
-    Lua.pushName "tag"
-    Lua.rawget (Lua.nth 2)
-  Lua.peekName Lua.top `lastly` Lua.pop 2  -- table/metatable and `tag` field
-
-pushViaConstr' :: forall e. LuaError e => Name -> [LuaE e ()] -> LuaE e ()
-pushViaConstr' fnname pushArgs = do
-  pushName @e ("pandoc." <> fnname)
-  rawget @e registryindex
-  sequence_ pushArgs
-  call @e (fromIntegral (length pushArgs)) 1
 
 -- | Like @'Lua.pcall'@, but uses a predefined error handler which adds a
 -- traceback on error.
@@ -86,3 +65,19 @@ dofileWithTraceback fp = do
   case loadRes of
     Lua.OK -> pcallWithTraceback 0 Lua.multret
     _ -> return loadRes
+
+
+-- These will become part of hslua-aeson in future versions.
+
+-- | Retrieves a value from the Lua stack via JSON.
+peekViaJSON :: (Aeson.FromJSON a, LuaError e) => Peeker e a
+peekViaJSON idx = do
+  value <- peekValue idx
+  case Aeson.fromJSON value of
+    Aeson.Success x -> pure x
+    Aeson.Error msg -> failPeek $ "failed to decode: " <>
+                       UTF8.fromString msg
+
+-- | Pushes a value to the Lua stack as a JSON-like value.
+pushViaJSON :: (Aeson.ToJSON a, LuaError e) => Pusher e a
+pushViaJSON = pushValue . Aeson.toJSON

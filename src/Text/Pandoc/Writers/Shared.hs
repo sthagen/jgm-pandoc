@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.Shared
-   Copyright   : Copyright (C) 2013-2021 John MacFarlane
+   Copyright   : Copyright (C) 2013-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -456,7 +456,9 @@ endsWithPlain :: [Block] -> Bool
 endsWithPlain xs =
   case lastMay xs of
     Just Plain{} -> True
-    _            -> False
+    Just (BulletList is) -> maybe False endsWithPlain (lastMay is)
+    Just (OrderedList _ is) -> maybe False endsWithPlain (lastMay is)
+    _ -> False
 
 -- | Convert the relevant components of a new-style table (with block
 -- caption, row headers, row and column spans, and so on) to those of

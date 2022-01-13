@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeApplications    #-}
 {- |
    Module      : Text.Pandoc.Lua.Module.Utils
-   Copyright   : Copyright © 2017-2021 Albert Krewinkel
+   Copyright   : Copyright © 2017-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -21,24 +21,20 @@ import Control.Applicative ((<|>))
 import Control.Monad ((<$!>))
 import Data.Data (showConstr, toConstr)
 import Data.Default (def)
+import Data.Maybe (fromMaybe)
 import Data.Version (Version)
 import HsLua as Lua
-import HsLua.Class.Peekable (PeekError)
 import HsLua.Module.Version (peekVersionFuzzy, pushVersion)
+import Text.Pandoc.Citeproc (getReferences)
 import Text.Pandoc.Definition
 import Text.Pandoc.Error (PandocError)
-import Text.Pandoc.Lua.Marshaling ()
-import Text.Pandoc.Lua.Marshaling.AST
-  ( peekBlock, peekInline, peekPandoc, pushBlock, pushInline, pushPandoc
-  , peekAttr, peekMeta, peekMetaValue)
-import Text.Pandoc.Lua.Marshaling.ListAttributes (peekListAttributes)
-import Text.Pandoc.Lua.Marshaling.List (pushPandocList)
-import Text.Pandoc.Lua.Marshaling.SimpleTable
-  ( SimpleTable (..), peekSimpleTable, pushSimpleTable )
+import Text.Pandoc.Lua.Marshal.AST
+import Text.Pandoc.Lua.Marshal.Reference
 import Text.Pandoc.Lua.PandocLua (PandocLua (unPandocLua))
 
 import qualified Data.Digest.Pure.SHA as SHA
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Text.Pandoc.Builder as B
 import qualified Text.Pandoc.Filter.JSON as JSONFilter
@@ -62,12 +58,12 @@ documentedModule = Module
             "blocks" ""
       <#> optionalParameter (peekList peekInline) "list of inlines"
             "inline" ""
-      =#> functionResult (pushPandocList pushInline) "list of inlines" ""
+      =#> functionResult pushInlines "list of inlines" ""
 
     , defun "equals"
-      ### liftPure2 (==)
-      <#> parameter peekAstElement "AST element" "elem1" ""
-      <#> parameter peekAstElement "AST element" "elem2" ""
+      ### equal
+      <#> parameter pure "AST element" "elem1" ""
+      <#> parameter pure "AST element" "elem2" ""
       =#> functionResult pushBool "boolean" "true iff elem1 == elem2"
 
     , defun "make_sections"
@@ -77,7 +73,7 @@ documentedModule = Module
                     "integer or nil" "baselevel" ""
       <#> parameter (peekList peekBlock) "list of blocks"
             "blocks" "document blocks to process"
-      =#> functionResult (pushPandocList pushBlock) "list of Blocks"
+      =#> functionResult pushBlocks "list of Blocks"
             "processes blocks"
 
     , defun "normalize_date"
@@ -102,6 +98,18 @@ documentedModule = Module
       =#> functionResult pushVersion "Version" "new Version object"
       #? "Creates a Version object."
 
+    , defun "references"
+      ### (unPandocLua . getReferences Nothing)
+      <#> parameter peekPandoc "Pandoc" "doc" "document"
+      =#> functionResult (pushPandocList pushReference) "table"
+            "lift of references"
+      #? mconcat
+         [ "Get references defined inline in the metadata and via an external "
+         , "bibliography.  Only references that are actually cited in the "
+         , "document (either with a genuine citation or with `nocite`) are "
+         , "returned. URL variables are converted to links."
+         ]
+
     , defun "run_json_filter"
       ### (\doc filterPath margs -> do
               args <- case margs of
@@ -118,8 +126,8 @@ documentedModule = Module
       =#> functionResult pushPandoc "Pandoc" "filtered document"
 
     , defun "stringify"
-      ### unPandocLua . stringify
-      <#> parameter peekAstElement "AST element" "elem" "some pandoc AST element"
+      ### stringify
+      <#> parameter pure "AST element" "elem" "some pandoc AST element"
       =#> functionResult pushText "string" "stringified element"
 
     , defun "from_simple_table"
@@ -138,6 +146,17 @@ documentedModule = Module
       <#> parameter peekTable "Block" "tbl" "a table"
       =#> functionResult pushSimpleTable "SimpleTable" "SimpleTable object"
       #? "Converts a table into an old/simple table."
+
+    , defun "type"
+      ### (\idx -> getmetafield idx "__name" >>= \case
+              TypeString -> fromMaybe mempty <$> tostring top
+              _ -> ltype idx >>= typename)
+      <#> parameter pure "any" "object" ""
+      =#> functionResult pushByteString "string" "type of the given value"
+    #? ("Pandoc-friendly version of Lua's default `type` function, " <>
+        "returning the type of a value. If the argument has a " <>
+        "string-valued metafield `__name`, then it gives that string. " <>
+        "Otherwise it behaves just like the normal `type` function.")
     ]
   }
 
@@ -153,53 +172,35 @@ sha1 = defun "sha1"
 -- | Convert pandoc structure to a string with formatting removed.
 -- Footnotes are skipped (since we don't want their contents in link
 -- labels).
-stringify :: AstElement -> PandocLua T.Text
-stringify el = return $ case el of
-  PandocElement pd -> Shared.stringify pd
-  InlineElement i  -> Shared.stringify i
-  BlockElement b   -> Shared.stringify b
-  MetaElement m    -> Shared.stringify m
-  CitationElement c  -> Shared.stringify c
-  MetaValueElement m -> stringifyMetaValue m
-  _                  -> mempty
-
-stringifyMetaValue :: MetaValue -> T.Text
-stringifyMetaValue mv = case mv of
-  MetaBool b   -> T.toLower $ T.pack (show b)
-  MetaString s -> s
-  _            -> Shared.stringify mv
-
-data AstElement
-  = PandocElement Pandoc
-  | MetaElement Meta
-  | BlockElement Block
-  | InlineElement Inline
-  | MetaValueElement MetaValue
-  | AttrElement Attr
-  | ListAttributesElement ListAttributes
-  | CitationElement Citation
-  deriving (Eq, Show)
-
-peekAstElement :: PeekError e => Peeker e AstElement
-peekAstElement = retrieving "pandoc AST element" . choice
-  [ (fmap PandocElement . peekPandoc)
-  , (fmap InlineElement . peekInline)
-  , (fmap BlockElement . peekBlock)
-  , (fmap MetaValueElement . peekMetaValue)
-  , (fmap AttrElement . peekAttr)
-  , (fmap ListAttributesElement . peekListAttributes)
-  , (fmap MetaElement . peekMeta)
-  ]
+stringify :: LuaError e => StackIndex -> LuaE e T.Text
+stringify idx = forcePeek . retrieving "stringifyable element" $
+  choice
+  [ (fmap Shared.stringify . peekPandoc)
+  , (fmap Shared.stringify . peekInline)
+  , (fmap Shared.stringify . peekBlock)
+  , (fmap Shared.stringify . peekCitation)
+  , (fmap stringifyMetaValue . peekMetaValue)
+  , (fmap (const "") . peekAttr)
+  , (fmap (const "") . peekListAttributes)
+  ] idx
+ where
+  stringifyMetaValue :: MetaValue -> T.Text
+  stringifyMetaValue mv = case mv of
+    MetaBool b   -> T.toLower $ T.pack (show b)
+    MetaString s -> s
+    MetaList xs  -> mconcat $ map stringifyMetaValue xs
+    MetaMap m    -> mconcat $ map (stringifyMetaValue . snd) (Map.toList m)
+    _            -> Shared.stringify mv
 
 -- | Converts an old/simple table into a normal table block element.
 from_simple_table :: SimpleTable -> LuaE PandocError NumResults
 from_simple_table (SimpleTable capt aligns widths head' body) = do
   Lua.push $ Table
     nullAttr
-    (Caption Nothing [Plain capt])
+    (Caption Nothing [Plain capt | not (null capt)])
     (zipWith (\a w -> (a, toColWidth w)) aligns widths)
     (TableHead nullAttr [blockListToRow head' | not (null head') ])
-    [TableBody nullAttr 0 [] $ map blockListToRow body]
+    [TableBody nullAttr 0 [] $ map blockListToRow body | not (null body)]
     (TableFoot nullAttr [])
   return (NumResults 1)
   where

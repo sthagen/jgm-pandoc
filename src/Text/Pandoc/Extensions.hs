@@ -6,7 +6,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {- |
    Module      : Text.Pandoc.Extensions
-   Copyright   : Copyright (C) 2012-2021 John MacFarlane
+   Copyright   : Copyright (C) 2012-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -432,6 +432,8 @@ getDefaultExtensions "jats_archiving"  = getDefaultExtensions "jats"
 getDefaultExtensions "jats_publishing" = getDefaultExtensions "jats"
 getDefaultExtensions "jats_articleauthoring" = getDefaultExtensions "jats"
 getDefaultExtensions "opml"            = pandocExtensions -- affects notes
+getDefaultExtensions "markua"          = extensionsFromList
+                                          []
 getDefaultExtensions _                 = extensionsFromList
                                           [Ext_auto_identifiers]
 
@@ -534,6 +536,7 @@ getAllExtensions f = universalExtensions <> getAll f
     extensionsFromList
     [ Ext_citations
     , Ext_smart
+    , Ext_fancy_lists
     , Ext_task_lists
     ]
   getAll "html"            = autoIdExtensions <>
@@ -622,8 +625,8 @@ parseFormatSpec = parse formatSpec ""
                        Just n  -> return n
                        Nothing
                          | name == "lhs" -> return Ext_literate_haskell
-                         | otherwise -> Prelude.fail $
-                                          "Unknown extension: " ++ name
+                         | otherwise -> unexpected $
+                                          "unknown extension: " ++ name
           return $ \(extsToEnable, extsToDisable) ->
                     case polarity of
                         '+' -> (ext : extsToEnable, extsToDisable)

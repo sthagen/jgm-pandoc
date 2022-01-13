@@ -2,7 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {- |
    Module      : Text.Pandoc.Lua.ErrorConversion
-   Copyright   : © 2020-2021 Albert Krewinkel
+   Copyright   : © 2020-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -19,7 +19,7 @@ import HsLua (LuaError, LuaE, top)
 import HsLua.Marshalling (resultToEither, runPeek)
 import HsLua.Class.Peekable (PeekError (..))
 import Text.Pandoc.Error (PandocError (PandocLuaError))
-import Text.Pandoc.Lua.Marshaling.PandocError (pushPandocError, peekPandocError)
+import Text.Pandoc.Lua.Marshal.PandocError (pushPandocError, peekPandocError)
 
 import qualified Data.Text as T
 import qualified HsLua as Lua

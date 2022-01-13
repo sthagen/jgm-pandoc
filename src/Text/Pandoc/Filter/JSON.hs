@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Filter
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -23,16 +23,16 @@ import System.Directory (executable, doesFileExist, findExecutable,
 import System.Environment (getEnvironment)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>), takeExtension)
-import Text.Pandoc.Error (PandocError (PandocFilterError))
 import Text.Pandoc.Definition (Pandoc)
-import Text.Pandoc.Options (ReaderOptions)
+import Text.Pandoc.Error (PandocError (PandocFilterError))
+import Text.Pandoc.Filter.Environment (Environment (..))
 import Text.Pandoc.Process (pipeProcess)
 import Text.Pandoc.Shared (pandocVersion, tshow)
 import qualified Control.Exception as E
 import qualified Text.Pandoc.UTF8 as UTF8
 
 apply :: MonadIO m
-      => ReaderOptions
+      => Environment
       -> [String]
       -> FilePath
       -> Pandoc
@@ -40,8 +40,8 @@ apply :: MonadIO m
 apply ropts args f = liftIO . externalFilter ropts f args
 
 externalFilter :: MonadIO m
-               => ReaderOptions -> FilePath -> [String] -> Pandoc -> m Pandoc
-externalFilter ropts f args' d = liftIO $ do
+               => Environment -> FilePath -> [String] -> Pandoc -> m Pandoc
+externalFilter fenv f args' d = liftIO $ do
   exists <- doesFileExist f
   isExecutable <- if exists
                      then executable <$> getPermissions f
@@ -62,6 +62,7 @@ externalFilter ropts f args' d = liftIO $ do
     mbExe <- findExecutable f'
     when (isNothing mbExe) $
       E.throwIO $ PandocFilterError fText (T.pack $ "Could not find executable " <> f')
+  let ropts = envReaderOptions fenv
   env <- getEnvironment
   let env' = Just
            ( ("PANDOC_VERSION", T.unpack pandocVersion)

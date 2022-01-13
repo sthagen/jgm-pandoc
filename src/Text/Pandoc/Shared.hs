@@ -8,7 +8,7 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {- |
    Module      : Text.Pandoc.Shared
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -25,6 +25,7 @@ module Text.Pandoc.Shared (
                      ordNub,
                      findM,
                      -- * Text processing
+                     inquotes,
                      tshow,
                      elemText,
                      notElemText,
@@ -185,6 +186,10 @@ findM p = foldr go (pure Nothing)
 --
 -- Text processing
 --
+
+-- | Wrap double quotes around a Text
+inquotes :: T.Text -> T.Text
+inquotes txt = T.cons '\"' (T.snoc txt '\"')
 
 tshow :: Show a => a -> T.Text
 tshow = T.pack . show
@@ -727,17 +732,17 @@ filterIpynbOutput mode = walk go
                  where
                   rank (RawBlock (Format "html") _)
                     | fmt == Format "html" = 1 :: Int
-                    | fmt == Format "markdown" = 2
-                    | otherwise = 3
+                    | fmt == Format "markdown" = 3
+                    | otherwise = 4
                   rank (RawBlock (Format "latex") _)
                     | fmt == Format "latex" = 1
-                    | fmt == Format "markdown" = 2
-                    | otherwise = 3
+                    | fmt == Format "markdown" = 3
+                    | otherwise = 4
                   rank (RawBlock f _)
                     | fmt == f = 1
-                    | otherwise = 3
-                  rank (Para [Image{}]) = 1
-                  rank _ = 2
+                    | otherwise = 4
+                  rank (Para [Image{}]) = 2
+                  rank _ = 3
                   removeANSI (CodeBlock attr code) =
                     CodeBlock attr (removeANSIEscapes code)
                   removeANSI x = x

@@ -1,6 +1,6 @@
 {- |
    Module      : Tests.Old
-   Copyright   : © 2006-2021 John MacFarlane
+   Copyright   : © 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -219,7 +219,16 @@ tests pandocPath =
                       "--markdown-headings=setext", "-t",
                       "ipynb-raw_html-raw_tex+raw_attribute", "-s"]
       "ipynb/simple.in.native" "ipynb/simple.ipynb"
+    , test' "reader" ["-t", "native", "-f", "ipynb",
+                      "--ipynb-output=all"]
+      "ipynb/mime.ipynb" "ipynb/mime.native"
+    , test' "writer" ["-f", "native", "-t", "ipynb",
+                      "--wrap=preserve"]
+      "ipynb/mime.native" "ipynb/mime.out.ipynb"
+    , test' "reader" ["-f", "ipynb", "-t", "html"]
+      "ipynb/rank.ipynb" "ipynb/rank.out.html"
     ]
+  , testGroup "markua" [ testGroup "writer" $ writerTests' "markua"]
   ]
  where
     test'           = test pandocPath

@@ -4,8 +4,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {- |
    Module      : Text.Pandoc.Lua.Marshaling.ReaderOptions
-   Copyright   : © 2012-2021 John MacFarlane
-                 © 2017-2021 Albert Krewinkel
+   Copyright   : © 2012-2022 John MacFarlane
+                 © 2017-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -13,7 +13,7 @@
 
 Marshaling instance for ReaderOptions and its components.
 -}
-module Text.Pandoc.Lua.Marshaling.ReaderOptions
+module Text.Pandoc.Lua.Marshal.ReaderOptions
   ( peekReaderOptions
   , pushReaderOptions
   , pushReaderOptionsReadonly
@@ -21,7 +21,8 @@ module Text.Pandoc.Lua.Marshaling.ReaderOptions
 
 import Data.Default (def)
 import HsLua as Lua
-import Text.Pandoc.Lua.Marshaling.List (pushPandocList)
+import Text.Pandoc.Lua.Marshal.List (pushPandocList)
+import Text.Pandoc.Lua.Util (peekViaJSON, pushViaJSON)
 import Text.Pandoc.Options (ReaderOptions (..))
 
 --
@@ -87,23 +88,23 @@ readerOptionsMembers =
       (pushText, readerDefaultImageExtension)
       (peekText, \opts x -> opts{ readerDefaultImageExtension = x })
   , property "extensions" ""
-      (pushString . show, readerExtensions)
-      (peekRead, \opts x -> opts{ readerExtensions = x })
+      (pushViaJSON, readerExtensions)
+      (peekViaJSON, \opts x -> opts{ readerExtensions = x })
   , property "indented_code_classes" ""
       (pushPandocList pushText, readerIndentedCodeClasses)
       (peekList peekText, \opts x -> opts{ readerIndentedCodeClasses = x })
-  , property "strip_comments" ""
-      (pushBool, readerStripComments)
-      (peekBool, \opts x -> opts{ readerStripComments = x })
   , property "standalone" ""
       (pushBool, readerStandalone)
       (peekBool, \opts x -> opts{ readerStandalone = x })
+  , property "strip_comments" ""
+      (pushBool, readerStripComments)
+      (peekBool, \opts x -> opts{ readerStripComments = x })
   , property "tab_stop" ""
       (pushIntegral, readerTabStop)
       (peekIntegral, \opts x -> opts{ readerTabStop = x })
   , property "track_changes" ""
-      (pushString . show, readerTrackChanges)
-      (peekRead, \opts x -> opts{ readerTrackChanges = x })
+      (pushViaJSON, readerTrackChanges)
+      (choice [peekRead, peekViaJSON], \opts x -> opts{ readerTrackChanges = x })
   ]
 
 -- | Retrieves a 'ReaderOptions' object from a table on the stack, using
@@ -127,7 +128,7 @@ peekReaderOptionsTable idx = retrieving "ReaderOptions (table)" $ do
               setFields
     pushnil -- first key
     setFields
-  peekUD typeReaderOptions top
+  peekUD typeReaderOptions top `lastly` pop 1
 
 instance Pushable ReaderOptions where
   push = pushReaderOptions
