@@ -3,7 +3,7 @@ pandoc=$(shell find dist -name pandoc -type f -exec ls -t {} \; | head -1)
 SOURCEFILES?=$(shell git ls-tree -r master --name-only | grep "\.hs$$")
 BRANCH?=master
 ARCH=$(shell uname -m)
-DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:8.10.7
+DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:9.0.2
 COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
 LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
@@ -136,7 +136,7 @@ pandoc-templates:
 	popd
 
 trypandoc:
-	ssh -t macfarlane 'cd src/pandoc && git pull && stack install --flag pandoc:trypandoc --flag pandoc:embed_data_files && cd trypandoc && sudo make install'
+	ssh -t macfarlane 'cd src/pandoc && git pull && cabal update && cabal install -ftrypandoc -fembed_data_files --install-method=copy --overwrite-policy=always && cd trypandoc && sudo make install'
 
 update-website:
 	make -C $(WEBSITE) update
