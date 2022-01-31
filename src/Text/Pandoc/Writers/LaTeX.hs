@@ -235,10 +235,13 @@ elementToBeamer slideLevel (Div (ident,"section":dclasses,dkvs)
              isSlide _                         = False
          let (titleBs, slideBs) = break isSlide ys
          return $
-           if null titleBs
-              then Div (ident,"section":dclasses,dkvs) xs
-              else Div (ident,"section":dclasses,dkvs)
-                    (h : Div ("","slide":dclasses,dkvs) (h:titleBs) : slideBs)
+           case titleBs of
+              [] -> Div (ident,"section":dclasses,dkvs) xs
+              [Div (_,"notes":_,_) _] ->  -- see #7857, don't create frame
+                    -- just for speaker notes after section heading
+                    Div (ident,"section":dclasses,dkvs) xs
+              _  -> Div (ident,"section":dclasses,dkvs)
+                     (h : Div ("","slide":dclasses,dkvs) (h:titleBs) : slideBs)
   | otherwise
     = return $ Div (ident,"slide":dclasses,dkvs) xs
 elementToBeamer _ x = return x
@@ -281,14 +284,15 @@ blockToLaTeX (Div (identifier,"slide":dclasses,dkvs)
   let fragile = "fragile" `elem` classes ||
                 not (null $ query hasCodeBlock bs ++ query hasCode bs)
   let frameoptions = ["allowdisplaybreaks", "allowframebreaks", "fragile",
-                      "b", "c", "t", "environment",
+                      "b", "c", "t", "environment", "s", "squeeze",
                       "label", "plain", "shrink", "standout",
                       "noframenumbering"]
   let optionslist = ["fragile" | fragile
                                , isNothing (lookup "fragile" kvs)
                                , "fragile" `notElem` classes] ++
                     [k | k <- classes, k `elem` frameoptions] ++
-                    [k <> "=" <> v | (k,v) <- kvs, k `elem` frameoptions]
+                    [k <> "=" <> v | (k,v) <- kvs, k `elem` frameoptions] ++
+                    [v | ("frameoptions", v) <- kvs]
   let options = if null optionslist
                    then empty
                    else brackets (literal (T.intercalate "," optionslist))

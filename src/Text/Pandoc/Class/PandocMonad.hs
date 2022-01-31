@@ -46,6 +46,7 @@ module Text.Pandoc.Class.PandocMonad
   , getResourcePath
   , readDefaultDataFile
   , readDataFile
+  , readMetadataFile
   , fillMediaBag
   , toLang
   , setTranslations
@@ -573,11 +574,25 @@ getDefaultReferencePptx = do
      Nothing   -> foldr addEntryToArchive emptyArchive <$>
                      mapM pathToEntry paths
 
--- | Read file from user data directory or,
--- if not found there, from the default data files.
+-- | Checks if the file path is relative to a parent directory.
+isRelativeToParentDir :: FilePath -> Bool
+isRelativeToParentDir fname =
+  let canonical = makeCanonical fname
+   in length canonical >= 2 && take 2 canonical == ".."
+
+-- | Returns possible user data directory if the file path refers to a file or
+-- subdirectory within it.
+checkUserDataDir :: PandocMonad m => FilePath -> m (Maybe FilePath)
+checkUserDataDir fname =
+  if isRelative fname && not (isRelativeToParentDir fname)
+     then getUserDataDir
+     else return Nothing
+
+--- | Read file from user data directory or,
+--- if not found there, from the default data files.
 readDataFile :: PandocMonad m => FilePath -> m B.ByteString
 readDataFile fname = do
-  datadir <- getUserDataDir
+  datadir <- checkUserDataDir fname
   case datadir of
        Nothing -> readDefaultDataFile fname
        Just userDir -> do
@@ -585,6 +600,25 @@ readDataFile fname = do
          if exists
             then readFileStrict (userDir </> fname)
             else readDefaultDataFile fname
+
+-- | Read metadata file from the working directory or, if not found there, from
+-- the metadata subdirectory of the user data directory.
+readMetadataFile :: PandocMonad m => FilePath -> m B.ByteString
+readMetadataFile fname = do
+  existsInWorkingDir <- fileExists fname
+  if existsInWorkingDir
+     then readFileStrict fname
+     else do
+       dataDir <- checkUserDataDir fname
+       case dataDir of
+         Nothing ->
+           throwError $ PandocCouldNotFindMetadataFileError $ T.pack fname
+         Just userDir -> do
+           let path = userDir </> "metadata" </> fname
+           existsInUserDir <- fileExists path
+           if existsInUserDir
+              then readFileStrict path
+              else throwError $ PandocCouldNotFindMetadataFileError $ T.pack fname
 
 -- | Read file from from the default data files.
 readDefaultDataFile :: PandocMonad m => FilePath -> m B.ByteString
@@ -617,9 +651,10 @@ checkExistence fn = do
 makeCanonical :: FilePath -> FilePath
 makeCanonical = Posix.joinPath . transformPathParts . splitDirectories
  where  transformPathParts = reverse . foldl' go []
-        go as     "."  = as
-        go (_:as) ".." = as
-        go as     x    = x : as
+        go as        "."  = as
+        go ("..":as) ".." = ["..", ".."] <> as
+        go (_:as)    ".." = as
+        go as        x    = x : as
 
 -- | Tries to run an action on a file: for each directory given, a
 -- filepath is created from the given filename, and the action is run on

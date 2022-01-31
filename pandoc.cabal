@@ -1,6 +1,6 @@
 cabal-version:   2.4
 name:            pandoc
-version:         2.17.0.1
+version:         2.17.1
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -251,6 +251,11 @@ extra-source-files:
                  test/command/3510-export.latex
                  test/command/3510-src.hs
                  test/command/3971b.tex
+                 test/command/5876.yaml
+                 test/command/5876/metadata/5876.yaml
+                 test/command/5876/metadata/command/5876.yaml
+                 test/command/7861.yaml
+                 test/command/7861/metadata/placeholder
                  test/docbook-chapter.docbook
                  test/docbook-reader.docbook
                  test/docbook-xref.docbook
@@ -475,9 +480,9 @@ library
                  file-embed            >= 0.0      && < 0.1,
                  filepath              >= 1.1      && < 1.5,
                  haddock-library       >= 1.10     && < 1.11,
-                 hslua                 >= 2.0.1    && < 2.1,
-                 hslua-aeson           >= 2.0.1    && < 2.1,
-                 hslua-marshalling     >= 2.0.1    && < 2.1,
+                 hslua                 >= 2.1      && < 2.2,
+                 hslua-aeson           >= 2.1      && < 2.2,
+                 hslua-marshalling     >= 2.1      && < 2.2,
                  hslua-module-path     >= 1.0      && < 1.1,
                  hslua-module-system   >= 1.0      && < 1.1,
                  hslua-module-text     >= 1.0      && < 1.1,
@@ -500,8 +505,8 @@ library
                  random                >= 1        && < 1.3,
                  safe                  >= 0.3.18   && < 0.4,
                  scientific            >= 0.3      && < 0.4,
-                 skylighting           >= 0.12.1   && < 0.13,
-                 skylighting-core      >= 0.12.1   && < 0.13,
+                 skylighting           >= 0.12.2   && < 0.13,
+                 skylighting-core      >= 0.12.2   && < 0.13,
                  split                 >= 0.2      && < 0.3,
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
@@ -719,7 +724,6 @@ library
                    Text.Pandoc.Lua.Orphans,
                    Text.Pandoc.Lua.Packages,
                    Text.Pandoc.Lua.PandocLua,
-                   Text.Pandoc.Lua.Util,
                    Text.Pandoc.XML.Light,
                    Text.Pandoc.XML.Light.Types,
                    Text.Pandoc.XML.Light.Proc,
@@ -777,7 +781,7 @@ test-suite test-pandoc
                   doctemplates      >= 0.10    && < 0.11,
                   exceptions        >= 0.8     && < 0.11,
                   filepath          >= 1.1     && < 1.5,
-                  hslua             >= 2.0     && < 2.1,
+                  hslua             >= 2.1     && < 2.2,
                   mtl               >= 2.2     && < 2.3,
                   pandoc-types      >= 1.22.1  && < 1.23,
                   process           >= 1.2.3   && < 1.7,
