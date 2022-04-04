@@ -36,7 +36,7 @@ import Control.Monad (foldM, guard, mplus, mzero, void)
 import Data.Char (isSpace)
 import Data.Default (Default)
 import Data.Functor (($>))
-import Data.List (foldl', intersperse)
+import Data.List (foldl')
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import Data.List.NonEmpty (nonEmpty)
@@ -509,7 +509,13 @@ exampleCode = B.codeBlockWith ("", ["example"], [])
 --
 
 specialLine :: PandocMonad m => OrgParser m (F Blocks)
-specialLine = fmap return . try $ rawExportLine <|> metaLine <|> commentLine
+specialLine = fmap return . try $
+  rawExportLine <|> printbibliographyLine <|> metaLine <|> commentLine
+
+printbibliographyLine :: PandocMonad m => OrgParser m Blocks
+printbibliographyLine = do
+  try $ skipSpaces <* string "#+print_bibliography:" <* anyLine
+  return $ B.divWith ("refs",[],[]) mempty
 
 -- | Include the content of a file.
 include :: PandocMonad m => OrgParser m (F Blocks)
@@ -760,19 +766,17 @@ latexFragment = try $ do
   texOpt  <- getExportSetting exportWithLatex
   let envStart = "\\begin{" <> envName <> "}"
   let envEnd = "\\end{" <> envName <> "}"
-  envLines <- do
-    content <- manyTill anyLine (latexEnd envName)
-    return $ envStart : content ++ [envEnd]
+  envContent <- do
+    content <- manyTillChar anyChar (latexEnd envName)
+    return $ envStart <> content <> envEnd
   returnF $ case texOpt of
-    TeXExport -> B.rawBlock "latex" . T.unlines $ envLines
+    TeXExport -> B.rawBlock "latex" (envContent <> "\n")
     TeXIgnore   -> mempty
-    TeXVerbatim -> B.para . mconcat . intersperse B.softbreak $
-                   map B.str envLines
+    TeXVerbatim -> B.para . B.text $ envContent
  where
   latexEnd :: Monad m => Text -> OrgParser m ()
   latexEnd envName = try . void
-     $ skipSpaces
-    <* textStr ("\\end{" <> envName <> "}")
+     $ textStr ("\\end{" <> envName <> "}")
     <* blankline
 
 

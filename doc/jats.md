@@ -152,23 +152,30 @@ Metadata Values
         (if the latter is present).
 
 `copyright`
-:   Licensing and copyright information. This information is
+:   Copyright and licensing information. This information is
     rendered via the [`<permissions>`][elem:permissions] element.
 
-    The variables `type`, `link`, and `text` should always be used
-    together.
+    It is recommended to use the `license` field (described below)
+    for licensing information. If licensing information is
+    included below `copyright`, then the variables `type`, `link`,
+    and `text` should always be used together.
 
     `statement`
-    :   the year of copyright; used as content of the
-        [`<copyright-statement>`][elem:copyright-statement]
+    :   copyright notice or statement; used as content of the
+        [`<copyright-statement>`][elem:copyright-statement]. Use a
+        list for multiple statements.
 
     `year`
     :   the year of copyright; used as content of the
-        [`<copyright-year>`][elem:copyright-year]
+        [`<copyright-year>`][elem:copyright-year]. Use a list to
+        for multiple copyright years. The JATS documentation
+        states that this field need not to be used if the year is
+        included in the copyright statement.
 
     `holder`
     :   the copyright holder; included via the
-        [`<copyright-holder>`][elem:copyright-holder] element.
+        [`<copyright-holder>`][elem:copyright-holder] element. Use
+        a list for multiple copyright holders.
 
     `text`
     :   inline text setting the license under which the text is
@@ -342,6 +349,27 @@ Metadata Values
     `publisher-loc`
     :   place of publication. Used as the content of the
         [`<publisher-loc>`][elem:publisher-loc] element.
+
+`license`
+:   Article licensing information. Each item of this field is
+    rendered as a `<license>` element within the
+    [`<permissions>`][elem:permissions] element.
+
+    Item content should be either a single paragraph, or a map
+    with the fields listed below.
+
+    `text`
+    :   inline text describing a license under which the text is
+        published; included via the
+        [`<license-p>`][elem:copyright-holder] element.
+
+    `type`
+    :   type of the license; used as value of the
+        [`license-type`][attr:license-type] attribute.
+
+    `link`
+    :   external link describing the license; used as value of a
+        `xlink:href` attribute in the `<license>` element.
 
 `notes`
 :   Additional notes concerning the whole article. Added to the

@@ -113,7 +113,9 @@ defaultWriterState = WriterState {stNotes= [], stEmittedNotes = 0, stMath = Fals
 -- Helpers to render HTML with the appropriate function.
 
 strToHtml :: Text -> Html
-strToHtml = strToHtml' . T.unpack
+strToHtml t
+    | T.any isSpecial t = strToHtml' $ T.unpack t
+    | otherwise = toHtml t
   where
     strToHtml' ('\'':xs) = preEscapedString "\'" `mappend` strToHtml' xs
     strToHtml' ('"' :xs) = preEscapedString "\"" `mappend` strToHtml' xs
@@ -122,11 +124,11 @@ strToHtml = strToHtml' . T.unpack
                         case xs of
                           ('\xFE0E':ys) -> strToHtml' ys
                           _             -> strToHtml' xs
-    strToHtml' xs@(_:_) = case break (\c -> c == '\'' || c == '"' ||
-                                       needsVariationSelector c) xs of
+    strToHtml' xs@(_:_) = case break isSpecial xs of
                             (_ ,[]) -> toHtml xs
                             (ys,zs) -> toHtml ys `mappend` strToHtml' zs
     strToHtml' [] = ""
+    isSpecial c = c == '\'' || c == '"' || needsVariationSelector c
 
 -- See #5469: this prevents iOS from substituting emojis.
 needsVariationSelector :: Char -> Bool
@@ -149,12 +151,14 @@ writeHtml5 = writeHtml' defaultWriterState{ stHtml5 = True }
 
 -- | Convert Pandoc document to Html 4 string.
 writeHtml4String :: PandocMonad m => WriterOptions -> Pandoc -> m Text
-writeHtml4String = writeHtmlString'
-                      defaultWriterState{ stHtml5 = False }
+writeHtml4String opts = writeHtmlString'
+                         defaultWriterState{ stHtml5 = False } opts .
+                        ensureValidXmlIdentifiers
 
 -- | Convert Pandoc document to Html 4 structure.
 writeHtml4 :: PandocMonad m => WriterOptions -> Pandoc -> m Html
-writeHtml4 = writeHtml' defaultWriterState{ stHtml5 = False }
+writeHtml4 opts = writeHtml' defaultWriterState{ stHtml5 = False } opts .
+                    ensureValidXmlIdentifiers
 
 -- | Convert Pandoc document to Html appropriate for an epub version.
 writeHtmlStringForEPUB :: PandocMonad m
@@ -164,6 +168,8 @@ writeHtmlStringForEPUB version o = writeHtmlString'
                       defaultWriterState{ stHtml5 = version == EPUB3,
                                           stEPUBVersion = Just version }
                       o{ writerWrapText = WrapNone }
+   -- we don't use ensureValidXmlIdentifiers here because we
+   -- do that in the EPUB writer
 
 -- | Convert Pandoc document to Reveal JS HTML slide show.
 writeRevealJs :: PandocMonad m
@@ -173,22 +179,25 @@ writeRevealJs = writeHtmlSlideShow' RevealJsSlides
 -- | Convert Pandoc document to S5 HTML slide show.
 writeS5 :: PandocMonad m
         => WriterOptions -> Pandoc -> m Text
-writeS5 = writeHtmlSlideShow' S5Slides
+writeS5 opts = writeHtmlSlideShow' S5Slides opts .
+               ensureValidXmlIdentifiers
 
 -- | Convert Pandoc document to Slidy HTML slide show.
 writeSlidy :: PandocMonad m
            => WriterOptions -> Pandoc -> m Text
-writeSlidy = writeHtmlSlideShow' SlidySlides
+writeSlidy opts = writeHtmlSlideShow' SlidySlides opts .
+                  ensureValidXmlIdentifiers
 
 -- | Convert Pandoc document to Slideous HTML slide show.
 writeSlideous :: PandocMonad m
               => WriterOptions -> Pandoc -> m Text
-writeSlideous = writeHtmlSlideShow' SlideousSlides
+writeSlideous opts = writeHtmlSlideShow' SlideousSlides opts .
+                     ensureValidXmlIdentifiers
 
 -- | Convert Pandoc document to DZSlides HTML slide show.
 writeDZSlides :: PandocMonad m
               => WriterOptions -> Pandoc -> m Text
-writeDZSlides = writeHtmlSlideShow' DZSlides
+writeDZSlides opts = writeHtmlSlideShow' DZSlides opts
 
 writeHtmlSlideShow' :: PandocMonad m
                     => HTMLSlideVariant -> WriterOptions -> Pandoc -> m Text
@@ -982,7 +991,7 @@ blockToHtmlInner opts (Header level (ident,classes,kvs) lst) = do
   let contents' = if writerNumberSections opts && not (T.null secnum)
                      && "unnumbered" `notElem` classes
                      then (H.span ! A.class_ "header-section-number"
-                             $ toHtml secnum) >> strToHtml " " >> contents
+                             $ toHtml secnum) >> toHtml ' ' >> contents
                      else contents
   html5 <- gets stHtml5
   let kvs' = if html5
@@ -1364,14 +1373,14 @@ inlineToHtml opts inline = do
   html5 <- gets stHtml5
   case inline of
     (Str str)      -> return $ strToHtml str
-    Space          -> return $ strToHtml " "
+    Space          -> return $ toHtml ' '
     SoftBreak      -> return $ case writerWrapText opts of
-                                     WrapNone     -> " "
-                                     WrapAuto     -> " "
-                                     WrapPreserve -> nl
+                                     WrapNone     -> toHtml ' '
+                                     WrapAuto     -> toHtml ' '
+                                     WrapPreserve -> toHtml '\n'
     LineBreak      -> return $ do
                         if html5 then H5.br else H.br
-                        strToHtml "\n"
+                        toHtml '\n'
     (Span ("",[cls],[]) ils)
         | cls == "csl-block" || cls == "csl-left-margin" ||
           cls == "csl-right-inline" || cls == "csl-indent"
@@ -1440,10 +1449,10 @@ inlineToHtml opts inline = do
     (Subscript lst)   -> H.sub <$> inlineListToHtml opts lst
     (Quoted quoteType lst) ->
                         let (leftQuote, rightQuote) = case quoteType of
-                              SingleQuote -> (strToHtml "‘",
-                                              strToHtml "’")
-                              DoubleQuote -> (strToHtml "“",
-                                              strToHtml "”")
+                              SingleQuote -> (toHtml '‘',
+                                              toHtml '’')
+                              DoubleQuote -> (toHtml '“',
+                                              toHtml '”')
 
                         in if writerHtmlQTags opts
                                then do
@@ -1465,13 +1474,15 @@ inlineToHtml opts inline = do
       case writerHTMLMathMethod opts of
            WebTeX url -> do
               let imtag = if html5 then H5.img else H.img
+              let str' = T.strip str
               let s = case t of
                            InlineMath  -> "\\textstyle "
                            DisplayMath -> "\\displaystyle "
               return $ imtag ! A.style "vertical-align:middle"
-                             ! A.src (toValue . (url <>) . urlEncode $ s <> str)
-                             ! A.alt (toValue str)
-                             ! A.title (toValue str)
+                             ! A.src (toValue . (url <>) .
+                                 urlEncode $ s <> str')
+                             ! A.alt (toValue str')
+                             ! A.title (toValue str')
                              ! A.class_ mathClass
            GladTeX ->
               return $

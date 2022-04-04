@@ -26,6 +26,9 @@ on:
       - 'test/tables/planets.jats_archiving'
       - 'test/tables/students.jats_archiving'
 
+permissions:
+  contents: read
+
 jobs:
   jats:
     name: JATS
@@ -41,7 +44,7 @@ jobs:
           - archiving
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Validate writer output
         run: |

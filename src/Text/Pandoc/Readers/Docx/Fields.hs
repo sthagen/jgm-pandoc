@@ -26,8 +26,10 @@ type Anchor = T.Text
 data FieldInfo = HyperlinkField URL
                 -- The boolean indicates whether the field is a hyperlink.
                | PagerefField Anchor Bool
-               | ZoteroItem T.Text
-               | ZoteroBibliography
+               | CslCitation T.Text
+               | CslBibliography
+               | EndNoteCite T.Text
+               | EndNoteRefList
                | UnknownField
                deriving (Show)
 
@@ -38,7 +40,7 @@ fieldInfo :: Parser FieldInfo
 fieldInfo =
   try (HyperlinkField <$> hyperlink)
   <|>
-  try ((uncurry PagerefField) <$> pageref) 
+  try ((uncurry PagerefField) <$> pageref)
   <|>
   try addIn
   <|>
@@ -49,20 +51,32 @@ addIn = do
   spaces
   string "ADDIN"
   spaces
-  try zoteroItem <|> zoteroBibliography
+  try cslCitation <|> cslBibliography <|> endnoteCite <|> endnoteRefList
 
-zoteroItem :: Parser FieldInfo
-zoteroItem = do
-  string "ZOTERO_ITEM"
+cslCitation :: Parser FieldInfo
+cslCitation = do
+  optional (string "ZOTERO_ITEM")
   spaces
   string "CSL_CITATION"
   spaces
-  ZoteroItem <$> getInput
+  CslCitation <$> getInput
 
-zoteroBibliography :: Parser FieldInfo
-zoteroBibliography = do
-  string "ZOTERO_BIBL"
-  return ZoteroBibliography
+cslBibliography :: Parser FieldInfo
+cslBibliography = do
+  string "ZOTERO_BIBL" <|> string "Mendeley Bibliography CSL_BIBLIOGRAPHY"
+  return CslBibliography
+
+endnoteCite :: Parser FieldInfo
+endnoteCite = try $ do
+  string "EN.CITE"
+  spaces
+  EndNoteCite <$> getInput
+
+endnoteRefList :: Parser FieldInfo
+endnoteRefList = try $ do
+  string "EN.REFLIST"
+  return EndNoteRefList
+
 
 escapedQuote :: Parser T.Text
 escapedQuote = string "\\\"" $> "\\\""

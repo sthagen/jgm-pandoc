@@ -3,7 +3,7 @@ pandoc=$(shell find dist -name pandoc -type f -exec ls -t {} \; | head -1)
 SOURCEFILES?=$(shell git ls-tree -r master --name-only | grep "\.hs$$")
 BRANCH?=master
 ARCH=$(shell uname -m)
-DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:9.0.2
+DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:9.2.2
 COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
 LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
@@ -16,20 +16,15 @@ endif
 GHCOPTS=-fdiagnostics-color=always -j4 +RTS -A8m -RTS
 WEBSITE=../../web/pandoc.org
 REVISION?=1
-# For gauge:
-# BENCHARGS?=--small --ci=0.90 --match=pattern $(PATTERN)
-# For tasty-bench:
 BENCHARGS?=--csv bench_$(TIMESTAMP).csv $(BASELINECMD) --timeout=6 +RTS -T --nonmoving-gc -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
+
+quick-cabal: ## build & test with stack, no optimizations
+	cabal v2-test --ghc-options='$(GHCOPTS)' --disable-optimization --test-options="--hide-successes --ansi-tricks=false $(TESTARGS)" && cabal build --ghc-options='$(GHCOPTS)' --disable-optimization exe:pandoc
 
 # Note:  to accept current results of golden tests,
 # make test TESTARGS='--accept'
 quick: ## build & test with stack, no optimizations
 	stack install --ghc-options='$(GHCOPTS)' --system-ghc --flag 'pandoc:embed_data_files' --fast --test --test-arguments='-j4 --hide-successes --ansi-tricks=false $(TESTARGS)'
-
-quick-cabal: ## build & test with stack, no optimizations
-	cabal v2-build -j8 --ghc-options '$(GHCOPTS)' --disable-optimization --enable-tests
-	cabal v2-test --disable-optimization --test-options="--hide-successes --ansi-tricks=false $(TESTARGS)"
-	echo "Path to built executable:" && cabal exec -- sh -c 'command -v pandoc' | sed -e 's!x/pandoc/build!x/pandoc/noopt/build!'
 
 full: ## build with stack, including benchmarks, trypandoc
 	stack install --flag 'pandoc:embed_data_files' --flag 'pandoc:trypandoc' --bench --no-run-benchmarks --test --test-arguments='-j4 --hide-successes--ansi-tricks-false' --ghc-options '-Wall -Werror -fno-warn-unused-do-bind -O0 $(GHCOPTS)'
@@ -62,10 +57,11 @@ ghcid-test: ## run ghcid/stack with tests
 	ghcid -c "stack repl --ghc-options=-XNoImplicitPrelude --flag 'pandoc:embed_data_files' --ghci-options=-fobject-code pandoc:lib pandoc:test-pandoc"
 
 bench: ## build and run benchmarks
-	stack bench \
-	  --ghc-options '$(GHCOPTS)' \
-	  --benchmark-arguments='$(BENCHARGS)' 2>&1 | \
-	  tee "bench_latest.txt"
+	cabal bench --benchmark-options='$(BENCHARGS)' 2>&1 | tee "bench_$(TIMESTAMP).txt"
+#	stack bench \
+#	  --ghc-options '$(GHCOPTS)' \
+#	  --benchmark-arguments='$(BENCHARGS)' 2>&1 | \
+#	  tee "bench_latest.txt"
 
 reformat: ## reformat with stylish-haskell
 	for f in $(SOURCEFILES); do echo $$f; stylish-haskell -i $$f ; done
@@ -106,6 +102,15 @@ man/pandoc.1: MANUAL.txt man/pandoc.1.before man/pandoc.1.after
 README.md: README.template MANUAL.txt tools/update-readme.lua
 	pandoc --lua-filter tools/update-readme.lua \
 	      --reference-location=section -t gfm $< -o $@
+
+.PHONY: doc/lua-filters.md
+doc/lua-filters.md: tools/update-lua-module-docs.lua
+	cabal run pandoc -- --standalone \
+		--reference-links \
+		--lua-filter=$< \
+		--columns=66 \
+		--output=$@ \
+		$@
 
 download_stats: ## print download stats from GitHub releases
 	curl https://api.github.com/repos/jgm/pandoc/releases | \

@@ -55,6 +55,8 @@ module Text.Pandoc.Readers
   , readCslJson
   , readBibTeX
   , readBibLaTeX
+  , readEndNoteXML
+  , readRIS
   , readRTF
   -- * Miscellaneous
   , getReader
@@ -103,6 +105,8 @@ import Text.Pandoc.Readers.Man
 import Text.Pandoc.Readers.CSV
 import Text.Pandoc.Readers.CslJson
 import Text.Pandoc.Readers.BibTeX
+import Text.Pandoc.Readers.EndNote
+import Text.Pandoc.Readers.RIS
 import Text.Pandoc.Readers.RTF
 import qualified Text.Pandoc.UTF8 as UTF8
 import Text.Pandoc.Sources (ToSources(..), sourcesToText)
@@ -151,6 +155,8 @@ readers = [("native"       , TextReader readNative)
           ,("csljson"      , TextReader readCslJson)
           ,("bibtex"       , TextReader readBibTeX)
           ,("biblatex"     , TextReader readBibLaTeX)
+          ,("endnotexml"   , TextReader readEndNoteXML)
+          ,("ris"          , TextReader readRIS)
           ,("rtf"          , TextReader readRTF)
            ]
 

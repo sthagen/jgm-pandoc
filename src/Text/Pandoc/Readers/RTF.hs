@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Readers.RTF
@@ -30,7 +31,7 @@ import Text.Pandoc.Class.PandocMonad (PandocMonad (..), insertMedia)
 import Text.Pandoc.Definition
 import Text.Pandoc.Options
 import Text.Pandoc.Parsing
-import Text.Pandoc.Shared (safeRead, tshow)
+import Text.Pandoc.Shared (tshow)
 import Data.Char (isAlphaNum, chr, isAscii, isLetter, isSpace, ord)
 import qualified Data.ByteString.Lazy as BL
 import Data.Digest.Pure.SHA (sha1, showDigest)
@@ -202,71 +203,83 @@ newtype TableRow = TableRow [Blocks] -- cells in reverse order
 parseRTF :: PandocMonad m => RTFParser m Pandoc
 parseRTF = do
   skipMany nl
-  toks <- many tok
-  -- return $! traceShowId toks
-  bs <- (case toks of
-          -- if we start with {\rtf1...}, parse that and ignore
-          -- what follows (which in certain cases can be non-RTF content)
-          rtftok@(Tok _ (Grouped (Tok _ (ControlWord "rtf" (Just 1)) : _))) : _
-            -> foldM processTok mempty [rtftok]
-          _ -> foldM processTok mempty toks)
-        >>= emitBlocks
+  bs <- many tok >>= foldM processTok mempty >>= emitBlocks
   unclosed <- closeContainers
   let doc = B.doc $ bs <> unclosed
   kvs <- sMetadata <$> getState
   pure $ foldr (uncurry B.setMeta) doc kvs
 
-data Tok = Tok SourcePos TokContents
+data Tok = Tok !SourcePos !TokContents
   deriving (Show, Eq)
 
 data TokContents =
-    ControlWord Text (Maybe Int)
-  | ControlSymbol Char
-  | UnformattedText Text
-  | BinData BL.ByteString
-  | HexVal Word8
+    ControlWord !Text !(Maybe Int)
+  | ControlSymbol !Char
+  | UnformattedText !Text
+  | BinData !BL.ByteString
+  | HexVal !Word8
   | Grouped [Tok]
   deriving (Show, Eq)
 
 tok :: PandocMonad m => RTFParser m Tok
 tok = do
   pos <- getPosition
-  Tok pos <$> ((controlThing <|> unformattedText <|> grouped) <* skipMany nl)
+  Tok pos <$!> ((controlThing <|> unformattedText <|> grouped) <* skipMany nl)
  where
   controlThing = do
     char '\\' *>
-      ( binData
-     <|> (ControlWord <$> letterSequence <*> (parameter <* optional delimChar))
+      ( controlWord
      <|> (HexVal <$> hexVal)
      <|> (ControlSymbol <$> anyChar) )
-  binData = try $ do
-    string "bin" <* notFollowedBy letter
-    n <- fromMaybe 0 <$> parameter
-    spaces
-    -- NOTE: We assume here that if the document contains binary
-    -- data, it will not be valid UTF-8 and hence it will have been
-    -- read as latin1, so we can recover the data in the following
-    -- way.  This is probably not completely reliable, but I don't
-    -- know if we can do better without making this reader take
-    -- a ByteString input.
-    dat <- BL.pack . map (fromIntegral . ord) <$> count n anyChar
-    return $ BinData dat
+  controlWord = do
+    name <- letterSequence
+    param <- parameter <* optional delimChar
+    case name of
+      "bin" -> do
+        let n = fromMaybe 0 param
+        spaces
+        -- NOTE: We assume here that if the document contains binary
+        -- data, it will not be valid UTF-8 and hence it will have been
+        -- read as latin1, so we can recover the data in the following
+        -- way.  This is probably not completely reliable, but I don't
+        -- know if we can do better without making this reader take
+        -- a ByteString input.
+        dat <- BL.pack . map (fromIntegral . ord) <$> count n anyChar
+        return $! BinData dat
+      _ -> return $! ControlWord name param
   parameter = do
-    hyph <- string "-" <|> pure ""
+    hyph <- option False $ True <$ char '-'
     rest <- many digit
-    let pstr = T.pack $ hyph <> rest
-    return $ safeRead pstr
+    if null rest
+       then return $! Nothing
+       else do
+         let pstr = T.pack rest
+         case TR.decimal pstr of
+           Right (!i,_) ->
+                return $! Just $! if hyph
+                                     then (-1) * i
+                                     else i
+           _ -> return $! Nothing
   hexVal = do
     char '\''
     x <- hexDigit
     y <- hexDigit
     return $ hexToWord (T.pack [x,y])
   letterSequence = T.pack <$> many1 (satisfy (\c -> isAscii c && isLetter c))
-  unformattedText =
-    UnformattedText . T.pack . mconcat <$>
-      many1 (   many1 (satisfy (not . isSpecial))
-            <|> ("" <$ nl))
-  grouped = Grouped <$> (char '{' *> skipMany nl *> manyTill tok (char '}'))
+  unformattedText = do
+    ts <-  filter (\c -> c /= '\r' && c /= '\n') <$>
+           ( many1 (satisfy (\c -> not (isSpecial c) || c == '\r' || c == '\n')))
+    return $! UnformattedText $! T.pack ts
+  grouped = do
+    char '{'
+    skipMany nl
+    ts <- manyTill tok (char '}')
+    case ts of
+       Tok _ (ControlWord "rtf" (Just 1)) : _ -> do
+         setInput mempty -- discard remaining input: content after the \rtf1
+                         -- group can be non-RTF
+       _ -> return ()
+    return $! Grouped ts
 
 nl :: PandocMonad m => RTFParser m ()
 nl = void (char '\n' <|> char '\r')
@@ -332,7 +345,7 @@ addFormatting (props, txt) =
 addText :: PandocMonad m => Text -> RTFParser m ()
 addText t = do
   gs <- sGroupStack <$> getState
-  let props = case gs of
+  let !props = case gs of
                 (x:_) -> x
                 _ -> def
   updateState (\s -> s{ sTextContent = (props, t) : sTextContent s })

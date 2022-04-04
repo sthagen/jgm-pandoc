@@ -63,20 +63,22 @@ jobs:
             prefix: ''
             cabalopts: ''
             testopts: '--test-option=--hide-successes --test-option=--ansi-tricks=false'
+          - ghc: '9.2.2'
+            cabal: '3.6'
+            prefix: ''
+            cabalopts: ''
+            testopts: '--test-option=--hide-successes --test-option=--ansi-tricks=false'
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     # needed by memory
     - name: Install numa
       run: sudo apt-get install libnuma-dev
 
-    # need to install older cabal/ghc versions from ppa repository
-
-    - name: Install recent cabal/ghc
-      uses: haskell/actions/setup@v1
-      with:
-        ghc-version: ${{ matrix.versions.ghc }}
-        cabal-version: ${{ matrix.versions.cabal }}
+    - name: Install cabal/ghc
+      run: |
+        ghcup install ghc --set ${{ matrix.versions.ghc }}
+        ghcup install cabal --set ${{ matrix.versions.cabal }}
 
     # declare/restore cached things
     # caching doesn't work for scheduled runs yet
@@ -84,7 +86,7 @@ jobs:
 
     - name: Cache cabal global package db
       id:   cabal-global
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           ~/.cabal
@@ -92,7 +94,7 @@ jobs:
 
     - name: Cache cabal work
       id:   cabal-local
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           dist-newstyle
@@ -115,13 +117,7 @@ jobs:
     runs-on: windows-2019
 
     steps:
-    - uses: actions/checkout@v2
-
-    # We should have ghc 8.10, cabal, stack pre-installed
-    # - uses: haskell/actions/setup@v1
-    #   with:
-    #     enable-stack: true
-    #     stack-version: 'latest'
+    - uses: actions/checkout@v3
 
     # declare/restore cached things
     # caching doesn't work for scheduled runs yet
@@ -129,7 +125,7 @@ jobs:
 
     - name: Cache stack global package db
       id:   stack-global-package-db
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           C:\Users\runneradmin\AppData\Roaming\stack\
@@ -164,13 +160,12 @@ jobs:
             cabal: '3.2'
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - name: Install recent cabal/ghc
-      uses: haskell/actions/setup@v1
-      with:
-        ghc-version: ${{ matrix.versions.ghc }}
-        cabal-version: ${{ matrix.versions.cabal }}
+    - name: Install cabal/ghc
+      run: |
+        ghcup install ghc --set ${{ matrix.versions.ghc }}
+        ghcup install cabal ${{ matrix.versions.cabal }}
 
     # declare/restore cached things
     # caching doesn't work for scheduled runs yet
@@ -178,7 +173,7 @@ jobs:
 
     - name: Cache cabal global package db
       id:   cabal-global
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           ~/.cabal
@@ -186,7 +181,7 @@ jobs:
 
     - name: Cache cabal work
       id:   cabal-local
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           dist-newstyle
@@ -210,20 +205,17 @@ jobs:
       fail-fast: true
       matrix:
         versions:
-          - ghc: '8.8.4'
-            cabal: '3.2'
           - ghc: '8.10.7'
             cabal: '3.2'
+          - ghc: '9.2.2'
+            cabal: '3.6'
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    # need to install older cabal/ghc versions from ppa repository
-
-    - name: Install recent cabal/ghc
-      uses: haskell/actions/setup@v1
-      with:
-        ghc-version: ${{ matrix.versions.ghc }}
-        cabal-version: ${{ matrix.versions.cabal }}
+    - name: Install cabal/ghc
+      run: |
+        ghcup install ghc --set ${{ matrix.versions.ghc }}
+        ghcup install cabal ${{ matrix.versions.cabal }}
 
     # declare/restore cached things
     # caching doesn't work for scheduled runs yet
@@ -231,7 +223,7 @@ jobs:
 
     - name: Cache cabal global package db
       id:   cabal-global
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           ~/.cabal
@@ -239,7 +231,7 @@ jobs:
 
     - name: Cache cabal work
       id:   cabal-local
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           dist-newstyle

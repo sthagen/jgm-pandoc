@@ -14,11 +14,15 @@ module Tests.Shared (tests) where
 
 import System.FilePath.Posix (joinPath)
 import Test.Tasty
-import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 import Text.Pandoc.Arbitrary ()
+import Test.Tasty.QuickCheck (testProperty)
 import Text.Pandoc.Builder
 import Text.Pandoc.Shared
-import Text.Pandoc.Writers.Shared (toLegacyTable)
+import Test.Tasty.HUnit
+import Tests.Helpers
+import Text.Pandoc
+import Text.Pandoc.Writers.Shared
+import qualified Data.Text as T
 
 tests :: [TestTree]
 tests = [ testGroup "compactifyDL"
@@ -29,7 +33,52 @@ tests = [ testGroup "compactifyDL"
           ]
         , testGroup "collapseFilePath" testCollapse
         , testGroup "toLegacyTable" testLegacyTable
+        , testGroup "table of contents" testTOC
+        , testGroup "makeSections"
+          [ testProperty "makeSections is idempotent" makeSectionsIsIdempotent
+          , testCase "makeSections is idempotent for test case" $
+              let d = header 1 "H1" <> header 2 "H2" <> header 3 "H3" <>
+                      header 2 "H2a" <> header 4 "H4" <> header 1 "H1a"
+                  d' = makeSections False Nothing $ toList d
+               in assertBool "makeSections is idempotent for test case"
+                      (makeSections False Nothing d' == d')
+          ]
         ]
+
+makeSectionsIsIdempotent :: [Block] -> Bool
+makeSectionsIsIdempotent d =
+  let d' = makeSections False Nothing d
+   in d' == makeSections False Nothing d'
+
+givesTOC :: String -> (Blocks, Blocks) -> TestTree
+givesTOC desc (blocks, toc) = test (toTableOfContents def) desc (toList blocks, head . toList $ toc)
+
+linkId :: T.Text -> T.Text -> T.Text -> Inlines -> Inlines
+linkId lId = linkWith (lId,[],[])
+
+headerId :: T.Text -> Int -> Inlines -> Blocks
+headerId hId = headerWith (hId,[],[])
+
+testTOC :: [TestTree]
+testTOC = [ givesTOC "empty case" $ mempty =?> bulletList []
+          , givesTOC "no headers" $ horizontalRule =?> bulletList []
+          , givesTOC "unlinked header" $
+              header 1 "H1" =?>
+              bulletList [plain "H1"]
+          , givesTOC "linked header" $
+              headerId "h1" 1 "H1" =?>
+              bulletList [plain $ linkId "toc-h1" "#h1" "" "H1"]
+          , givesTOC "nested headlines" $
+              header 1 "H1a" <> header 2 "H2" =?>
+              bulletList [plain "H1a" <> bulletList [plain "H2"]]
+          , givesTOC "only referenced headers" $
+              header 1 "H1a" <> headerId "h2" 2 "H2" =?>
+              bulletList [plain "H1a" <> 
+                          bulletList [plain $ linkId "toc-h2" "#h2" "" "H2"]]
+          , givesTOC "section id used as backup" $
+              divWith ("sec",["section"],[]) (header 1 "H1") =?>
+              bulletList [plain $ linkId "toc-sec" "#sec" "" "H1"]             
+          ]
 
 testCollapse :: [TestTree]
 testCollapse = map (testCase "collapse")

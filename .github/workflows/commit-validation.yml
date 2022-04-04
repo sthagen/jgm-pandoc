@@ -1,11 +1,14 @@
 name: commit-validation
 on: [ push, pull_request ]
 
+permissions:
+  contents: read
+
 jobs:
   check-commit-msg-length:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v3
     - name: Check commit message length
       run: |
         # Get last commit messages

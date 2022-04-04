@@ -33,6 +33,11 @@ without SVG support), [Python] (to use Pandoc filters), and
 [MiKTeX] (to typeset PDFs with [LaTeX]):
 
     choco install rsvg-convert python miktex
+    
+Or, you can install pandoc using
+[winget](https://github.com/microsoft/winget-pkgs):
+
+    winget install pandoc
 
 Using multiple installation methods can result in two separate
 installations of pandoc; it is recommended to properly uninstall
@@ -305,8 +310,7 @@ You will need cabal version 2.0 or higher.
     - `embed_data_files`: embed all data files into the binary (default no).
       This is helpful if you want to create a relocatable binary.
 
-    - `https`:  enable support for downloading resources over https
-      (using the `http-client` and `http-client-tls` libraries).
+    - `lua53`: embed support for Lua 5.3 instead of 5.4.
 
 3.  Build:
 

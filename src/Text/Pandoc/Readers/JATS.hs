@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {- |
@@ -21,7 +22,7 @@ import Data.Default
 import Data.Generics
 import Data.List (foldl', intersperse)
 import qualified Data.Map as Map
-import Data.Maybe (maybeToList, fromMaybe)
+import Data.Maybe (maybeToList, fromMaybe, catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
@@ -30,8 +31,9 @@ import Text.Pandoc.Builder
 import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import Text.Pandoc.Options
 import Text.Pandoc.Shared (safeRead, extractSpaces)
-import Text.TeXMath (readMathML, writeTeX)
+import Text.Pandoc.Walk (walk)
 import Text.Pandoc.XML.Light
+import Text.TeXMath (readMathML, writeTeX)
 import qualified Data.Set as S (fromList, member)
 import Data.Set ((\\))
 import Text.Pandoc.Sources (ToSources(..), sourcesToText)
@@ -43,6 +45,7 @@ data JATSState = JATSState{ jatsSectionLevel :: Int
                           , jatsQuoteType    :: QuoteType
                           , jatsMeta         :: Meta
                           , jatsBook         :: Bool
+                          , jatsFootnotes    :: Map.Map Text Blocks
                           , jatsContent      :: [Content]
                           } deriving Show
 
@@ -51,6 +54,7 @@ instance Default JATSState where
                  , jatsQuoteType = DoubleQuote
                  , jatsMeta = mempty
                  , jatsBook = False
+                 , jatsFootnotes = mempty
                  , jatsContent = [] }
 
 
@@ -63,7 +67,17 @@ readJATS _ inp = do
   tree <- either (throwError . PandocXMLError "") return $
             parseXMLContents (TL.fromStrict . sourcesToText $ sources)
   (bs, st') <- flip runStateT (def{ jatsContent = tree }) $ mapM parseBlock tree
-  return $ Pandoc (jatsMeta st') (toList . mconcat $ bs)
+  let footnotes = jatsFootnotes st'
+  let blockList = toList $ mconcat bs
+  let linkToFootnotes :: Inline -> Inline
+      linkToFootnotes link'@(Link _attr _txt (href, _title)) =
+        case T.uncons href of
+          Just ('#', rid) -> case Map.lookup rid footnotes of
+                               Just footnote -> Note (toList footnote)
+                               Nothing       -> link'
+          _               -> link'
+      linkToFootnotes inline = inline
+  return $ Pandoc (jatsMeta st') (walk linkToFootnotes blockList)
 
 -- convenience function to get an attribute value, defaulting to ""
 attrValue :: Text -> Element -> Text
@@ -175,6 +189,7 @@ parseBlock (Elem e) =
         "table-wrap" -> divWith (attrValue "id" e, ["table-wrap"], [])
                           <$> getBlocks e
         "caption" -> divWith (attrValue "id" e, ["caption"], []) <$> sect 6
+        "fn-group" -> parseFootnoteGroup
         "ref-list" -> parseRefList e
         "?xml"  -> return mempty
         _       -> getBlocks e
@@ -239,6 +254,13 @@ parseBlock (Elem e) =
                           (attrValue "title" g)
 
                   _   -> divWith (attrValue "id" e, ["fig"], []) <$> getBlocks e
+         parseFootnoteGroup = do
+           forM_ (filterChildren (named "fn") e) $ \fn -> do
+             let id' = attrValue "id" fn
+             contents <- getBlocks fn
+             modify $ \st ->
+               st { jatsFootnotes = Map.insert id' contents (jatsFootnotes st) }
+           return mempty
 
          parseTable = do
                       let isCaption x = named "title" x || named "caption" x
@@ -319,6 +341,7 @@ parseMetadata e = do
   getAuthors e
   getAffiliations e
   getAbstract e
+  getPubDate e
   return mempty
 
 getTitle :: PandocMonad m => Element -> JATS m ()
@@ -358,6 +381,19 @@ getAbstract e =
       addMeta "abstract" blks
     Nothing -> pure ()
 
+getPubDate :: PandocMonad m => Element -> JATS m ()
+getPubDate e =
+  case filterElement (named "pub-date") e of
+    Just d -> do
+      case maybeAttrValue "iso-8601-date" d of
+        Just isod -> addMeta "date" (text isod)
+        Nothing -> do
+          let yr = strContent <$> filterElement (named "year") d
+          let mon = strContent <$> filterElement (named "month") d
+          let day = strContent <$> filterElement (named "day") d
+          addMeta "date" $ text $ T.intercalate "-" $ catMaybes [yr, mon, day]
+    Nothing -> pure ()
+
 getContrib :: PandocMonad m => Element -> JATS m Inlines
 getContrib x = do
   given <- maybe (return mempty) getInlines
@@ -379,64 +415,69 @@ parseRefList e = do
 parseRef :: PandocMonad m
          => Element -> JATS m (Map.Map Text MetaValue)
 parseRef e = do
-  let refId = text $ attrValue "id" e
-  let getInlineText n = maybe (return mempty) getInlines . filterChild (named n)
-  case filterChild (named "element-citation") e of
-       Just c  -> do
-         let refType = text $
-               case attrValue "publication-type" c of
-                  "journal" -> "article-journal"
-                  x -> x
-         (refTitle, refContainerTitle) <- do
-           t <- getInlineText "article-title" c
-           ct <- getInlineText "source" c
-           if t == mempty
-              then return (ct, mempty)
-              else return (t, ct)
-         refLabel <- getInlineText "label" c
-         refYear <- getInlineText "year" c
-         refVolume <- getInlineText "volume" c
-         refFirstPage <- getInlineText "fpage" c
-         refLastPage <- getInlineText "lpage" c
-         refPublisher <- getInlineText "publisher-name" c
-         refPublisherPlace <- getInlineText "publisher-loc" c
-         let refPages = refFirstPage <> (if refLastPage == mempty
-                                            then mempty
-                                            else text "\x2013" <> refLastPage)
-         let personGroups' = filterChildren (named "person-group") c
-         let getName nm = do
-               given <- maybe (return mempty) getInlines
-                         $ filterChild (named "given-names") nm
-               family <- maybe (return mempty) getInlines
-                         $ filterChild (named "surname") nm
-               return $ toMetaValue $ Map.fromList [
-                   ("given" :: Text, given)
-                 , ("family", family)
-                 ]
-         personGroups <- mapM (\pg ->
-                                do names <- mapM getName
-                                            (filterChildren (named "name") pg)
-                                   return (attrValue "person-group-type" pg,
-                                           toMetaValue names))
-                         personGroups'
-         return $ Map.fromList $
-           [ ("id" :: Text, toMetaValue refId)
-           , ("type", toMetaValue refType)
-           , ("title", toMetaValue refTitle)
-           , ("container-title", toMetaValue refContainerTitle)
-           , ("publisher", toMetaValue refPublisher)
-           , ("publisher-place", toMetaValue refPublisherPlace)
-           , ("title", toMetaValue refTitle)
-           , ("issued", toMetaValue
-                        $ Map.fromList [
-                            ("year" :: Text, refYear)
-                          ])
-           , ("volume", toMetaValue refVolume)
-           , ("page", toMetaValue refPages)
-           , ("citation-label", toMetaValue refLabel)
-           ] ++ personGroups
-       Nothing -> return $ Map.insert "id" (toMetaValue refId) mempty
-       -- TODO handle mixed-citation
+  let combineWithDash x y = x <> text "-" <> y
+  let getName nm = do
+        given <- maybe (return mempty) getInlines
+                  $ filterChild (named "given-names") nm
+        family <- maybe (return mempty) getInlines
+                  $ filterChild (named "surname") nm
+        return $ toMetaValue $ Map.fromList [
+            ("given" :: Text, given)
+          , ("family", family)
+          ]
+  let refElement :: PandocMonad m
+                 => Element -> Element -> JATS m (Maybe (Text, MetaValue))
+      refElement c el =
+        case qName (elName el) of
+          "article-title" -> Just . ("title",) . toMetaValue <$> getInlines el
+          "source" ->
+            case filterChild (named "article-title") c of
+              Just _ -> Just . ("container-title",) . toMetaValue <$> getInlines el
+              Nothing -> Just . ("title",) . toMetaValue <$> getInlines el
+          "label" -> Just . ("citation-label",) . toMetaValue <$> getInlines el
+          "year" -> case filterChild (named "month") c of
+                      Just m -> Just . ("issued",) . toMetaValue <$>
+                                 (combineWithDash
+                                    <$> getInlines el <*> getInlines m)
+                      Nothing -> Just . ("issued",) . toMetaValue <$> getInlines el
+          "volume" -> Just . ("volume",) . toMetaValue <$> getInlines el
+          "issue" -> Just . ("issue",) . toMetaValue <$> getInlines el
+          "isbn" -> Just . ("ISBN",) . toMetaValue <$> getInlines el
+          "issn" -> Just . ("ISSN",) . toMetaValue <$> getInlines el
+          "fpage" ->
+            case filterChild (named "lpage") c of
+              Just lp -> Just . ("page",) . toMetaValue <$>
+                          (combineWithDash <$> getInlines el <*> getInlines lp)
+              Nothing -> Just . ("page-first",) . toMetaValue <$> getInlines el
+          "publisher-name" -> Just . ("publisher",) . toMetaValue <$> getInlines el
+          "publisher-loc" -> Just . ("publisher-place",) . toMetaValue
+                                <$> getInlines el
+          "person-group" -> do names <- mapM getName
+                                            (filterChildren (named "name") el)
+                               pure $ Just (attrValue "person-group-type" el,
+                                            toMetaValue names)
+          "pub-id" -> case attrValue "pub-id-type" el of
+                         "doi"  -> pure $ Just ("DOI",  toMetaValue $ strContent el)
+                         "pmid" -> pure $ Just ("PMID", toMetaValue $ strContent el)
+                         _      -> pure Nothing
+          "object-id" -> case attrValue "pub-id-type" el of
+                         "doi"  -> pure $ Just ("DOI",  toMetaValue $ strContent el)
+                         "pmid" -> pure $ Just ("PMID", toMetaValue $ strContent el)
+                         _      -> pure Nothing
+
+
+          _ -> pure Nothing
+  refVariables <-
+    case filterChild (named "element-citation") e of
+      Just c -> (("type", toMetaValue $ case attrValue "publication-type" c of
+                            "journal" -> "article-journal"
+                            x -> x) :) .
+                  catMaybes <$> mapM (refElement c) (elChildren c)
+      Nothing -> pure []   -- TODO handle mixed-citation
+  -- allows round-tripping, since JATS writer puts ref- in front of citation ids:
+  let stripPref t = fromMaybe t $ T.stripPrefix "ref-" t
+  return $ Map.fromList (("id", toMetaValue $ stripPref $ attrValue "id" e)
+                        : refVariables)
 
 textContent :: Element -> Text
 textContent = strContent

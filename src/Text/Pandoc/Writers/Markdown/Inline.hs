@@ -68,8 +68,16 @@ escapeText opts = T.pack . go' . T.unpack
   go [] = []
   go (c:cs) =
     case c of
-       _ | c `elem` ['\\','`','*','_','[',']'] ->
-              '\\':c:go cs
+       '[' -> '\\':c:go cs
+       ']' -> '\\':c:go cs
+       '`' -> '\\':c:go cs
+       '*' -> '\\':c:go cs
+       '_' -> '\\':c:go cs
+       '\\' | isEnabled Ext_raw_tex opts -> '\\':c:go cs
+            | otherwise ->
+              case cs of -- don't escape \ if we don't have to:
+                d:_ | isAlphaNum d -> c:go cs
+                _ -> '\\':c:go cs
        '>' | isEnabled Ext_all_symbols_escapable opts -> '\\':'>':go cs
            | otherwise -> "&gt;" ++ go cs
        '<' | isEnabled Ext_all_symbols_escapable opts -> '\\':'<':go cs
@@ -100,7 +108,7 @@ escapeText opts = T.pack . go' . T.unpack
 escapeMarkuaString :: Text -> Text
 escapeMarkuaString s = foldr (uncurry T.replace) s [("--","~-~-"),
                         ("**","~*~*"),("//","~/~/"),("^^","~^~^"),(",,","~,~,")]
- 
+
 attrsToMarkdown :: Attr -> Doc Text
 attrsToMarkdown attribs = braces $ hsep [attribId, attribClasses, attribKeys]
         where attribId = case attribs of
@@ -138,7 +146,7 @@ attrsToMarkua attributes
               attrKeyValues = case attributes of
                                (_,_,[]) -> []
                                (_,_,keyvalues) -> map ((\(k,v) -> escAttr k
-                                              <> ": " <> escAttr v) . 
+                                              <> ": " <> escAttr v) .
                                               preprocessKeyValues) keyvalues
               escAttr          = mconcat . map escAttrChar . T.unpack
               escAttrChar '"'  = literal "\""
@@ -162,7 +170,7 @@ attrsToMarkua attributes
 
 -- | Add a (key, value) pair to Pandoc attr type
 addKeyValueToAttr :: Attr -> (Text,Text) -> Attr
-addKeyValueToAttr (ident,classes,kvs) (key,value) 
+addKeyValueToAttr (ident,classes,kvs) (key,value)
     | not (T.null key) && not (T.null value) = (ident,
                                                 classes,
                                                 (key,value): kvs)
@@ -170,7 +178,7 @@ addKeyValueToAttr (ident,classes,kvs) (key,value)
 
 linkAttributes :: WriterOptions -> Attr -> Doc Text
 linkAttributes opts attr =
-  if (isEnabled Ext_link_attributes opts || 
+  if (isEnabled Ext_link_attributes opts ||
         isEnabled Ext_attributes opts) && attr /= nullAttr
      then attrsToMarkdown attr
      else empty
@@ -485,31 +493,35 @@ inlineToMarkdown opts (Math InlineMath str) = do
   case () of
     _ | variant == Markua -> return $ "`" <> literal str <> "`" <> "$"
       | otherwise -> case writerHTMLMathMethod opts of
-          WebTeX url -> inlineToMarkdown opts
-                          (Image nullAttr [Str str] (url <> urlEncode str, str))
+          WebTeX url ->
+            let str' = T.strip str
+             in inlineToMarkdown opts
+                  (Image nullAttr [Str str'] (url <> urlEncode str', str'))
           _ | isEnabled Ext_tex_math_dollars opts ->
                 return $ "$" <> literal str <> "$"
             | isEnabled Ext_tex_math_single_backslash opts ->
                 return $ "\\(" <> literal str <> "\\)"
             | isEnabled Ext_tex_math_double_backslash opts ->
                 return $ "\\\\(" <> literal str <> "\\\\)"
-            | otherwise -> 
+            | otherwise ->
                 texMathToInlines InlineMath str >>=
                   inlineListToMarkdown opts .
                     (if variant == PlainText then makeMathPlainer else id)
-     
+
 inlineToMarkdown opts (Math DisplayMath str) = do
   variant <- asks envVariant
   case () of
     _ | variant == Markua -> do
-        let attributes = attrsToMarkua (addKeyValueToAttr ("",[],[]) 
+        let attributes = attrsToMarkua (addKeyValueToAttr ("",[],[])
                                                         ("format", "latex"))
-        return $ blankline <> attributes <> cr <> literal "```" <> cr 
+        return $ blankline <> attributes <> cr <> literal "```" <> cr
             <> literal str <> cr <> literal "```" <> blankline
       | otherwise -> case writerHTMLMathMethod opts of
-          WebTeX url -> (\x -> blankline <> x <> blankline) `fmap`
-                 inlineToMarkdown opts (Image nullAttr [Str str]
-                        (url <> urlEncode str, str))
+          WebTeX url ->
+            let str' = T.strip str
+             in (\x -> blankline <> x <> blankline) `fmap`
+                 inlineToMarkdown opts (Image nullAttr [Str str']
+                        (url <> urlEncode str', str'))
           _ | isEnabled Ext_tex_math_dollars opts ->
                 return $ "$$" <> literal str <> "$$"
             | isEnabled Ext_tex_math_single_backslash opts ->
@@ -670,13 +682,13 @@ inlineToMarkdown opts img@(Image attr alternate (source, tit))
                else alternate
   linkPart <- inlineToMarkdown opts (Link attr txt (source, tit))
   alt <- inlineListToMarkdown opts alternate
-  let attributes | variant == Markua = attrsToMarkua $ 
-            addKeyValueToAttr (addKeyValueToAttr attr ("title", tit)) 
-            ("alt", render (Just (writerColumns opts)) alt) 
+  let attributes | variant == Markua = attrsToMarkua $
+            addKeyValueToAttr (addKeyValueToAttr attr ("title", tit))
+            ("alt", render (Just (writerColumns opts)) alt)
                  | otherwise = empty
   return $ case variant of
                 PlainText -> "[" <> linkPart <> "]"
-                Markua -> cr <> attributes <> cr <> literal "![](" <> 
+                Markua -> cr <> attributes <> cr <> literal "![](" <>
                             literal source <> ")" <> cr
                 _ -> "!" <> linkPart
 inlineToMarkdown opts (Note contents) = do

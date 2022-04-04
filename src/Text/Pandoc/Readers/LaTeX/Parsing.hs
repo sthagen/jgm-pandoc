@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
@@ -24,6 +25,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , LaTeXState(..)
   , defaultLaTeXState
   , LP
+  , TokStream(..)
   , withVerbatimMode
   , rawLaTeXParser
   , applyMacros
@@ -34,6 +36,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , untoken
   , toksToString
   , satisfyTok
+  , peekTok
   , parseFromToks
   , disablingWithRaw
   , doMacros
@@ -119,6 +122,7 @@ import Text.Pandoc.Readers.LaTeX.Types (ExpansionPoint (..), Macro (..),
                                         ArgSpec (..), Tok (..), TokType (..))
 import Text.Pandoc.Shared
 import Text.Parsec.Pos
+import Text.Parsec (Stream(uncons))
 import Text.Pandoc.Walk
 
 newtype DottedNum = DottedNum [Int]
@@ -162,6 +166,7 @@ data LaTeXState = LaTeXState{ sOptions       :: ReaderOptions
                             , sLastHeaderNum :: DottedNum
                             , sLastFigureNum :: DottedNum
                             , sLastTableNum  :: DottedNum
+                            , sLastNoteNum   :: Int
                             , sTheoremMap    :: M.Map Text TheoremSpec
                             , sLastTheoremStyle :: TheoremStyle
                             , sLastLabel     :: Maybe Text
@@ -189,6 +194,7 @@ defaultLaTeXState = LaTeXState{ sOptions       = def
                               , sLastHeaderNum = DottedNum []
                               , sLastFigureNum = DottedNum []
                               , sLastTableNum  = DottedNum []
+                              , sLastNoteNum   = 0
                               , sTheoremMap    = M.empty
                               , sLastTheoremStyle = PlainStyle
                               , sLastLabel     = Nothing
@@ -241,7 +247,24 @@ instance HasMeta LaTeXState where
 instance Default LaTeXState where
   def = defaultLaTeXState
 
-type LP m = ParserT [Tok] LaTeXState m
+-- The Boolean is True if macros have already been expanded,
+-- False if they need expanding.
+data TokStream = TokStream !Bool [Tok]
+  deriving (Show)
+
+instance Semigroup TokStream where
+  (TokStream exp1 ts1) <> (TokStream exp2 ts2) =
+    TokStream (if null ts1 then exp2 else exp1) (ts1 <> ts2)
+
+instance Monoid TokStream where
+  mempty = TokStream False mempty
+  mappend = (<>)
+
+instance Monad m => Stream TokStream m Tok where
+  uncons (TokStream _ []) = return Nothing
+  uncons (TokStream _ (t:ts)) = return $ Just (t, TokStream False ts)
+
+type LP m = ParserT TokStream LaTeXState m
 
 withVerbatimMode :: PandocMonad m => LP m a -> LP m a
 withVerbatimMode parser = do
@@ -267,11 +290,12 @@ rawLaTeXParser toks parser valParser = do
   let preparser = setStartPos >> parser
   let rawparser = (,) <$> withRaw valParser <*> getState
   res' <- lift $ runParserT (withRaw (preparser >> getPosition))
-                            lstate "chunk" toks
+                            lstate "chunk" $ TokStream False toks
   case res' of
        Left _    -> mzero
        Right (endpos, toks') -> do
-         res <- lift $ runParserT rawparser lstate' "chunk" toks'
+         res <- lift $ runParserT rawparser lstate' "chunk"
+                     $ TokStream False toks'
          case res of
               Left _    -> mzero
               Right ((val, raw), st) -> do
@@ -301,7 +325,8 @@ applyMacros s = (guardDisabled Ext_latex_macros >> return s) <|>
       pstate <- getState
       let lstate = def{ sOptions = extractReaderOptions pstate
                       , sMacros  = extractMacros pstate :| [] }
-      res <- runParserT retokenize lstate "math" (tokenize (initialPos "math") s)
+      res <- runParserT retokenize lstate "math" $
+                 TokStream False (tokenize (initialPos "math") s)
       case res of
            Left e   -> Prelude.fail (show e)
            Right s' -> return s'
@@ -456,7 +481,7 @@ toksToString = T.unpack . untokenize
 parseFromToks :: PandocMonad m => LP m a -> [Tok] -> LP m a
 parseFromToks parser toks = do
   oldInput <- getInput
-  setInput toks
+  setInput $ TokStream False toks
   oldpos <- getPosition
   case toks of
      Tok pos _ _ : _ -> setPosition pos
@@ -480,20 +505,29 @@ satisfyTok f = do
     res <- tokenPrim (T.unpack . untoken) updatePos matcher
     updateState $ \st ->
       if sEnableWithRaw st
-         then st{ sRawTokens = IntMap.map (res:) $ sRawTokens st }
+         then
+           let !newraws = IntMap.map (res:) $! sRawTokens st
+            in  st{ sRawTokens = newraws }
          else st
     return $! res
   where matcher t | f t       = Just t
                   | otherwise = Nothing
-        updatePos :: SourcePos -> Tok -> [Tok] -> SourcePos
-        updatePos _spos _ (Tok pos _ _ : _) = pos
-        updatePos spos (Tok _ _ t)  []      = incSourceColumn spos (T.length t)
+        updatePos :: SourcePos -> Tok -> TokStream -> SourcePos
+        updatePos _spos _ (TokStream _ (Tok pos _ _ : _)) = pos
+        updatePos spos (Tok _ _ t) _ = incSourceColumn spos (T.length t)
+
+peekTok :: PandocMonad m => LP m Tok
+peekTok = do
+  doMacros
+  lookAhead (satisfyTok (const True))
 
 doMacros :: PandocMonad m => LP m ()
 doMacros = do
-  st <- getState
-  unless (sVerbatimMode st) $
-    getInput >>= doMacros' 1 >>= setInput
+  TokStream macrosExpanded toks <- getInput
+  unless macrosExpanded $ do
+    st <- getState
+    unless (sVerbatimMode st) $
+      doMacros' 1 toks >>= setInput . TokStream True
 
 doMacros' :: PandocMonad m => Int -> [Tok] -> LP m [Tok]
 doMacros' n inp =
@@ -566,10 +600,10 @@ doMacros' n inp =
                              Just o  -> do
                                 x <- option o bracketedToks
                                 getargs (M.singleton 1 x) $ drop 1 argspecs
-                   rest <- getInput
+                   TokStream _ rest <- getInput
                    return (args, rest)
              lstate <- getState
-             res <- lift $ runParserT getargs' lstate "args" ts
+             res <- lift $ runParserT getargs' lstate "args" $ TokStream False ts
              case res of
                Left _ -> Prelude.fail $ "Could not parse arguments for " ++
                                 T.unpack name
@@ -597,7 +631,8 @@ trySpecialMacro _ _ = mzero
 
 handleIf :: PandocMonad m => Bool -> [Tok] -> LP m [Tok]
 handleIf b ts = do
-  res' <- lift $ runParserT (ifParser b) defaultLaTeXState "tokens" ts
+  res' <- lift $ runParserT (ifParser b) defaultLaTeXState "tokens"
+               $ TokStream False ts
   case res' of
     Left _ -> Prelude.fail "Could not parse conditional"
     Right ts' -> return ts'
@@ -608,7 +643,7 @@ ifParser b = do
                     *> anyTok)
   elseToks <- (controlSeq "else" >> manyTill anyTok (controlSeq "fi"))
                  <|> ([] <$ controlSeq "fi")
-  rest <- getInput
+  TokStream _ rest <- getInput
   return $ (if b then ifToks else elseToks) ++ rest
 
 startsWithAlphaNum :: Text -> Bool
@@ -715,8 +750,9 @@ singleChar = singleCharTok <|> singleCharFromWord
   singleCharFromWord = do
     Tok pos toktype t <- disablingWithRaw $ satisfyTok isWordTok
     let (t1, t2) = (T.take 1 t, T.drop 1 t)
-    inp <- getInput
-    setInput $ Tok pos toktype t1 : Tok (incSourceColumn pos 1) toktype t2 : inp
+    TokStream macrosExpanded inp <- getInput
+    setInput $ TokStream macrosExpanded
+             $ Tok pos toktype t1 : Tok (incSourceColumn pos 1) toktype t2 : inp
     anyTok
 
 specialChars :: Set.Set Char
@@ -800,7 +836,8 @@ retokenizeComment = (do
         Tok (incSourceColumn (incSourceLine pos' (sourceLine pos - 1))
              (sourceColumn pos)) toktype' txt'
   let newtoks = map updPos $ tokenize pos $ T.tail txt
-  getInput >>= setInput . ((Tok pos Symbol "%" : newtoks) ++))
+  TokStream macrosExpanded ts <- getInput
+  setInput $ TokStream macrosExpanded ((Tok pos Symbol "%" : newtoks) ++ ts))
     <|> return ()
 
 bracedOrToken :: PandocMonad m => LP m [Tok]

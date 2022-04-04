@@ -265,7 +265,6 @@ githubMarkdownExtensions :: Extensions
 githubMarkdownExtensions = extensionsFromList
   [ Ext_pipe_tables
   , Ext_raw_html
-  , Ext_native_divs
   , Ext_auto_identifiers
   , Ext_gfm_auto_identifiers
   , Ext_autolink_bare_uris
@@ -356,7 +355,6 @@ getDefaultExtensions "plain"           = plainExtensions
 getDefaultExtensions "gfm"             = extensionsFromList
   [ Ext_pipe_tables
   , Ext_raw_html
-  , Ext_native_divs
   , Ext_auto_identifiers
   , Ext_gfm_auto_identifiers
   , Ext_autolink_bare_uris
@@ -377,7 +375,6 @@ getDefaultExtensions "commonmark_x"    = extensionsFromList
   , Ext_emoji
   , Ext_pipe_tables
   , Ext_raw_html
-  , Ext_raw_tex            -- only supported in writer (for math)
   , Ext_smart
   , Ext_tex_math_dollars
   , Ext_superscript
@@ -488,6 +485,7 @@ getAllExtensions f = universalExtensions <> getAll f
     [ Ext_empty_paragraphs
     , Ext_native_numbering
     , Ext_styles
+    , Ext_citations
     ]
   getAll "opendocument"    = extensionsFromList
     [ Ext_empty_paragraphs
@@ -512,7 +510,6 @@ getAllExtensions f = universalExtensions <> getAll f
     , Ext_task_lists
     , Ext_emoji
     , Ext_raw_html
-    , Ext_raw_tex            -- only supported in writer (for math)
     , Ext_implicit_figures
     , Ext_hard_line_breaks
     , Ext_smart

@@ -4,6 +4,7 @@
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE TypeApplications    #-}
 {- |
    Module      : Text.Pandoc.App.CommandLineOptions
    Copyright   : Copyright (C) 2006-2022 John MacFarlane
@@ -37,6 +38,7 @@ import Data.List (isPrefixOf)
 #endif
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
+import HsLua (Exception, getglobal, openlibs, peek, run, top)
 import Safe (tailDef)
 import Skylighting (Style, Syntax (..), defaultSyntaxMap, parseTheme)
 import System.Console.GetOpt
@@ -105,11 +107,15 @@ parseOptionsFromArgs options' defaults prg rawArgs = do
                      not (null (optIncludeBeforeBody opts)) ||
                      not (null (optIncludeAfterBody opts)) }
 
+-- | Supported LaTeX engines; the first item is used as default engine
+-- when going through LaTeX.
 latexEngines :: [String]
 latexEngines  = ["pdflatex", "lualatex", "xelatex", "latexmk", "tectonic"]
 
+-- | Supported HTML PDF engines; the first item is used as default
+-- engine when going through HTML.
 htmlEngines :: [String]
-htmlEngines  = ["pagedjs-cli", "wkhtmltopdf", "weasyprint", "prince"]
+htmlEngines  = ["wkhtmltopdf", "weasyprint", "pagedjs-cli", "prince"]
 
 engines :: [(Text, String)]
 engines = map ("html",) htmlEngines ++
@@ -942,10 +948,14 @@ options =
                   (\_ -> do
                      prg <- getProgName
                      defaultDatadir <- defaultUserDataDir
+                     luaVersion <- HsLua.run @HsLua.Exception $ do
+                       openlibs
+                       getglobal "_VERSION"
+                       peek top
                      UTF8.hPutStrLn stdout
                       $ T.pack
                       $ prg ++ " " ++ T.unpack pandocVersion ++
-                        compileInfo ++
+                        compileInfo ++ "\nScripting engine: " ++ luaVersion ++
                         "\nUser data directory: " ++ defaultDatadir ++
                         ('\n':copyrightMessage)
                      exitSuccess ))
@@ -985,7 +995,7 @@ compileInfo =
   "\nCompiled with pandoc-types " ++ VERSION_pandoc_types ++
   ", texmath " ++ VERSION_texmath ++ ", skylighting " ++
   VERSION_skylighting ++ ",\nciteproc " ++ VERSION_citeproc ++
-  ", ipynb " ++ VERSION_ipynb
+  ", ipynb " ++ VERSION_ipynb ++ ", hslua " ++ VERSION_hslua
 
 handleUnrecognizedOption :: String -> [String] -> [String]
 handleUnrecognizedOption "--smart" =

@@ -41,6 +41,7 @@ documentTree :: PandocMonad m
              -> OrgParser m (F Inlines)
              -> OrgParser m (F Headline)
 documentTree blocks inline = do
+  many commentLine
   properties <- option mempty propertiesDrawer
   initialBlocks <- blocks
   headlines <- sequence <$> manyTill (headline blocks inline 1) eof
@@ -59,6 +60,9 @@ documentTree blocks inline = do
       , headlineContents = initialBlocks'
       , headlineChildren = headlines'
       }
+  where
+    commentLine :: Monad m => OrgParser m ()
+    commentLine = commentLineStart <* anyLine
 
 -- | Create a tag containing the given string.
 toTag :: Text -> Tag
@@ -405,7 +409,8 @@ propertiesDrawer = try $ do
 
    key :: Monad m => OrgParser m PropertyKey
    key = fmap toPropertyKey . try $
-         skipSpaces *> char ':' *> many1TillChar nonspaceChar (char ':')
+         skipSpaces *> char ':' *>
+         many1TillChar nonspaceChar (try $ char ':' *> spaceChar)
 
    value :: Monad m => OrgParser m PropertyValue
    value = fmap toPropertyValue . try $

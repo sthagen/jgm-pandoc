@@ -16,6 +16,7 @@ import Text.Pandoc.Citeproc.Locator (parseLocator, toLocatorMap,
                                      LocatorInfo(..))
 import Text.Pandoc.Citeproc.CslJson (cslJsonToReferences)
 import Text.Pandoc.Citeproc.BibTeX (readBibtexString, Variant(..))
+import Text.Pandoc.Readers.RIS (readRIS)
 import Text.Pandoc.Citeproc.MetaValue (metaValueToReference, metaValueToText)
 import Text.Pandoc.Readers.Markdown (yamlToRefs)
 import Text.Pandoc.Builder (Inlines, Many(..), deleteMeta, setMeta)
@@ -107,8 +108,8 @@ processCitations (Pandoc meta bs) = do
          evalState (walkM insertResolvedCitations $ Pandoc meta' bs)
          $ cits
   return $ walk removeQuoteSpan
-         $ Pandoc meta''
-         $ insertRefs refkvs classes meta'' (B.toList bibs) bs'
+         $ insertRefs refkvs classes (B.toList bibs)
+         $ Pandoc meta'' bs'
 
 removeQuoteSpan :: Inline -> Inline
 removeQuoteSpan (Span ("",["csl-quoted"],[]) xs) = Span nullAttr xs
@@ -267,6 +268,11 @@ getRefs locale format idpred mbfp raw = do
               (T.unpack <$> mbfp)
               raw
       return $ mapMaybe metaValueToReference rs
+    Format_ris -> do
+      Pandoc meta _ <- readRIS def (UTF8.toText raw)
+      case lookupMeta "references" meta of
+        Just (MetaList rs) -> return $ mapMaybe metaValueToReference rs
+        _ -> return []
 
 -- assumes we walk in same order as query
 insertResolvedCitations :: Inline -> State [Inlines] Inline
@@ -321,7 +327,7 @@ fromPandocCitations locale otherIdsMap = concatMap go
                , citationItemSuffix = case suffix of
                                         [] -> Nothing
                                         ils -> Just $ B.fromList ils
-               }
+               , citationItemData = Nothing }
      in if Pandoc.citationId c == "*"
            then []
            else
@@ -343,6 +349,7 @@ data BibFormat =
   | Format_bibtex
   | Format_json
   | Format_yaml
+  | Format_ris
   deriving (Show, Eq, Ord)
 
 formatFromExtension :: FilePath -> Maybe BibFormat
@@ -353,6 +360,7 @@ formatFromExtension fp = case dropWhile (== '.') $ takeExtension fp of
                            "json"     -> Just Format_json
                            "yaml"     -> Just Format_yaml
                            "yml"      -> Just Format_yaml
+                           "ris"      -> Just Format_ris
                            _          -> Nothing
 
 
@@ -453,23 +461,24 @@ isYesValue _ = False
 -- if document contains a Div with id="refs", insert
 -- references as its contents.  Otherwise, insert references
 -- at the end of the document in a Div with id="refs"
-insertRefs :: [(Text,Text)] -> [Text] -> Meta -> [Block] -> [Block] -> [Block]
-insertRefs _ _ _  []   bs = bs
-insertRefs refkvs refclasses meta refs bs =
+insertRefs :: [(Text,Text)] -> [Text] -> [Block] -> Pandoc -> Pandoc
+insertRefs _ _ [] d = d
+insertRefs refkvs refclasses refs (Pandoc meta bs) =
   if isRefRemove meta
-     then bs
-     else case runState (walkM go bs) False of
-               (bs', True) -> bs'
-               (_, False)
-                 -> case refTitle meta of
+     then Pandoc meta bs
+     else case runState (walkM go (Pandoc meta bs)) False of
+               (d', True) -> d'
+               (Pandoc meta' bs', False)
+                 -> Pandoc meta' $
+                    case refTitle meta of
                       Nothing ->
-                        case reverse bs of
+                        case reverse bs' of
                           Header lev (id',classes,kvs) ys : xs ->
                             reverse xs ++
                             [Header lev (id',addUnNumbered classes,kvs) ys,
                              Div ("refs",refclasses,refkvs) refs]
-                          _ -> bs ++ [refDiv]
-                      Just ils -> bs ++
+                          _ -> bs' ++ [refDiv]
+                      Just ils -> bs' ++
                         [Header 1 ("bibliography", ["unnumbered"], []) ils,
                          refDiv]
   where

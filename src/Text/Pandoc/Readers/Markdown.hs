@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -21,6 +22,7 @@ module Text.Pandoc.Readers.Markdown (
 
 import Control.Monad
 import Control.Monad.Except (throwError)
+import Data.Bifunctor (second)
 import Data.Char (isAlphaNum, isPunctuation, isSpace)
 import Text.DocLayout (realLength)
 import Data.List (transpose, elemIndex, sortOn, foldl')
@@ -44,7 +46,7 @@ import Safe.Foldable (maximumBounded)
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.Pandoc.Walk (walk)
-import Text.Pandoc.Parsing hiding (tableWith)
+import Text.Pandoc.Parsing hiding (tableCaption)
 import Text.Pandoc.Readers.HTML (htmlInBalanced, htmlTag, isBlockTag,
                                  isCommentTag, isInlineTag, isTextTag)
 import Text.Pandoc.Readers.LaTeX (applyMacros, rawLaTeXBlock, rawLaTeXInline)
@@ -635,7 +637,7 @@ identifier = do
 identifierAttr :: PandocMonad m => MarkdownParser m (Attr -> Attr)
 identifierAttr = try $ do
   char '#'
-  result <- identifier
+  result <- T.pack <$> many1 (alphaNum <|> oneOf "-_:.") -- see #7920
   return $ \(_,cs,kvs) -> (result,cs,kvs)
 
 classAttr :: PandocMonad m => MarkdownParser m (Attr -> Attr)
@@ -1298,14 +1300,18 @@ tableCaption = do
 -- Parse a simple table with '---' header and one line per row.
 simpleTable :: PandocMonad m
             => Bool  -- ^ Headerless table
-            -> MarkdownParser m ([Alignment], [Double], F [Row], F [Row])
+            -> MarkdownParser m (F TableComponents)
 simpleTable headless = do
-  (aligns, _widths, heads', lines') <-
-       tableWith (simpleTableHeader headless) tableLine
+  tableComponents <-
+       tableWith' NormalizeHeader
+              (simpleTableHeader headless) tableLine
               (return ())
               (if headless then tableFooter else tableFooter <|> blanklines')
-  -- Simple tables get 0s for relative column widths (i.e., use default)
-  return (aligns, replicate (length aligns) 0, heads', lines')
+  -- All columns in simple tables have default widths.
+  let useDefaultColumnWidths tc =
+        let cs' = map (second (const ColWidthDefault)) $ tableColSpecs tc
+        in tc {tableColSpecs = cs'}
+  return $ useDefaultColumnWidths <$> tableComponents
 
 -- Parse a multiline table:  starts with row of '-' on top, then header
 -- (which may be multiline), then the rows,
@@ -1313,9 +1319,10 @@ simpleTable headless = do
 -- ending with a footer (dashed line followed by blank line).
 multilineTable :: PandocMonad m
                => Bool -- ^ Headerless table
-               -> MarkdownParser m ([Alignment], [Double], F [Row], F [Row])
+               -> MarkdownParser m (F TableComponents)
 multilineTable headless =
-  tableWith (multilineTableHeader headless) multilineRow blanklines tableFooter
+  tableWith' NormalizeHeader (multilineTableHeader headless)
+             multilineRow blanklines tableFooter
 
 multilineTableHeader :: PandocMonad m
                      => Bool -- ^ Headerless table
@@ -1355,8 +1362,8 @@ multilineTableHeader headless = try $ do
 -- which may be grid, separated by blank lines, and
 -- ending with a footer (dashed line followed by blank line).
 gridTable :: PandocMonad m => Bool -- ^ Headerless table
-          -> MarkdownParser m ([Alignment], [Double], F [Row], F [Row])
-gridTable headless = gridTableWith' parseBlocks headless
+          -> MarkdownParser m (F TableComponents)
+gridTable headless = gridTableWith' NormalizeHeader parseBlocks headless
 
 pipeBreak :: PandocMonad m => MarkdownParser m ([Alignment], [Int])
 pipeBreak = try $ do
@@ -1364,13 +1371,13 @@ pipeBreak = try $ do
   openPipe <- (True <$ char '|') <|> return False
   first <- pipeTableHeaderPart
   rest <- many $ sepPipe *> pipeTableHeaderPart
-  -- surrounding pipes needed for a one-column table:
-  guard $ not (null rest && not openPipe)
-  optional (char '|')
+  closePipe <- (True <$ char '|') <|> return False
+  -- at least one pipe needed for a one-column table:
+  guard $ not (null rest && not (openPipe || closePipe))
   blankline
   return $ unzip (first:rest)
 
-pipeTable :: PandocMonad m => MarkdownParser m ([Alignment], [Double], F [Row], F [Row])
+pipeTable :: PandocMonad m => MarkdownParser m (F TableComponents)
 pipeTable = try $ do
   nonindentSpaces
   lookAhead nonspaceChar
@@ -1390,7 +1397,8 @@ pipeTable = try $ do
                   else replicate (length aligns) 0.0
   (headCells :: F [Blocks]) <- sequence <$> mapM cellContents heads'
   (rows :: F [[Blocks]]) <- sequence <$> mapM (fmap sequence . mapM cellContents) lines''
-  return (aligns, widths, toHeaderRow <$> headCells, map toRow <$> rows)
+  return $
+    toTableComponents' NormalizeHeader aligns widths <$> headCells <*> rows
 
 sepPipe :: PandocMonad m => MarkdownParser m ()
 sepPipe = try $ do
@@ -1406,9 +1414,10 @@ pipeTableRow = try $ do
   -- split into cells
   let chunk = void (code <|> math <|> rawHtmlInline <|> escapedChar <|> rawLaTeXInline')
        <|> void (noneOf "|\n\r")
-  cells <- (snd <$> withRaw (many chunk)) `sepEndBy1` char '|'
-  -- surrounding pipes needed for a one-column table:
-  guard $ not (length cells == 1 && not openPipe)
+  cells <- (snd <$> withRaw (many chunk)) `sepBy1` char '|'
+  closePipe <- (True <$ char '|') <|> return False
+  -- at least one pipe needed for a one-column table:
+  guard $ not (length cells == 1 && not (openPipe || closePipe))
   blankline
   return cells
 
@@ -1445,29 +1454,10 @@ scanForPipe = do
        (_, T.uncons -> Just ('|', _)) -> return ()
        _                              -> mzero
 
--- | Parse a table using 'headerParser', 'rowParser',
--- 'lineParser', and 'footerParser'.  Variant of the version in
--- Text.Pandoc.Parsing.
-tableWith :: PandocMonad m
-          => MarkdownParser m (F [Blocks], [Alignment], [Int])
-          -> ([Int] -> MarkdownParser m (F [Blocks]))
-          -> MarkdownParser m sep
-          -> MarkdownParser m end
-          -> MarkdownParser m ([Alignment], [Double], F [Row], F [Row])
-tableWith headerParser rowParser lineParser footerParser = try $ do
-    (heads, aligns, indices) <- headerParser
-    lines' <- fmap sequence $ rowParser indices `sepEndBy1` lineParser
-    footerParser
-    numColumns <- getOption readerColumns
-    let widths = if null indices
-                    then replicate (length aligns) 0.0
-                    else widthsFromIndices numColumns indices
-    return (aligns, widths, toHeaderRow <$> heads, map toRow <$> lines')
-
 table :: PandocMonad m => MarkdownParser m (F Blocks)
 table = try $ do
   frontCaption <- option Nothing (Just <$> tableCaption)
-  (aligns, widths, heads, lns) <-
+  tableComponents <-
          (guardEnabled Ext_pipe_tables >> try (scanForPipe >> pipeTable)) <|>
          (guardEnabled Ext_multiline_tables >> try (multilineTable False)) <|>
          (guardEnabled Ext_simple_tables >>
@@ -1480,23 +1470,10 @@ table = try $ do
   caption <- case frontCaption of
                   Nothing -> option (return mempty) tableCaption
                   Just c  -> return c
-  -- renormalize widths if greater than 100%:
-  let totalWidth = sum widths
-  let widths' = if totalWidth < 1
-                   then widths
-                   else map (/ totalWidth) widths
-  let strictPos w
-        | w > 0     = ColWidth w
-        | otherwise = ColWidthDefault
   return $ do
     caption' <- caption
-    heads' <- heads
-    lns' <- lns
-    return $ B.table (B.simpleCaption $ B.plain caption')
-                     (zip aligns (strictPos <$> widths'))
-                     (TableHead nullAttr heads')
-                     [TableBody nullAttr 0 [] lns']
-                     (TableFoot nullAttr [])
+    (TableComponents _attr _capt colspecs th tb tf) <- tableComponents
+    return $ B.table (B.simpleCaption $ B.plain caption') colspecs th tb tf
 
 --
 -- inline
@@ -1748,7 +1725,7 @@ nonEndline = satisfy (/='\n')
 
 str :: PandocMonad m => MarkdownParser m (F Inlines)
 str = do
-  result <- mconcat <$> many1
+  !result <- mconcat <$> many1
              ( T.pack <$> (many1 alphaNum)
               <|> "." <$ try (char '.' <* notFollowedBy (char '.')) )
   updateLastStrPos
@@ -1764,11 +1741,11 @@ str = do
                         ils' <- ils
                         case B.toList ils' of
                              [Space] ->
-                                 return (B.str result <> B.str "\160")
-                             _ -> return (B.str result <> ils'))
-                <|> return (return (B.str result))
-         else return (return (B.str result)))
-     <|> return (return (B.str result))
+                                 return $! (B.str result <> B.str "\160")
+                             _ -> return $! (B.str result <> ils'))
+                <|> return (return $! B.str result)
+         else return (return $! B.str result))
+     <|> return (return $! B.str result)
 
 -- an endline character that can be treated as a space, not a structural break
 endline :: PandocMonad m => MarkdownParser m (F Inlines)
@@ -2282,9 +2259,3 @@ doubleQuoted = do
     fmap B.doubleQuoted . trimInlinesF . mconcat <$>
       many1Till inline doubleQuoteEnd))
     <|> (return (return (B.str "\8220")))
-
-toRow :: [Blocks] -> Row
-toRow = Row nullAttr . map B.simpleCell
-
-toHeaderRow :: [Blocks] -> [Row]
-toHeaderRow l = [toRow l | not (null l) && not (all null l)]

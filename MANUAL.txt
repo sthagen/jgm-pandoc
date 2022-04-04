@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: January 30, 2022
+date: April 4, 2022
 ---
 
 # Synopsis
@@ -235,6 +235,7 @@ header when requesting a document from a URL:
     - `docbook` ([DocBook])
     - `docx` ([Word docx])
     - `dokuwiki` ([DokuWiki markup])
+    - `endnotexml` ([EndNote XML bibliography])
     - `epub` ([EPUB])
     - `fb2` ([FictionBook2] e-book)
     - `gfm` ([GitHub-Flavored Markdown]),
@@ -259,6 +260,7 @@ header when requesting a document from a URL:
     - `odt` ([ODT])
     - `opml` ([OPML])
     - `org` ([Emacs Org mode])
+    - `ris` ([RIS] bibliography)
     - `rtf` ([Rich Text Format])
     - `rst` ([reStructuredText])
     - `t2t` ([txt2tags])
@@ -486,6 +488,7 @@ header when requesting a document from a URL:
 [roff ms]: https://man.cx/groff_ms(7)
 [Haskell]: https://www.haskell.org
 [GNU Texinfo]: https://www.gnu.org/software/texinfo/
+[RIS]: https://en.wikipedia.org/wiki/RIS_(file_format)
 [Emacs Org mode]: https://orgmode.org
 [AsciiDoc]: https://www.methods.co.nz/asciidoc/
 [AsciiDoctor]: https://asciidoctor.org/
@@ -504,6 +507,7 @@ header when requesting a document from a URL:
 [BibTeX]: https://ctan.org/pkg/bibtex
 [BibLaTeX]: https://ctan.org/pkg/biblatex
 [Markua]: https://leanpub.com/markua/read
+[EndNote XML bibliography]: https://support.clarivate.com/Endnote/s/article/EndNote-XML-Document-Type-Definition
 
 ## Reader options {.options}
 
@@ -637,10 +641,12 @@ header when requesting a document from a URL:
 
 :   Read metadata from the supplied YAML (or JSON) file. This
     option can be used with every input format, but string scalars
-    in the YAML file will always be parsed as Markdown. Generally,
-    the input will be handled the same as in [YAML metadata
-    blocks][Extension: `yaml_metadata_block`]. This option can be
-    used repeatedly to include multiple metadata files; values in
+    in the YAML file will always be parsed as Markdown. (If the
+    input format is Markdown or a Markdown variant, then the
+    same variant will be used to parse the metadata file;
+    if it is a non-Markdown format, pandoc's default Markdown
+    extensions will be used.) This option can be used
+    repeatedly to include multiple metadata files; values in
     files specified later on the command line will be preferred
     over those specified in earlier files. Metadata values
     specified inside the document, or by using `-M`, overwrite
@@ -950,8 +956,7 @@ header when requesting a document from a URL:
     `data-external="1"` will be left alone; the documents they
     link to will not be incorporated in the document.
     Limitation: resources that are loaded dynamically through
-    JavaScript cannot be incorporated; as a result,
-    `--self-contained` does not work with `--mathjax`, and some
+    JavaScript cannot be incorporated; as a result, some
     advanced features (e.g.  zoom or speaker notes) may not work
     in an offline "self-contained" `reveal.js` slide show.
 
@@ -3162,7 +3167,8 @@ inserted after certain abbreviations, such as "Mr."
 This extension can be enabled/disabled for the following formats:
 
 input formats
-:  `markdown`, `commonmark`, `latex`, `mediawiki`, `org`, `rst`, `twiki`
+:  `markdown`, `commonmark`, `latex`, `mediawiki`, `org`, `rst`, `twiki`,
+   `html`
 
 output formats
 :  `markdown`, `latex`, `context`, `rst`
@@ -3465,8 +3471,17 @@ output format.
 
 #### Extension: `citations` {#org-citations}
 
-Some aspects of [Pandoc's Markdown citation syntax](#citations)
-are also accepted in `org` input.
+When the `citations` extension is enabled in `org`,
+org-cite and org-ref style citations will be parsed as
+native pandoc citations.
+
+  [org-cite]: https://orgmode.org/manual/Citations.html
+  [org-ref]:  https://github.com/jkitchin/org-ref
+
+When `citations` is enabled in `docx`, citations inserted
+by Zotero or Mendeley or EndNote plugins will be parsed as native
+pandoc citations.  (Otherwise, the formatted citations generated
+by the bibliographic software will be parsed as regular text.)
 
 #### Extension: `fancy_lists` {#org-fancy-lists}
 
@@ -4784,7 +4799,7 @@ them and they won't be treated as math delimiters.
 
 For display math, use `$$` delimiters.  (In this case, the delimiters
 may be separated from the formula by whitespace.  However, there can be
-no blank lines betwen the opening and closing `$$` delimiters.)
+no blank lines between the opening and closing `$$` delimiters.)
 
 TeX math will be printed in all output formats. How it is rendered
 depends on the output format:
@@ -5717,6 +5732,7 @@ to YAML array.  A bibliography may have any of these formats:
   BibTeX            .bibtex
   CSL JSON          .json
   CSL YAML          .yaml
+  RIS               .ris
 
 Note that `.bib` can be used with both BibTeX and BibLaTeX files;
 use the extension `.bibtex` to force interpretation as BibTeX.
@@ -5958,6 +5974,19 @@ or at the end of your document:
 The bibliography will be inserted after this heading.  Note that
 the `unnumbered` class will be added to this heading, so that the
 section will not be numbered.
+
+If you want to put the bibliography into a variable in your
+template, one way to do that is to put the div with id `refs`
+into a metadata field, e.g.
+
+    ---
+    refs: |
+       ::: {#refs}
+       :::
+    ...
+
+You can then put the variable `$refs$` into your template where
+you want the bibliography to be placed.
 
 ## Including uncited items in the bibliography
 
@@ -6240,6 +6269,15 @@ option):
 
 Both methods allow incremental and nonincremental lists to be mixed
 in a single document.
+
+If you want to include a block-quoted list, you can work around
+this behavior by putting the list inside a fenced div, so that
+it is not the direct child of the block quote:
+
+    > ::: wrapper
+    > - a
+    > - list in a quote
+    > :::
 
 ## Inserting pauses
 
@@ -6974,9 +7012,6 @@ metadata field (see [EPUB Metadata], above).
 
 # A note on security
 
-If you use pandoc to convert user-contributed content in a web
-application, here are some things to keep in mind:
-
 1. Although pandoc itself will not create or modify any files other
    than those you explicitly ask it create (with the exception
    of temporary files used in producing PDFs), a filter or custom
@@ -7002,7 +7037,8 @@ application, here are some things to keep in mind:
    that fully isolates pandoc from your file system, by running the
    pandoc operations in the `PandocPure` monad. See the document
    [Using the pandoc API](https://pandoc.org/using-the-pandoc-api.html)
-   for more details.
+   for more details. (This corresponds to the use of the `--sandbox`
+   option on the command line.) 
 
 5. Pandoc's parsers can exhibit pathological performance on some
    corner cases.  It is wise to put any pandoc operations under
@@ -7018,8 +7054,8 @@ application, here are some things to keep in mind:
    If `raw_html` is enabled for the Markdown input, users can
    inject arbitrary HTML.  Even if `raw_html` is disabled,
    users can include dangerous content in URLs and attributes.
-   To be safe, you should run all the generated HTML through
-   an HTML sanitizer.
+   To be safe, you should run all HTML generated from untrusted
+   user input through an HTML sanitizer.
 
 # Authors
 
