@@ -416,6 +416,50 @@ should add/modify your `LUA_PATH` and `LUA_CPATH` to include the
 correct locations; [see detailed instructions
 here](https://studio.zerobrane.com/doc-remote-debugging).
 
+## Common pitfalls
+
+AST elements not updated
+:   A filtered element will only be updated if the filter
+    function returns a new element to replace it. A function like
+    the below has no effect, as the function returns no value:
+
+    ``` lua
+    function Str (str)
+      str.text = string.upper(str.text)
+    end
+    ```
+
+    The correct version would be
+
+    ``` lua
+    function Str (str)
+      str.text = string.upper(str.text)
+      return str
+    end
+    ```
+
+Pattern behavior is locate dependent
+:   The character classes in Lua's pattern library depend on the
+    current locale: E.g., the character `©` will be treated as
+    punctuation, and matched by the pattern `%p`, on CP-1252
+    locales, but not on systems using a UTF-8 locale.
+
+    A reliable way to ensure unified handling of patterns and
+    character classes is to use the "C" locale by adding
+    `os.setlocale 'C'` to the top of the Lua script.
+
+String library is not Unicode aware
+:   Lua's `string` library treats each byte as a single
+    character. A function like `string.upper` will not have the
+    intended effect when applied to words with non-ASCII
+    characters. Similarly, a pattern like `[☃]` will match *any*
+    of the bytes `\240`, `\159`, `\154`, and `\178`, but
+    **won't** match the "snowman" Unicode character.
+
+    Use the [pandoc.text](#module-text) module for Unicode-aware
+    transformation, and consider using using the lpeg or re
+    library for pattern matching.
+
 # Examples
 
 The following filters are presented as examples. A repository of
@@ -686,7 +730,7 @@ Images are added to the mediabag. For output to binary formats,
 pandoc will use images in the mediabag. For textual formats, use
 `--extract-media` to specify a directory where the files in the
 mediabag will be written, or (for HTML only) use
-`--self-contained`.
+`--embed-resources`.
 
 ``` lua
 -- Pandoc filter to process code blocks with class "abc" containing
@@ -694,7 +738,7 @@ mediabag will be written, or (for HTML only) use
 --
 -- * Assumes that abcm2ps and ImageMagick's convert are in the path.
 -- * For textual output formats, use --extract-media=abc-images
--- * For HTML formats, you may alternatively use --self-contained
+-- * For HTML formats, you may alternatively use --embed-resources
 
 local filetypes = { html = {"png", "image/png"}
                   , latex = {"pdf", "application/pdf"}
@@ -859,7 +903,9 @@ equal in Lua if and only if they are equal in Haskell.
 Applies a Lua filter to the Pandoc element. Just as for
 full-document filters, the order in which elements are traversed
 can be controlled by setting the `traverse` field of the filter;
-see the section on [traversal order][Traversal order].
+see the section on [traversal order][Traversal order]. Returns a
+(deep) copy on which the filter has been applied: the original
+element is left untouched.
 
 Parameters:
 
@@ -935,7 +981,9 @@ Haskell.
 Applies a Lua filter to the block element. Just as for
 full-document filters, the order in which elements are traversed
 can be controlled by setting the `traverse` field of the filter;
-see the section on [traversal order][Traversal order].
+see the section on [traversal order][Traversal order]. Returns a
+(deep) copy on which the filter has been applied: the original
+element is left untouched.
 
 Note that the filter is applied to the subtree, but not to the
 `self` block element. The rationale is that otherwise the element
@@ -1284,7 +1332,9 @@ values:
 Applies a Lua filter to the Blocks list. Just as for
 full-document filters, the order in which elements are traversed
 can be controlled by setting the `traverse` field of the filter;
-see the section on [traversal order][Traversal order].
+see the section on [traversal order][Traversal order]. Returns a
+(deep) copy on which the filter has been applied: the original
+list is left untouched.
 
 Parameters:
 
@@ -1319,7 +1369,9 @@ Haskell.
 Applies a Lua filter to the Inline element. Just as for
 full-document filters, the order in which elements are traversed
 can be controlled by setting the `traverse` field of the filter;
-see the section on [traversal order][Traversal order].
+see the section on [traversal order][Traversal order]. Returns a
+(deep) copy on which the filter has been applied: the original
+element is left untouched.
 
 Note that the filter is applied to the subtree, but not to the
 `self` inline element. The rationale is that otherwise the
@@ -1740,7 +1792,9 @@ values:
 Applies a Lua filter to the Inlines list. Just as for
 full-document filters, the order in which elements are handled
 are are Inline → Inlines → Block → Blocks. The filter is applied
-to all list items *and* to the list itself.
+to all list items *and* to the list itself. Returns a (deep)
+copy on which the filter has been applied: the original list is
+left untouched.
 
 Parameters:
 
@@ -3372,6 +3426,8 @@ Usage:
 ### `walk_block (element, filter)` {#pandoc.walk_block}
 
 Apply a filter inside a block element, walking its contents.
+Returns a (deep) copy on which the filter has been applied:
+the original element is left untouched.
 
 Parameters:
 
@@ -3387,6 +3443,8 @@ Returns: the transformed block element
 ### `walk_inline (element, filter)` {#pandoc.walk_inline}
 
 Apply a filter inside an inline element, walking its contents.
+Returns a (deep) copy on which the filter has been applied:
+the original element is left untouched.
 
 Parameters:
 
@@ -3765,7 +3823,7 @@ Usage:
 
 The `pandoc.mediabag` module allows accessing pandoc's media
 storage. The "media bag" is used when pandoc is called with the
-`--extract-media` or (for HTML only) `--self-contained` option.
+`--extract-media` or (for HTML only) `--embed-resources` option.
 
 The module is loaded as part of module `pandoc` and can either
 be accessed via the `pandoc.mediabag` field, or explicitly
@@ -3981,7 +4039,8 @@ Returns:
 
 ### `pandoc.List:clone ()` {#pandoc.list:clone}
 
-Returns a (shallow) copy of the list.
+Returns a (shallow) copy of the list. (To get a deep copy
+of the list, use `walk` with an empty filter.)
 
 ### `pandoc.List:extend (list)` {#pandoc.list:extend}
 
