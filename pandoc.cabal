@@ -1,6 +1,6 @@
 cabal-version:   2.4
 name:            pandoc
-version:         2.18
+version:         2.19
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -257,6 +257,10 @@ extra-source-files:
                  test/command/5876.yaml
                  test/command/5876/metadata/5876.yaml
                  test/command/5876/metadata/command/5876.yaml
+                 test/command/6466-beg.hs
+                 test/command/6466-end.hs
+                 test/command/6466-mid.hs
+                 test/command/6466-whole.hs
                  test/command/7861.yaml
                  test/command/7861/metadata/placeholder
                  test/docbook-chapter.docbook
@@ -476,7 +480,7 @@ library
                  blaze-markup          >= 0.8      && < 0.9,
                  bytestring            >= 0.9      && < 0.12,
                  case-insensitive      >= 1.2      && < 1.3,
-                 citeproc              >= 0.8      && < 0.9,
+                 citeproc              >= 0.8.0.1  && < 0.9,
                  commonmark            >= 0.2.2    && < 0.3,
                  commonmark-extensions >= 0.2.3.1  && < 0.3,
                  commonmark-pandoc     >= 0.2.1.2  && < 0.3,
@@ -516,13 +520,13 @@ library
                  random                >= 1        && < 1.3,
                  safe                  >= 0.3.18   && < 0.4,
                  scientific            >= 0.3      && < 0.4,
-                 skylighting           >= 0.12.3.1 && < 0.13,
-                 skylighting-core      >= 0.12.3.1 && < 0.13,
+                 skylighting           >= 0.13     && < 0.14,
+                 skylighting-core      >= 0.13     && < 0.14,
                  split                 >= 0.2      && < 0.3,
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
                  temporary             >= 1.1      && < 1.4,
-                 texmath               >= 0.12.5   && < 0.12.6,
+                 texmath               >= 0.12.5.1 && < 0.12.6,
                  text                  >= 1.1.1.0  && < 2.1,
                  text-conversions      >= 0.3      && < 0.4,
                  time                  >= 1.5      && < 1.14,
