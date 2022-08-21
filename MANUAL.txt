@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: August 3, 2022
+date: August 18, 2022
 ---
 
 # Synopsis
@@ -7050,6 +7050,25 @@ be taken from it instead of the current time.
 Some document formats also include a unique identifier.  For
 EPUB, this can be set explicitly by setting the `identifier`
 metadata field (see [EPUB Metadata], above).
+
+# Running pandoc as a web server
+
+If you rename (or symlink) the pandoc executable to
+`pandoc-server`, it will start up a web server with a JSON
+API. This server exposes most of the conversion functionality
+of pandoc.  For full documentation, see the [pandoc-server]
+man page.
+
+If you rename (or symlink) the pandoc executable to
+`pandoc-server.cgi`, it will function as a CGI program
+exposing the same API as `pandoc-server`.
+
+`pandoc-server` is designed to be maximally secure; it uses
+Haskell's type system to provide strong guarantees that no I/O
+will be performed on the server during pandoc conversions.
+
+[pandoc-server]: https://github.com/jgm/pandoc/blob/master/doc/pandoc-server.md
+
 
 # A note on security
 

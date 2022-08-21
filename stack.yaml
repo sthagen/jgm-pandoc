@@ -1,6 +1,5 @@
 flags:
   pandoc:
-    server: false
     embed_data_files: true
   QuickCheck:
     old-random: false
@@ -13,6 +12,7 @@ extra-deps:
 - skylighting-format-latex-0.1
 - skylighting-format-blaze-html-0.1
 - emojis-0.1.2
+- gridtables-0.0.3.0
 - lpeg-1.0.3
 - hslua-2.2.1
 - hslua-aeson-2.2.1
@@ -20,7 +20,7 @@ extra-deps:
 - hslua-core-2.2.1
 - hslua-marshalling-2.2.1
 - hslua-module-doclayout-1.0.4
-- hslua-module-path-1.0.2
+- hslua-module-path-1.0.3
 - hslua-module-system-1.0.2
 - hslua-module-text-1.0.2
 - hslua-module-version-1.0.2
@@ -36,15 +36,13 @@ extra-deps:
 - unicode-data-0.3.0
 - commonmark-pandoc-0.2.1.2
 - ipynb-0.2
-- pandoc-types-1.22.2
+- pandoc-types-1.22.2.1
 - commonmark-0.2.2
 - commonmark-extensions-0.2.3.2
 - doclayout-0.4
 - doctemplates-0.10.0.2
 - citeproc-0.8.0.1
 - texmath-0.12.5.2
-- git: https://github.com/tarleb/gridtables
-  commit: 76198add9b404124b3a2fdf137399256a91d337b
 
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
