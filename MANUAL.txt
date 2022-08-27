@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: August 18, 2022
+date: August 22, 2022
 ---
 
 # Synopsis
@@ -3854,6 +3854,18 @@ the code block:
 This is equivalent to:
 
     ``` {.haskell}
+    qsort [] = []
+    ```
+
+This shortcut form may be combined with attributes:
+
+    ```haskell {.numberLines}
+    qsort [] = []
+    ```
+
+Which is equivalent to:
+
+    ``` {.haskell .numberLines}
     qsort [] = []
     ```
 

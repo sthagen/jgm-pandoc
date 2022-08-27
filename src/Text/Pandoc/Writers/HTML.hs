@@ -46,8 +46,8 @@ import Text.Blaze.Html hiding (contents)
 import Text.Pandoc.Translations (Term(Abstract))
 import Text.Pandoc.CSS (cssAttributes)
 import Text.Pandoc.Definition
-import Text.Pandoc.Highlighting (formatHtmlBlock, formatHtmlInline, highlight,
-                                 styleToCss)
+import Text.Pandoc.Highlighting (formatHtmlBlock, formatHtml4Block,
+                 formatHtmlInline, highlight, styleToCss)
 import Text.Pandoc.ImageSize
 import Text.Pandoc.Options
 import Text.Pandoc.Shared
@@ -545,9 +545,9 @@ footnoteSection refLocation startCounter notes = do
                 = H5.section ! A.id "footnotes"
                              ! A.class_ className
                              ! customAttribute "epub:type" "footnotes" $ x
-        | html5 = H5.section ! A.id "footnotes"
-                             ! A.class_ className
-                             ! customAttribute "role" "doc-endnotes"
+        | html5 = H5.section ! A5.id "footnotes"
+                             ! A5.class_ className
+                             ! A5.role "doc-endnotes"
                              $ x
         | slideVariant /= NoSlides = H.div ! A.class_ "footnotes slide" $ x
         | otherwise = H.div ! A.class_ className $ x
@@ -876,7 +876,7 @@ blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
   let isCslBibEntry = "csl-entry" `elem` classes
   let kvs = [(k,v) | (k,v) <- kvs'
                    , k /= "width" || "column" `notElem` classes] ++
-            [("style", "flex:" <> w <> ";")  | "column" `elem` classes
+            [("style", "width:" <> w <> ";") | "column" `elem` classes
                                              , ("width", w) <- kvs'] ++
             [("role", "doc-bibliography") | isCslBibBody && html5] ++
             [("role", "doc-biblioentry") | isCslBibEntry && html5]
@@ -913,7 +913,7 @@ blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
                DZSlides       -> do
                  t <- addAttrs opts' attr $
                              H5.div contents'
-                 return $ t ! H5.customAttribute "role" "note"
+                 return $ t ! A5.role "note"
                NoSlides       -> addAttrs opts' attr $
                            H.div contents'
                _              -> return mempty
@@ -934,6 +934,7 @@ blockToHtmlInner _ HorizontalRule = do
   html5 <- gets stHtml5
   return $ if html5 then H5.hr else H.hr
 blockToHtmlInner opts (CodeBlock (id',classes,keyvals) rawCode) = do
+  html5 <- gets stHtml5
   id'' <- if T.null id'
              then do
                modify $ \st -> st{ stCodeBlockNum = stCodeBlockNum st + 1 }
@@ -952,7 +953,8 @@ blockToHtmlInner opts (CodeBlock (id',classes,keyvals) rawCode) = do
                     then T.unlines . map ("> " <>) . T.lines $ rawCode
                     else rawCode
       hlCode   = if isJust (writerHighlightStyle opts)
-                    then highlight (writerSyntaxMap opts) formatHtmlBlock
+                    then highlight (writerSyntaxMap opts)
+                         (if html5 then formatHtmlBlock else formatHtml4Block)
                             (id'',classes',keyvals) adjCode
                     else Left ""
   case hlCode of
@@ -1610,10 +1612,12 @@ inlineToHtml opts inline = do
                                        $ toHtml ref
                         return $ case epubVersion of
                                       Just EPUB3 -> link ! customAttribute "epub:type" "noteref"
-                                      _ | html5  -> link ! H5.customAttribute
-                                                      "role" "doc-noteref"
+                                      _ | html5  -> link ! A5.role "doc-noteref"
                                       _          -> link
-    (Cite cits il)-> do contents <- inlineListToHtml opts (walk addRoleToLink il)
+    (Cite cits il)-> do contents <- inlineListToHtml opts
+                                      (if html5
+                                          then walk addRoleToLink il
+                                          else il)
                         let citationIds = T.unwords $ map citationId cits
                         let result = H.span ! A.class_ "citation" $ contents
                         return $ if html5

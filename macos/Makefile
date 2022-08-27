@@ -20,8 +20,8 @@ $(BASE)-macOS.pkg: pandoc.pkg
 	productbuild --distribution distribution.xml --resources Resources --package-path $< --version $(VERSION) --sign 'Developer ID Installer: John Macfarlane' $@
 
 $(BASE)-macOS.zip: $(DEST)/bin/pandoc-server signed.txt
-	ln -s $(DEST) $(BASE)
-	zip -r $@ $(BASE)
+	mv $(DEST) $(BASE)
+	zip --symlinks -r $@ $(BASE)
 
 gon.hcl: version.txt
 	echo "notarize {\n  path = \"$(BASE)-macOS.pkg\"\n  bundle_id = \"org.pandoc.pandoc\"\n  staple = true\n}\napple_id {\n  username = \"jgm@berkeley.edu\"\n  password = \"@env:AC_PASSWORD\"\n}" > $@

@@ -1,6 +1,6 @@
 cabal-version:   2.4
 name:            pandoc
-version:         2.19.1
+version:         2.19.2
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -205,9 +205,6 @@ extra-source-files:
                  man/manfilter.lua
                  man/pandoc.1.before
                  man/pandoc.1.after
-                 -- trypandoc
-                 trypandoc/index.html
-                 trypandoc/trypandoc.js
                  -- tests
                  test/bodybg.gif
                  test/*.native
