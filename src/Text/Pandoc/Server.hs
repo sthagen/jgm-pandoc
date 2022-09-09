@@ -1,9 +1,11 @@
 {-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE DeriveGeneric   #-}
 {-# LANGUAGE TypeOperators   #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Text.Pandoc.Server
     ( app
+    , API
     , ServerOpts(..)
     , Params(..)
     , Blob(..)
@@ -11,10 +13,12 @@ module Text.Pandoc.Server
     ) where
 
 import Data.Aeson
+import qualified Data.Aeson.KeyMap as KeyMap
 import Network.Wai
 import Servant
 import Text.DocTemplates as DocTemplates
 import Text.Pandoc
+import Text.Pandoc.Writers.Shared (lookupMetaString)
 import Text.Pandoc.Citeproc (processCitations)
 import Text.Pandoc.Highlighting (lookupHighlightingStyle)
 import qualified Text.Pandoc.UTF8 as UTF8
@@ -32,6 +36,7 @@ import Control.Monad (when, foldM)
 import qualified Data.Set as Set
 import Skylighting (defaultSyntaxMap)
 import qualified Data.Map as M
+import Text.Collate.Lang (Lang (..), parseLang)
 import System.Console.GetOpt
 import System.Environment (getArgs, getProgName)
 import qualified Control.Exception as E
@@ -41,6 +46,7 @@ import Text.Pandoc.App.Opt ( IpynbOutput (..), Opt(..), defaultOpts )
 import Text.Pandoc.Builder (setMeta)
 import Text.Pandoc.SelfContained (makeSelfContained)
 import System.Exit
+import GHC.Generics (Generic)
 
 data ServerOpts =
   ServerOpts
@@ -141,17 +147,51 @@ instance FromJSON Params where
      <*> o .:? "files"
      <*> o .:? "citeproc"
 
+instance ToJSON Params where
+ toJSON params =
+   case toJSON (options params) of
+     (Object o) -> Object $
+       KeyMap.insert "text" (toJSON $ text params)
+       . KeyMap.insert "files" (toJSON $ files params)
+       . KeyMap.insert "citeproc" (toJSON $ citeproc params)
+       $ o
+     x -> x
+
+data Message =
+  Message
+  { verbosity :: Verbosity
+  , message   :: Text }
+  deriving (Generic, Show)
+
+instance ToJSON Message where
+ toEncoding = genericToEncoding defaultOptions
+
+type Base64 = Bool
+
+data Output = Succeeded Text Base64 [Message]
+            | Failed Text
+  deriving (Generic, Show)
+
+instance ToJSON Output where
+  toEncoding (Succeeded o b m) = pairs
+    ( "output" .= o  <>
+      "base64" .= b  <>
+      "messages" .= m )
+  toEncoding (Failed errmsg) = pairs
+    ( "error" .= errmsg )
 
 -- This is the API.  The "/convert" endpoint takes a request body
 -- consisting of a JSON-encoded Params structure and responds to
 -- Get requests with either plain text or JSON, depending on the
 -- Accept header.
 type API =
-  ReqBody '[JSON] Params :> Post '[PlainText, JSON] Text
-  :<|>
   ReqBody '[JSON] Params :> Post '[OctetStream] BS.ByteString
   :<|>
-  "batch" :> ReqBody '[JSON] [Params] :> Post '[JSON] [Text]
+  ReqBody '[JSON] Params :> Post '[PlainText] Text
+  :<|>
+  ReqBody '[JSON] Params :> Post '[JSON] Output
+  :<|>
+  "batch" :> ReqBody '[JSON] [Params] :> Post '[JSON] [Output]
   :<|>
   "babelmark" :> QueryParam' '[Required] "text" Text :> QueryParam "from" Text :> QueryParam "to" Text :> QueryFlag "standalone" :> Get '[JSON] Value
   :<|>
@@ -164,14 +204,16 @@ api :: Proxy API
 api = Proxy
 
 server :: Server API
-server = convert
-    :<|> convertBytes
-    :<|> mapM convert
+server = convertBytes
+    :<|> convertText
+    :<|> convertJSON
+    :<|> mapM convertJSON
     :<|> babelmark  -- for babelmark which expects {"html": "", "version": ""}
     :<|> pure pandocVersion
  where
   babelmark text' from' to' standalone' = do
-    res <- convert def{ text = text',
+    res <- convertText def{
+                        text = text',
                         options = defaultOpts{
                           optFrom = from',
                           optTo = to',
@@ -185,13 +227,30 @@ server = convert
   -- Changing this to
   --    handleErr =<< liftIO (runIO (convert' params))
   -- will allow the IO operations.
-  convert params = handleErr $
-    runPure (convert' id (encodeBase64 . BL.toStrict) params)
+  convertText params = handleErr $
+    runPure (convert' return (return . encodeBase64 . BL.toStrict) params)
 
   convertBytes params = handleErr $
-    runPure (convert' UTF8.fromText BL.toStrict params)
+    runPure (convert' (return . UTF8.fromText) (return . BL.toStrict) params)
 
-  convert' :: (Text -> a) -> (BL.ByteString -> a) -> Params -> PandocPure a
+  convertJSON params = handleErrJSON $
+    runPure
+      (convert'
+        (\t -> do
+            msgs <- getLog
+            return $ Succeeded t False (map toMessage msgs))
+        (\bs -> do
+            msgs <- getLog
+            return $ Succeeded (encodeBase64 (BL.toStrict bs)) True
+                               (map toMessage msgs))
+        params)
+
+  toMessage m = Message { verbosity = messageVerbosity m
+                        , message = showLogMessage m }
+
+  convert' :: (Text -> PandocPure a)
+           -> (BL.ByteString -> PandocPure a)
+           -> Params -> PandocPure a
   convert' textHandler bsHandler params = do
     curtime <- getCurrentTime
     -- put files params in ersatz file system
@@ -240,6 +299,7 @@ server = convert
                         , readerTrackChanges = optTrackChanges opts
                         , readerStripComments = optStripComments opts
                         }
+
     let writeropts =
           def{ writerExtensions = writerExts
              , writerTabStop = optTabStop opts
@@ -274,6 +334,7 @@ server = convert
              , writerReferenceLocation = optReferenceLocation opts
              , writerPreferAscii = optAscii opts
              }
+
     let reader = case readerSpec of
                 TextReader r -> r readeropts
                 ByteStringReader r -> \t -> do
@@ -281,14 +342,23 @@ server = convert
                   case eitherbs of
                     Left errt -> throwError $ PandocSomeError errt
                     Right bs -> r readeropts $ BL.fromStrict bs
-    let writer = case writerSpec of
+
+    let writer d@(Pandoc meta _) = do
+          case lookupMetaString "lang" meta of
+              ""      -> setTranslations $
+                            Lang "en" Nothing (Just "US") [] [] []
+              l       -> case parseLang l of
+                              Left _   -> report $ InvalidLang l
+                              Right l' -> setTranslations l'
+          case writerSpec of
                 TextWriter w ->
-                  fmap textHandler .
-                  (\d -> w writeropts d >>=
-                         if optEmbedResources opts && htmlFormat (optTo opts)
-                            then makeSelfContained
-                            else return)
-                ByteStringWriter w -> fmap bsHandler . w writeropts
+                  w writeropts d >>=
+                    (if optEmbedResources opts && htmlFormat (optTo opts)
+                        then makeSelfContained
+                        else return) >>=
+                    textHandler
+                ByteStringWriter w ->
+                  w writeropts d >>= bsHandler
 
     let transforms :: Pandoc -> Pandoc
         transforms = (case optShiftHeadingLevelBy opts of
@@ -345,6 +415,10 @@ server = convert
   handleErr (Right t) = return t
   handleErr (Left err) = throwError $
     err500 { errBody = TLE.encodeUtf8 $ TL.fromStrict $ renderError err }
+
+  handleErrJSON (Right o) = return o
+  handleErrJSON (Left err) =
+    return $ Failed (renderError err)
 
   compileCustomTemplate toformat t = do
     res <- runWithPartials $ compileTemplate ("custom." <> T.unpack toformat)

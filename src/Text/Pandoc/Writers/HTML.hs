@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -114,21 +115,20 @@ defaultWriterState = WriterState {stNotes= [], stEmittedNotes = 0, stMath = Fals
 
 strToHtml :: Text -> Html
 strToHtml t
-    | T.any isSpecial t = strToHtml' $ T.unpack t
+    | T.any isSpecial t =
+       let !x = foldl' go mempty $ T.groupBy samegroup t
+        in x
     | otherwise = toHtml t
   where
-    strToHtml' ('\'':xs) = preEscapedString "\'" `mappend` strToHtml' xs
-    strToHtml' ('"' :xs) = preEscapedString "\"" `mappend` strToHtml' xs
-    strToHtml' (x:xs) | needsVariationSelector x
-                      = preEscapedString [x, '\xFE0E'] `mappend`
-                        case xs of
-                          ('\xFE0E':ys) -> strToHtml' ys
-                          _             -> strToHtml' xs
-    strToHtml' xs@(_:_) = case break isSpecial xs of
-                            (_ ,[]) -> toHtml xs
-                            (ys,zs) -> toHtml ys `mappend` strToHtml' zs
-    strToHtml' [] = ""
-    isSpecial c = c == '\'' || c == '"' || needsVariationSelector c
+    samegroup c d = d == '\xFE0E' || not (isSpecial c || isSpecial d)
+    isSpecial '\'' = True
+    isSpecial '"' = True
+    isSpecial c = needsVariationSelector c
+    go h "\'" = h <> preEscapedString "\'"
+    go h "\"" = h <> preEscapedString "\""
+    go h txt | T.length txt == 1 && T.all needsVariationSelector txt
+           = h <> preEscapedString (T.unpack txt <> "\xFE0E")
+    go h txt = h <> toHtml txt
 
 -- See #5469: this prevents iOS from substituting emojis.
 needsVariationSelector :: Char -> Bool
@@ -679,9 +679,10 @@ attrsToHtml :: PandocMonad m
             => WriterOptions -> Attr -> StateT WriterState m [Attribute]
 attrsToHtml opts (id',classes',keyvals) = do
   attrs <- toAttrs keyvals
+  let classes'' = filter (not . T.null) classes'
   return $
     [prefixedId opts id' | not (T.null id')] ++
-    [A.class_ (toValue $ T.unwords classes') | not (null classes')] ++ attrs
+    [A.class_ (toValue $ T.unwords classes'') | not (null classes'')] ++ attrs
 
 imgAttrsToHtml :: PandocMonad m
                => WriterOptions -> Attr -> StateT WriterState m [Attribute]
@@ -808,9 +809,11 @@ blockToHtmlInner opts (Div (ident, "section":dclasses, dkvs)
   let inDiv' zs = RawBlock (Format "html") ("<div class=\""
                        <> fragmentClass <> "\">") :
                    (zs ++ [RawBlock (Format "html") "</div>"])
-  let breakOnPauses zs = case splitBy isPause zs of
+  let breakOnPauses zs
+        | slide = case splitBy isPause zs of
                            []   -> []
                            y:ys -> y ++ concatMap inDiv' ys
+        | otherwise = zs
   let (titleBlocks, innerSecs) =
         if titleSlide
            -- title slides have no content of their own

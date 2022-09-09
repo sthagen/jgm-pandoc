@@ -1299,7 +1299,8 @@ tableCaption = do
   guardEnabled Ext_table_captions
   try $ do
     skipNonindentSpaces
-    (string ":" <* notFollowedBy (satisfy isPunctuation)) <|> string "Table:"
+    (string ":" <* notFollowedBy (satisfy isPunctuation)) <|>
+      (oneOf ['T','t'] >> string "able:")
     trimInlinesF <$> inlines1 <* blanklines
 
 -- Parse a simple table with '---' header and one line per row.
@@ -1580,7 +1581,7 @@ symbol = do
          <|> try (do lookAhead $ char '\\'
                      notFollowedBy' (() <$ rawTeXBlock)
                      char '\\')
-  return $ return $ B.str $ T.singleton result
+  return $ return $ B.str $! T.singleton result
 
 -- parses inline code, between n `s and n `s
 code :: PandocMonad m => MarkdownParser m (F Inlines)
@@ -1605,8 +1606,8 @@ code = try $ do
          (guardEnabled Ext_inline_code_attributes >> try attributes))
   return $ return $
     case rawattr of
-         Left syn   -> B.rawInline syn result
-         Right attr -> B.codeWith attr result
+         Left syn   -> B.rawInline syn $! result
+         Right attr -> B.codeWith attr $! result
 
 math :: PandocMonad m => MarkdownParser m (F Inlines)
 math =  (return . B.displayMath <$> (mathDisplay >>= applyMacros))
