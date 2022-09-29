@@ -49,17 +49,22 @@ tableToLaTeX inlnsToLaTeX blksToLaTeX tbl = do
   let removeNote (Note _) = Span ("", [], []) []
       removeNote x        = x
   let colCount = ColumnCount $ length specs
-  firsthead <- if isEmpty capt || isEmptyHead thead
-               then return empty
-               else ($$ text "\\endfirsthead") <$>
-                    headToLaTeX blksToLaTeX colCount thead
-  head' <- if isEmptyHead thead
-           then return "\\toprule()"
-           -- avoid duplicate notes in head and firsthead:
-           else headToLaTeX blksToLaTeX colCount
-                (if isEmpty firsthead
-                 then thead
-                 else walk removeNote thead)
+  -- The first head is not repeated on the following pages. If we were to just
+  -- use a single head, without a separate first head, then the caption would be
+  -- repeated on all pages that contain a part of the table. We avoid this by
+  -- making the caption part of the first head. The downside is that we must
+  -- duplicate the header rows for this.
+  head' <- do
+    let mkHead = headToLaTeX blksToLaTeX colCount
+    case (not $ isEmpty capt, not $ isEmptyHead thead) of
+      (False, False) -> return "\\toprule()"
+      (False, True)  -> mkHead thead
+      (True, False)  -> return (capt $$ "\\toprule()" $$ "\\endfirsthead")
+      (True, True)   -> do
+        -- avoid duplicate notes in head and firsthead:
+        firsthead <- mkHead thead
+        repeated  <- mkHead (walk removeNote thead)
+        return $ capt $$ firsthead $$ "\\endfirsthead" $$ repeated
   rows' <- mapM (rowToLaTeX blksToLaTeX colCount BodyCell) $
                 mconcat (map bodyRows tbodies) <> footRows tfoot
   modify $ \s -> s{ stTable = True }
@@ -68,8 +73,6 @@ tableToLaTeX inlnsToLaTeX blksToLaTeX tbl = do
     $  "\\begin{longtable}[]" <>
           braces ("@{}" <> colDescriptors tbl <> "@{}")
           -- the @{} removes extra space at beginning and end
-    $$ capt
-    $$ firsthead
     $$ head'
     $$ "\\endhead"
     $$ vcat rows'

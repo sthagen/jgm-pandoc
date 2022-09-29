@@ -40,7 +40,6 @@ module Text.Pandoc.Shared (
                      toRomanNumeral,
                      escapeURI,
                      tabFilter,
-                     crFilter,
                      -- * Date/time
                      normalizeDate,
                      -- * Pandoc block and inline list processing
@@ -48,7 +47,6 @@ module Text.Pandoc.Shared (
                      extractSpaces,
                      removeFormatting,
                      deNote,
-                     deLink,
                      stringify,
                      capitalize,
                      compactify,
@@ -57,6 +55,7 @@ module Text.Pandoc.Shared (
                      makeSections,
                      uniqueIdent,
                      inlineListToIdentifier,
+                     textToIdentifier,
                      isHeaderBlock,
                      headerShift,
                      stripEmptyParagraphs,
@@ -209,6 +208,7 @@ tshow = T.pack . show
 elemText :: Char -> T.Text -> Bool
 elemText c = T.any (== c)
 
+{-# DEPRECATED notElemText "Use T.all (/= c)" #-}
 -- | @True@ exactly when the @Char@ does not appear in the @Text@.
 notElemText :: Char -> T.Text -> Bool
 notElemText c = T.all (/= c)
@@ -315,11 +315,6 @@ tabFilter tabStop = T.unlines . map go . T.lines
                        (tabStop - (T.length s1 `mod` tabStop)) (T.pack " ")
                        <> go (T.drop 1 s2)
 
-{-# DEPRECATED crFilter "readers filter crs automatically" #-}
--- | Strip out DOS line endings.
-crFilter :: T.Text -> T.Text
-crFilter = T.filter (/= '\r')
-
 --
 -- Date/time
 --
@@ -400,12 +395,6 @@ removeFormatting = query go . walk (deNote . deQuote)
 deNote :: Inline -> Inline
 deNote (Note _) = Str ""
 deNote x        = x
-
--- {- DEPRECATED deLink "deLink will be removed in a future version" -}
--- | Turns links into spans, keeping just the link text.
-deLink :: Inline -> Inline
-deLink (Link _ ils _) = Span nullAttr ils
-deLink x              = x
 
 -- | Convert pandoc structure to a string with formatting removed.
 -- Footnotes are skipped (since we don't want their contents in link
@@ -497,12 +486,10 @@ isPara :: Block -> Bool
 isPara (Para _) = True
 isPara _        = False
 
--- | Convert Pandoc inline list to plain text identifier.  HTML
--- identifiers must start with a letter, and may contain only
--- letters, digits, and the characters _-.
+-- | Convert Pandoc inline list to plain text identifier.
 inlineListToIdentifier :: Extensions -> [Inline] -> T.Text
 inlineListToIdentifier exts =
-  dropNonLetter . filterAscii . toIdent . stringify . walk unEmojify
+  textToIdentifier exts . stringify . walk unEmojify
   where
     unEmojify :: [Inline] -> [Inline]
     unEmojify
@@ -511,6 +498,12 @@ inlineListToIdentifier exts =
       | otherwise = id
     unEmoji (Span ("",["emoji"],[("data-emoji",ename)]) _) = Str ename
     unEmoji x = x
+
+-- | Convert string to plain text identifier.
+textToIdentifier :: Extensions -> T.Text -> T.Text
+textToIdentifier exts =
+  dropNonLetter . filterAscii . toIdent
+  where
     dropNonLetter
       | extensionEnabled Ext_gfm_auto_identifiers exts = id
       | otherwise = T.dropWhile (not . isAlpha)
@@ -715,6 +708,7 @@ addMetaField key val (Meta meta) =
         tolist (MetaList ys) = ys
         tolist y             = [y]
 
+{-# DEPRECATED makeMeta "Use addMetaField directly" #-}
 -- | Create 'Meta' from old-style title, authors, date.  This is
 -- provided to ease the transition from the old API.
 makeMeta :: [Inline] -> [[Inline]] -> [Inline] -> Meta

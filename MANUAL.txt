@@ -564,6 +564,17 @@ header when requesting a document from a URL:
     footnotes and links will not work across files. Reading binary
     files (docx, odt, epub) implies `--file-scope`.
 
+    If two or more files are processed using `--file-scope`,
+    prefixes based on the filenames will be added to identifiers
+    in order to disambiguate them, and internal links will
+    be adjusted accordingly.  For example, a header with
+    identifier `foo` in `subdir/file1.txt` will have its
+    identifier changed to `subdir__file1.txt__foo`.
+
+    In addition, a Div with an identifier based on the filename
+    will be added around the file's content, so that internal
+    links to the filename will point to this Div's identifier.
+
 `-F` *PROGRAM*, `--filter=`*PROGRAM*
 
 :   Specify an executable to be used as a filter transforming the
@@ -3756,7 +3767,7 @@ unless the `markdown_strict` format is used, the following does
 not produce a nested block quote in pandoc:
 
     > This is a block quote.
-    >> Nested.
+    >> Not nested, since `blank_before_blockquote` is enabled by default
 
 
 ## Verbatim (code) blocks
@@ -6482,8 +6493,10 @@ beamer slide shows, and pptx slide shows.
 ### On all slides (beamer, reveal.js, pptx)
 
 With beamer and reveal.js, the configuration option `background-image` can be
-used either in the YAML metadata block or as a command-line variable to get the
-same image on every slide.
+used either in the YAML metadata block or as a command-line variable to get the same image on every slide.
+
+Note that for reveal.js, the `background-image` will be used as
+a `parallaxBackgroundImage` (see below).
 
 For pptx, you can use a [reference doc](#option--reference-doc) in which
 background images have been set on the [relevant
@@ -6492,11 +6505,12 @@ layouts](#powerpoint-layout-choice).
 #### `parallaxBackgroundImage` (reveal.js)
 
 For reveal.js, there is also the reveal.js-native option
-`parallaxBackgroundImage`, which can be used instead of `background-image` to
-produce a parallax scrolling background. You must also set
-`parallaxBackgroundSize`, and can optionally set `parallaxBackgroundHorizontal`
-and `parallaxBackgroundVertical` to configure the scrolling behaviour. See the
-[reveal.js documentation](https://revealjs.com/backgrounds/#parallax-background)
+`parallaxBackgroundImage`, which produces a parallax scrolling background.
+You must also set `parallaxBackgroundSize`, and can optionally set
+`parallaxBackgroundHorizontal`
+and `parallaxBackgroundVertical` to configure the scrolling behaviour.
+See the [reveal.js
+documentation](https://revealjs.com/backgrounds/#parallax-background)
 for more details about the meaning of these options.
 
 In reveal.js's overview mode, the parallaxBackgroundImage will show up
@@ -7070,10 +7084,10 @@ metadata field (see [EPUB Metadata], above).
 # Running pandoc as a web server
 
 If you rename (or symlink) the pandoc executable to
-`pandoc-server`, it will start up a web server with a JSON
-API. This server exposes most of the conversion functionality
-of pandoc.  For full documentation, see the [pandoc-server]
-man page.
+`pandoc-server`, or if you call pandoc with `serve` as the first
+argument, it will start up a web server with a JSON API. This
+server exposes most of the conversion functionality of pandoc. For
+full documentation, see the [pandoc-server] man page.
 
 If you rename (or symlink) the pandoc executable to
 `pandoc-server.cgi`, it will function as a CGI program
@@ -7085,6 +7099,17 @@ will be performed on the server during pandoc conversions.
 
 [pandoc-server]: https://github.com/jgm/pandoc/blob/master/doc/pandoc-server.md
 
+# Running pandoc as a Lua interpreter
+
+Calling the pandoc executable under the name `pandoc-lua` or with
+`lua` as the first argument will make it function as a standalone
+Lua interpreter. The behavior is mostly identical to that of the
+[standalone `lua` executable][lua standalone], version 5.4.
+However, there is no REPL yet, and the `-i` option has no effect.
+For full documentation, see the [pandoc-lua] man page.
+
+[lua standalone]: https://www.lua.org/manual/5.4/manual.html#7
+[pandoc-server]: https://github.com/jgm/pandoc/blob/master/doc/pandoc-lua.md
 
 # A note on security
 

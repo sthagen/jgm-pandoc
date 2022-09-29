@@ -9,7 +9,7 @@ module Text.Pandoc.Server
     , ServerOpts(..)
     , Params(..)
     , Blob(..)
-    , parseServerOpts
+    , parseServerOptsFromArgs
     ) where
 
 import Data.Aeson
@@ -38,11 +38,11 @@ import Skylighting (defaultSyntaxMap)
 import qualified Data.Map as M
 import Text.Collate.Lang (Lang (..), parseLang)
 import System.Console.GetOpt
-import System.Environment (getArgs, getProgName)
+import System.Environment (getProgName)
 import qualified Control.Exception as E
 import Text.Pandoc.Shared (safeStrRead, headerShift, filterIpynbOutput,
                            eastAsianLineBreakFilter, stripEmptyParagraphs)
-import Text.Pandoc.App.Opt ( IpynbOutput (..), Opt(..), defaultOpts )
+import Text.Pandoc.App ( IpynbOutput (..), Opt(..), defaultOpts )
 import Text.Pandoc.Builder (setMeta)
 import Text.Pandoc.SelfContained (makeSelfContained)
 import System.Exit
@@ -91,9 +91,8 @@ cliOptions =
 
   ]
 
-parseServerOpts :: IO ServerOpts
-parseServerOpts = do
-  args <- getArgs
+parseServerOptsFromArgs :: [String] -> IO ServerOpts
+parseServerOptsFromArgs args = do
   let handleUnknownOpt x = "Unknown option: " <> x
   case getOpt' Permute cliOptions args of
     (os, ns, unrecognizedOpts, es) -> do
@@ -426,4 +425,3 @@ server = convertBytes
     case res of
       Left e -> throwError $ PandocTemplateError (T.pack e)
       Right tpl -> return tpl
-

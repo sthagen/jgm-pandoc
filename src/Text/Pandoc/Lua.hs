@@ -1,3 +1,6 @@
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications  #-}
 {- |
    Module      : Text.Pandoc.Lua
    Copyright   : Copyright © 2017-2022 Albert Krewinkel
@@ -9,15 +12,20 @@
 Running pandoc Lua filters.
 -}
 module Text.Pandoc.Lua
-  ( runLua
-  -- * Lua globals
-  , Global (..)
+  ( -- * High-level functions
+    applyFilter
+  , readCustom
+  , writeCustom
+  -- * Low-level functions
+  , Global(..)
   , setGlobals
-  -- * Filters
-  , runFilterFile
+  , runLua
+  , runLuaNoEnv
   ) where
 
-import Text.Pandoc.Lua.Filter (runFilterFile)
+import Text.Pandoc.Lua.Filter (applyFilter)
 import Text.Pandoc.Lua.Global (Global (..), setGlobals)
-import Text.Pandoc.Lua.Init (runLua)
+import Text.Pandoc.Lua.Init (runLua, runLuaNoEnv)
+import Text.Pandoc.Lua.Reader (readCustom)
+import Text.Pandoc.Lua.Writer (writeCustom)
 import Text.Pandoc.Lua.Orphans ()

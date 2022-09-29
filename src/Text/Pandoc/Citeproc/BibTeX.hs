@@ -179,6 +179,8 @@ writeBibtexString opts variant mblang ref =
            , "type"
            , "note"
            , "annote"
+           , "url" -- not officially supported, but supported by
+                   -- some styles (#8287)
            ]
 
   valToInlines (TextVal t) = B.text t
@@ -846,10 +848,19 @@ inBraces :: BibParser Text
 inBraces = do
   char '{'
   res <- manyTill
+         (  take1WhileP (\c -> c /= '{' && c /= '}' && c /= '\\' && c /= '%')
+        <|> (char '\\' >> T.cons '\\' . T.singleton <$> anyChar)
+        <|> ("" <$ (char '%' >> anyLine))
+        <|> (braced <$> inBraces)
+         ) (char '}')
+  return $ T.concat res
+
+inBracesURL :: BibParser Text
+inBracesURL = do
+  char '{'
+  res <- manyTill
          (  take1WhileP (\c -> c /= '{' && c /= '}' && c /= '\\')
-        <|> (char '\\' >> (do c <- oneOf "{}"
-                              return $ T.pack ['\\',c])
-                         <|> return "\\")
+        <|> (char '\\' >> T.cons '\\' . T.singleton <$> anyChar)
         <|> (braced <$> inBraces)
          ) (char '}')
   return $ T.concat res
@@ -866,6 +877,14 @@ inQuotes = do
                <|> ("" <$ (char '%' >> anyLine))
                <|> braced <$> inBraces
             ) (char '"')
+
+inQuotesURL :: BibParser Text
+inQuotesURL = do
+  char '"'
+  T.concat <$> manyTill
+             ( take1WhileP (\c -> c /= '{' && c /= '"' && c /= '\\')
+               <|> (char '\\' >> T.cons '\\' . T.singleton <$> anyChar)
+             ) (char '"')
 
 fieldName :: BibParser Text
 fieldName = resolveAlias . T.toLower
@@ -902,7 +921,9 @@ entField = do
   spaces'
   char '='
   spaces'
-  vs <- (expandString <|> inQuotes <|> inBraces <|> rawWord) `sepBy`
+  let inQ = if k == "url" then inQuotesURL else inQuotes
+  let inB = if k == "url" then inBracesURL else inBraces
+  vs <- (expandString <|> inQ <|> inB <|> rawWord) `sepBy`
             try (spaces' >> char '#' >> spaces')
   spaces'
   return (k, T.concat vs)
