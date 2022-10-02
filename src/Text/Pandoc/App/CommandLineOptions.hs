@@ -37,7 +37,6 @@ import Data.List (isPrefixOf)
 #endif
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
-import HsLua (Exception, getglobal, openlibs, peek, run, top)
 import Safe (tailDef)
 import Skylighting (Syntax (..), defaultSyntaxMap)
 import System.Console.GetOpt
@@ -53,6 +52,7 @@ import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), IpynbOutput (..),
                             fullDefaultsPath)
 import Text.Pandoc.Filter (Filter (..))
 import Text.Pandoc.Highlighting (highlightingStyles, lookupHighlightingStyle)
+import Text.Pandoc.Scripting (ScriptingEngine (engineName))
 import Text.Pandoc.Shared (ordNub, elemText, safeStrRead, defaultUserDataDir)
 import Text.Printf
 
@@ -69,21 +69,6 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Text.Pandoc.UTF8 as UTF8
-
-#ifdef NIGHTLY
-import qualified Language.Haskell.TH as TH
-import Data.Time
-#endif
-
-#ifdef NIGHTLY
-versionSuffix :: String
-versionSuffix = "-nightly-" ++
-  $(TH.stringE =<<
-    TH.runIO (formatTime defaultTimeLocale "%F" <$> Data.Time.getCurrentTime))
-#else
-versionSuffix :: String
-versionSuffix = ""
-#endif
 
 parseOptions :: [OptDescr (Opt -> IO Opt)] -> Opt -> IO Opt
 parseOptions options' defaults = do
@@ -145,8 +130,8 @@ pdfEngines = ordNub $ map snd engines
 
 -- | A list of functions, each transforming the options data structure
 --   in response to a command-line option.
-options :: [OptDescr (Opt -> IO Opt)]
-options =
+options :: ScriptingEngine -> [OptDescr (Opt -> IO Opt)]
+options scriptingEngine =
     [ Option "fr" ["from","read"]
                  (ReqArg
                   (\arg opt -> return opt { optFrom =
@@ -520,14 +505,6 @@ options =
                   "NUMBER")
                  "" -- "Headers base level"
 
-    , Option "" ["strip-empty-paragraphs"]
-                 (NoArg
-                  (\opt -> do
-                      deprecatedOption "--strip-empty-paragraphs"
-                        "Use +empty_paragraphs extension."
-                      return opt{ optStripEmptyParagraphs = True }))
-                 "" -- "Strip empty paragraphs"
-
     , Option "" ["track-changes"]
                  (ReqArg
                   (\arg opt -> do
@@ -564,14 +541,6 @@ options =
                   "block|section|document")
                  "" -- "Accepting or reject MS Word track-changes.""
 
-    , Option "" ["atx-headers"]
-                 (NoArg
-                  (\opt -> do
-                    deprecatedOption "--atx-headers"
-                      "Use --markdown-headings=atx instead."
-                    return opt { optSetextHeaders = False } ))
-                 "" -- "Use atx-style headers for markdown"
-
     , Option "" ["markdown-headings"]
                   (ReqArg
                     (\arg opt -> do
@@ -585,6 +554,12 @@ options =
                     )
                   "setext|atx")
                   ""
+
+    , Option "" ["list-tables"]
+                 (NoArg
+                  (\opt -> do
+                    return opt { optListTables = True } ))
+                 "" -- "Use list tables for RST"
 
     , Option "" ["listings"]
                  (NoArg
@@ -838,7 +813,8 @@ options =
                      let optnames (Option shorts longs _ _) =
                            map (\c -> ['-',c]) shorts ++
                            map ("--" ++) longs
-                     let allopts = unwords (concatMap optnames options)
+                     let allopts = unwords (concatMap optnames
+                                            (options scriptingEngine))
                      UTF8.hPutStrLn stdout $ T.pack $ printf tpl allopts
                          (T.unpack $ T.unwords readersNames)
                          (T.unpack $ T.unwords writersNames)
@@ -970,14 +946,11 @@ options =
                   (\_ -> do
                      prg <- getProgName
                      defaultDatadir <- defaultUserDataDir
-                     luaVersion <- HsLua.run @HsLua.Exception $ do
-                       openlibs
-                       getglobal "_VERSION"
-                       peek top
                      UTF8.hPutStrLn stdout
                       $ T.pack
-                      $ prg ++ " " ++ T.unpack pandocVersion ++ versionSuffix ++
-                        compileInfo ++ "\nScripting engine: " ++ luaVersion ++
+                      $ prg ++ " " ++ T.unpack pandocVersionText ++
+                        compileInfo ++ "\nScripting engine: " ++
+                        T.unpack (engineName scriptingEngine) ++
                         "\nUser data directory: " ++ defaultDatadir ++
                         ('\n':copyrightMessage)
                      exitSuccess ))
@@ -987,7 +960,8 @@ options =
                  (NoArg
                   (\_ -> do
                      prg <- getProgName
-                     UTF8.hPutStr stdout (T.pack $ usageMessage prg options)
+                     UTF8.hPutStr stdout (T.pack $ usageMessage prg
+                                          (options scriptingEngine))
                      exitSuccess ))
                  "" -- "Show help"
     ]
@@ -1017,7 +991,7 @@ compileInfo =
   "\nCompiled with pandoc-types " ++ VERSION_pandoc_types ++
   ", texmath " ++ VERSION_texmath ++ ", skylighting " ++
   VERSION_skylighting ++ ",\nciteproc " ++ VERSION_citeproc ++
-  ", ipynb " ++ VERSION_ipynb ++ ", hslua " ++ VERSION_hslua
+  ", ipynb " ++ VERSION_ipynb
 
 handleUnrecognizedOption :: String -> [String] -> [String]
 handleUnrecognizedOption "--smart" =

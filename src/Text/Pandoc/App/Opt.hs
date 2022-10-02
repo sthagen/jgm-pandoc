@@ -126,7 +126,6 @@ data Opt = Opt
     , optFilters               :: [Filter] -- ^ Filters to apply
     , optEmailObfuscation      :: ObfuscationMethod
     , optIdentifierPrefix      :: Text
-    , optStripEmptyParagraphs  :: Bool -- ^ Strip empty paragraphs
     , optIndentedCodeClasses   :: [Text] -- ^ Default classes for indented code blocks
     , optDataDir               :: Maybe FilePath
     , optCiteMethod            :: CiteMethod -- ^ Method to output cites
@@ -135,6 +134,7 @@ data Opt = Opt
     , optPdfEngineOpts         :: [String]   -- ^ Flags to pass to the engine
     , optSlideLevel            :: Maybe Int  -- ^ Header level that creates slides
     , optSetextHeaders         :: Bool       -- ^ Use atx headers for markdown level 1-2
+    , optListTables            :: Bool       -- ^ Use list tables for RST
     , optAscii                 :: Bool       -- ^ Prefer ascii output
     , optDefaultImageExtension :: Text       -- ^ Default image extension
     , optExtractMedia          :: Maybe FilePath -- ^ Path to extract embedded media
@@ -206,7 +206,6 @@ instance FromJSON Opt where
        <*> o .:? "filters" .!= optFilters defaultOpts
        <*> o .:? "email-obfuscation" .!= optEmailObfuscation defaultOpts
        <*> o .:? "identifier-prefix" .!= optIdentifierPrefix defaultOpts
-       <*> o .:? "strip-empty-paragraphs" .!= optStripEmptyParagraphs defaultOpts
        <*> o .:? "indented-code-classes" .!= optIndentedCodeClasses defaultOpts
        <*> o .:? "data-dir"
        <*> o .:? "cite-method" .!= optCiteMethod defaultOpts
@@ -215,6 +214,7 @@ instance FromJSON Opt where
        <*> o .:? "pdf-engine-opts" .!= optPdfEngineOpts defaultOpts
        <*> o .:? "slide-level"
        <*> o .:? "setext-headers" .!= optSetextHeaders defaultOpts
+       <*> o .:? "list-tables" .!= optListTables defaultOpts
        <*> o .:? "ascii" .!= optAscii defaultOpts
        <*> o .:? "default-image-extension" .!= optDefaultImageExtension defaultOpts
        <*> o .:? "extract-media"
@@ -577,8 +577,6 @@ doOpt (k,v) = do
     "identifier-prefix" ->
       parseJSON v >>= \x ->
              return (\o -> o{ optIdentifierPrefix = x })
-    "strip-empty-paragraphs" ->
-      parseJSON v >>= \x -> return (\o -> o{ optStripEmptyParagraphs = x })
     "indented-code-classes" ->
       parseJSON v >>= \x ->
              return (\o -> o{ optIndentedCodeClasses = x })
@@ -601,14 +599,14 @@ doOpt (k,v) = do
              return (\o -> o{ optPdfEngineOpts = [unpack x] }))
     "slide-level" ->
       parseJSON v >>= \x -> return (\o -> o{ optSlideLevel = x })
-    "atx-headers" ->
-      parseJSON v >>= \x -> return (\o -> o{ optSetextHeaders = not x })
     "markdown-headings" ->
       parseJSON v >>= \x -> return (\o ->
         case T.toLower x of
           "atx"    -> o{ optSetextHeaders = False }
           "setext" -> o{ optSetextHeaders = True }
           _        -> o)
+    "list-tables" ->
+      parseJSON v >>= \x -> return (\o -> o{ optListTables = x })
     "ascii" ->
       parseJSON v >>= \x -> return (\o -> o{ optAscii = x })
     "default-image-extension" ->
@@ -736,7 +734,6 @@ defaultOpts = Opt
     , optFilters               = []
     , optEmailObfuscation      = NoObfuscation
     , optIdentifierPrefix      = ""
-    , optStripEmptyParagraphs  = False
     , optIndentedCodeClasses   = []
     , optDataDir               = Nothing
     , optCiteMethod            = Citeproc
@@ -745,6 +742,7 @@ defaultOpts = Opt
     , optPdfEngineOpts         = []
     , optSlideLevel            = Nothing
     , optSetextHeaders         = False
+    , optListTables            = False
     , optAscii                 = False
     , optDefaultImageExtension = ""
     , optExtractMedia          = Nothing

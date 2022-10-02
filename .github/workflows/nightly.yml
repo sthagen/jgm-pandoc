@@ -24,10 +24,10 @@ jobs:
           ghc --version
           cabal --version
           cabal v2-update
-          cabal v2-build --dependencies-only pandoc-cli
+          cabal v2-build --dependencies-only -fembed_data_files -fnightly pandoc-cli
     - name: Build
       run: |
-          cabal v2-install -fnightly pandoc-cli
+          cabal v2-install -fembed_data_files -fnightly pandoc-cli
           strip $HOME/.cabal/bin/pandoc
     - name: Install artifact
       run: |
@@ -57,7 +57,7 @@ jobs:
           for /f %%a in ('powershell -Command "Get-Date -format yyyy-MM-dd"') do set THEDATE=%%a
           set ARTIFACTS=%CD%\nightly-windows\pandoc-nightly-windows-%THEDATE%
           mkdir %ARTIFACTS%
-          stack build --flag pandoc:nightly --flag pandoc:embed_data_files pandoc-cli
+          stack build --flag pandoc-cli:nightly --flag pandoc:embed_data_files pandoc-cli
           forfiles /P .\.stack-work\install /M pandoc*.exe /S /C "cmd /C copy @path %%ARTIFACTS%%"
           copy COPYRIGHT %ARTIFACTS%
           ren %ARTIFACTS%\COPYRIGHT COPYRIGHT.txt
@@ -81,7 +81,7 @@ jobs:
       run: |
           export ARTIFACTS=nightly-macos/pandoc-nightly-macos-$(date +%Y-%m-%d)
           mkdir -p ${ARTIFACTS}
-          stack build --flag pandoc:nightly --flag pandoc:embed_data_files pandoc-cli
+          stack build --flag pandoc-cli:nightly --flag pandoc:embed_data_files pandoc-cli
           for f in $(find .stack-work/install -name 'pandoc*' -perm +001 -type f); do cp $f ${ARTIFACTS}/; done
           mv ${ARTIFACTS}/pandoc ${ARTIFACTS}/pandoc
           cp COPYRIGHT ${ARTIFACTS}/

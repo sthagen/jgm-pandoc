@@ -1,6 +1,7 @@
 version?=$(shell grep '^[Vv]ersion:' pandoc.cabal | awk '{print $$2;}')
 pandoc=$(shell find dist -name pandoc -type f -exec ls -t {} \; | head -1)
 SOURCEFILES?=$(shell git ls-tree -r master --name-only | grep "\.hs$$")
+PANDOCSOURCEFILES?=$(shell git ls-tree -r master --name-only src | grep "\.hs$$")
 BRANCH?=master
 ARCH=$(shell uname -m)
 DOCKERIMAGE=registry.gitlab.b-data.ch/ghc/ghc4pandoc:9.2.3
@@ -8,6 +9,7 @@ COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
 LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
 BASELINE?=$(LATESTBENCH)
+ROOTNODE?=T.P
 ifeq ($(BASELINE),)
 BASELINECMD=
 else
@@ -21,7 +23,7 @@ BENCHARGS?=--csv bench_$(TIMESTAMP).csv $(BASELINECMD) --timeout=6 +RTS -T --non
 quick-cabal: quick-cabal-test ## tests and build executable
 	cabal build \
 	  --ghc-options='$(GHCOPTS)' \
-	  --disable-optimization pandoc-cli
+	  --disable-optimization all
 .PHONY: quick-cabal
 
 # Note:  to accept current results of golden tests,
@@ -161,9 +163,31 @@ update-website: ## update website and upload
 	make -C $(WEBSITE) upload
 .PHONY: update-website
 
+modules.dot: $(PANDOCSOURCEFILES)
+	@echo "digraph G {" > $@
+	@echo "overlap=\"scale\"" >> $@
+	@rg '^import.*Text\.Pandoc\.' --with-filename $^ \
+		| rg -v 'Text\.Pandoc\.(Definition|Builder|Walk|Generic)' \
+		| sort \
+		| uniq \
+		| sed -e 's/src\///' \
+	        | sed -e 's/\//\./g' \
+		| sed -e 's/\.hs:import *\(qualified *\)*\([^ ]*\).*/ -> \2/' \
+		| sed -e 's/Text\.Pandoc\([^ ]*\)/"T\.P\1"/g' >> $@
+	@echo "}" >> $@
+
+# To get the module dependencies of T.P.Parsing:
+# make modules.pdf ROOTNODE=T.P.Parsing
+modules.pdf: modules.dot
+	gvpr -f tools/cliptree.gvpr -a '"$(ROOTNODE)"' $< | dot -Tpdf > $@
+
+# make moduledeps ROOTNODE=T.P.Parsing
+moduledeps: modules.dot  ## Print dependencies of a module ROOTNODE
+	gvpr -f tools/depthfirst.gvpr -a '"$(ROOTNODE)"' modules.dot
+.PHONY: moduledeps
+
 clean: ## clean up
 	cabal clean
-	stack clean
 .PHONY: clean
 
 .PHONY: .FORCE

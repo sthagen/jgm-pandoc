@@ -536,13 +536,6 @@ header when requesting a document from a URL:
     where X = NUMBER - 1.* Specify the base level for headings
     (defaults to 1).
 
-`--strip-empty-paragraphs`
-
-:   *Deprecated.  Use the `+empty_paragraphs` extension instead.*
-    Ignore paragraphs with no content.  This option is useful
-    for converting word processing documents where users have
-    used empty paragraphs to create inter-paragraph space.
-
 `--indented-code-classes=`*CLASSES*
 
 :   Specify classes to use for indented code blocks--for example,
@@ -1024,9 +1017,9 @@ header when requesting a document from a URL:
     ATX-style headings are always used for levels 3+.
     This option also affects Markdown cells in `ipynb` output.
 
-`--atx-headers`
+`--list-tables`
 
-:   *Deprecated synonym for `--markdown-headings=atx`.*
+:   Render tables as list tables in RST output.
 
 `--top-level-division=default`|`section`|`chapter`|`part`
 
@@ -1546,6 +1539,7 @@ Nonzero exit codes have the following meanings:
    67 PandocSyntaxMapError
    83 PandocFilterError
    84 PandocLuaError
+   89 PandocNoScriptingEngine
    91 PandocMacroLoop
    92 PandocUTF8DecodingError
    93 PandocIpynbDecodingError
@@ -1897,6 +1891,10 @@ To include the built-in citeproc filter, use either `citeproc` or
 +----------------------------------+-----------------------------------+
 | ```                              | ``` yaml                          |
 | --markdown-headings atx          | markdown-headings: atx            |
+| ```                              | ```                               |
++----------------------------------+-----------------------------------+
+| ```                              | ``` yaml                          |
+| --list-tables                    | list-tables: true                 |
 | ```                              | ```                               |
 +----------------------------------+-----------------------------------+
 | ```                              | ``` yaml                          |
@@ -3184,7 +3182,7 @@ for other formats are covered.
 
 Note that markdown extensions added to the `ipynb` format
 affect Markdown cells in Jupyter notebooks (as do command-line
-options like `--atx-headers`).
+options like `--markdown-headings`).
 
 ## Typography
 
@@ -6882,8 +6880,8 @@ translating between Markdown and ipynb notebooks.
 Note that options and extensions that affect reading and
 writing of Markdown will also affect Markdown cells in ipynb
 notebooks.  For example, `--wrap=preserve` will preserve
-soft line breaks in Markdown cells; `--atx-headers` will
-cause ATX-style headings to be used; and `--preserve-tabs` will
+soft line breaks in Markdown cells; `--markdown-headings=setext` will
+cause Setext-style headings to be used; and `--preserve-tabs` will
 prevent tabs from being turned to spaces.
 
 # Syntax highlighting
@@ -7084,7 +7082,7 @@ metadata field (see [EPUB Metadata], above).
 # Running pandoc as a web server
 
 If you rename (or symlink) the pandoc executable to
-`pandoc-server`, or if you call pandoc with `serve` as the first
+`pandoc-server`, or if you call pandoc with `server` as the first
 argument, it will start up a web server with a JSON API. This
 server exposes most of the conversion functionality of pandoc. For
 full documentation, see the [pandoc-server] man page.

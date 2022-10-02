@@ -41,7 +41,7 @@ import System.Console.GetOpt
 import System.Environment (getProgName)
 import qualified Control.Exception as E
 import Text.Pandoc.Shared (safeStrRead, headerShift, filterIpynbOutput,
-                           eastAsianLineBreakFilter, stripEmptyParagraphs)
+                           eastAsianLineBreakFilter)
 import Text.Pandoc.App ( IpynbOutput (..), Opt(..), defaultOpts )
 import Text.Pandoc.Builder (setMeta)
 import Text.Pandoc.SelfContained (makeSelfContained)
@@ -85,7 +85,7 @@ cliOptions =
   , Option ['v'] ["version"]
       (NoArg (\_ -> do
         prg <- getProgName
-        putStrLn $ prg <> " " <> T.unpack pandocVersion
+        putStrLn $ prg <> " " <> T.unpack pandocVersionText
         exitWith ExitSuccess))
       "version info"
 
@@ -208,7 +208,7 @@ server = convertBytes
     :<|> convertJSON
     :<|> mapM convertJSON
     :<|> babelmark  -- for babelmark which expects {"html": "", "version": ""}
-    :<|> pure pandocVersion
+    :<|> pure pandocVersionText
  where
   babelmark text' from' to' standalone' = do
     res <- convertText def{
@@ -363,9 +363,6 @@ server = convertBytes
         transforms = (case optShiftHeadingLevelBy opts of
                         0             -> id
                         x             -> headerShift x) .
-                   (case optStripEmptyParagraphs opts of
-                        True          -> stripEmptyParagraphs
-                        False         -> id) .
                    (if extensionEnabled Ext_east_asian_line_breaks
                           readerExts &&
                        not (extensionEnabled Ext_east_asian_line_breaks
