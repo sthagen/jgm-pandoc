@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
 {- |
    Module      : Text.Pandoc.Lua
    Copyright   : Copyright © 2017-2022 Albert Krewinkel
@@ -13,6 +14,7 @@ Functions to initialize the Lua interpreter.
 module Text.Pandoc.Lua.Init
   ( runLua
   , runLuaNoEnv
+  , runLuaWith
   ) where
 
 import Control.Monad (forM, forM_, when)
@@ -20,10 +22,13 @@ import Control.Monad.Catch (throwM, try)
 import Control.Monad.Trans (MonadIO (..))
 import Data.Maybe (catMaybes)
 import HsLua as Lua hiding (status, try)
-import Text.Pandoc.Class (PandocMonad, readDataFile)
+import HsLua.Core.Run as Lua
+import Text.Pandoc.Class (PandocMonad (..))
+import Text.Pandoc.Data (readDataFile)
 import Text.Pandoc.Error (PandocError (PandocLuaError))
+import Text.Pandoc.Lua.Global (Global (..), setGlobals)
 import Text.Pandoc.Lua.Marshal.List (newListMetatable, pushListModule)
-import Text.Pandoc.Lua.PandocLua (PandocLua, liftPandocLua, runPandocLua)
+import Text.Pandoc.Lua.PandocLua (PandocLua (..), liftPandocLua)
 import qualified Data.ByteString.Char8 as Char8
 import qualified Data.Text as T
 import qualified Lua.LPeg as LPeg
@@ -31,27 +36,35 @@ import qualified HsLua.Aeson
 import qualified HsLua.Module.DocLayout as Module.Layout
 import qualified HsLua.Module.Path as Module.Path
 import qualified HsLua.Module.Text as Module.Text
-import qualified Text.Pandoc.Lua.Module.Pandoc as Module.Pandoc
+import qualified Text.Pandoc.Lua.Module.Format as Pandoc.Format
 import qualified Text.Pandoc.Lua.Module.MediaBag as Pandoc.MediaBag
+import qualified Text.Pandoc.Lua.Module.Pandoc as Module.Pandoc
 import qualified Text.Pandoc.Lua.Module.System as Pandoc.System
 import qualified Text.Pandoc.Lua.Module.Template as Pandoc.Template
 import qualified Text.Pandoc.Lua.Module.Types as Pandoc.Types
 import qualified Text.Pandoc.Lua.Module.Utils as Pandoc.Utils
 
--- | Run the lua interpreter, using pandoc's default way of environment
+-- | Run the Lua interpreter, using pandoc's default way of environment
 -- initialization.
 runLua :: (PandocMonad m, MonadIO m)
        => LuaE PandocError a -> m (Either PandocError a)
-runLua action =
-  runPandocLua . try $ do
+runLua action = do
+  runPandocLuaWith Lua.run . try $ do
+    initLuaState
+    liftPandocLua action
+
+runLuaWith :: (PandocMonad m, MonadIO m)
+           => GCManagedState -> LuaE PandocError a -> m (Either PandocError a)
+runLuaWith luaState action = do
+  runPandocLuaWith (withGCManagedState luaState) . try $ do
     initLuaState
     liftPandocLua action
 
 -- | Like 'runLua', but ignores all environment variables like @LUA_PATH@.
 runLuaNoEnv :: (PandocMonad m, MonadIO m)
             => LuaE PandocError a -> m (Either PandocError a)
-runLuaNoEnv action =
-  runPandocLua . try $ do
+runLuaNoEnv action = do
+  runPandocLuaWith Lua.run . try $ do
     liftPandocLua $ do
       -- This is undocumented, but works -- the code is adapted from the
       -- `lua.c` sources for the default interpreter.
@@ -67,7 +80,8 @@ runLuaNoEnv action =
 -- it must be handled separately.
 loadedModules :: [Module PandocError]
 loadedModules =
-  [ Pandoc.MediaBag.documentedModule
+  [ Pandoc.Format.documentedModule
+  , Pandoc.MediaBag.documentedModule
   , Pandoc.System.documentedModule
   , Pandoc.Template.documentedModule
   , Pandoc.Types.documentedModule
@@ -165,3 +179,31 @@ initLuaState = do
 initJsonMetatable :: PandocLua ()
 initJsonMetatable = liftPandocLua $ do
   newListMetatable HsLua.Aeson.jsonarray (pure ())
+
+-- | Evaluate a @'PandocLua'@ computation, running all contained Lua
+-- operations.
+runPandocLuaWith :: (PandocMonad m, MonadIO m)
+                 => (forall b. LuaE PandocError b -> IO b)
+                 -> PandocLua a
+                 -> m a
+runPandocLuaWith runner pLua = do
+  origState <- getCommonState
+  globals <- defaultGlobals
+  (result, newState) <- liftIO . runner . unPandocLua $ do
+    putCommonState origState
+    liftPandocLua $ setGlobals globals
+    r <- pLua
+    c <- getCommonState
+    return (r, c)
+  putCommonState newState
+  return result
+
+-- | Global variables which should always be set.
+defaultGlobals :: PandocMonad m => m [Global]
+defaultGlobals = do
+  commonState <- getCommonState
+  return
+    [ PANDOC_API_VERSION
+    , PANDOC_STATE commonState
+    , PANDOC_VERSION
+    ]

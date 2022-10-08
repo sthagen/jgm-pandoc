@@ -58,7 +58,7 @@ import Text.Pandoc.Walk
 import Text.Pandoc.Writers.Math
 import Text.Pandoc.Writers.Shared
 import qualified Text.Pandoc.Writers.AnnotatedTable as Ann
-import Text.Pandoc.Network.HTTP (urlEncode)
+import Text.Pandoc.URI (urlEncode)
 import Text.Pandoc.XML (escapeStringForXML, fromEntities, toEntities,
                         html5Attributes, html4Attributes, rdfaAttributes)
 import qualified Text.Blaze.XHtml5 as H5
@@ -68,8 +68,8 @@ import System.FilePath (takeBaseName)
 import Text.Blaze.Html.Renderer.Text (renderHtml)
 import qualified Text.Blaze.XHtml1.Transitional as H
 import qualified Text.Blaze.XHtml1.Transitional.Attributes as A
-import Text.Pandoc.Class.PandocMonad (PandocMonad, report,
-                                      translateTerm)
+import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
+import Text.Pandoc.Translations (translateTerm)
 import Text.Pandoc.Class.PandocPure (runPure)
 import Text.Pandoc.Error
 import Text.Pandoc.Logging
@@ -881,8 +881,8 @@ blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
                    , k /= "width" || "column" `notElem` classes] ++
             [("style", "width:" <> w <> ";") | "column" `elem` classes
                                              , ("width", w) <- kvs'] ++
-            [("role", "doc-bibliography") | isCslBibBody && html5] ++
-            [("role", "doc-biblioentry") | isCslBibEntry && html5]
+            [("role", "list") | isCslBibBody && html5] ++
+            [("role", "listitem") | isCslBibEntry && html5]
   let speakerNotes = "notes" `elem` classes
   -- we don't want incremental output inside speaker notes, see #1394
   let opts' = if | speakerNotes -> opts{ writerIncremental = False }

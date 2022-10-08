@@ -38,6 +38,7 @@ import Text.Pandoc.Builder (fromList, setMeta)
 import Text.Pandoc.Writers.Shared (ensureValidXmlIdentifiers)
 import Text.Pandoc.Class (PandocMonad, report)
 import qualified Text.Pandoc.Class.PandocPure as P
+import Text.Pandoc.Data (readDataFile)
 import qualified Text.Pandoc.Class.PandocMonad as P
 import Data.Time
 import Text.Pandoc.Definition
@@ -45,7 +46,7 @@ import Text.Pandoc.Error
 import Text.Pandoc.ImageSize
 import Text.Pandoc.Logging
 import Text.Pandoc.MIME (MimeType, extensionFromMimeType, getMimeType)
-import Text.Pandoc.Network.HTTP (urlEncode)
+import Text.Pandoc.URI (urlEncode)
 import Text.Pandoc.Options (EPUBVersion (..), HTMLMathMethod (..),
                             ObfuscationMethod (NoObfuscation), WrapOption (..),
                             WriterOptions (..))
@@ -460,7 +461,7 @@ pandocToEPUB version opts doc = do
   -- stylesheet
   stylesheets <- case epubStylesheets metadata of
                       [] -> (\x -> [B.fromChunks [x]]) <$>
-                             P.readDataFile "epub.css"
+                               readDataFile "epub.css"
                       fs -> mapM P.readFileLazy fs
   stylesheetEntries <- zipWithM
         (\bs n -> mkEntry ("styles/stylesheet" ++ show n ++ ".css") bs)

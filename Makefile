@@ -9,7 +9,7 @@ COMMIT=$(shell git rev-parse --short HEAD)
 TIMESTAMP=$(shell date "+%Y%m%d_%H%M")
 LATESTBENCH=$(word 1,$(shell ls -t bench_*.csv 2>/dev/null))
 BASELINE?=$(LATESTBENCH)
-ROOTNODE?=T.P
+ROOT?=Text.Pandoc
 ifeq ($(BASELINE),)
 BASELINECMD=
 else
@@ -44,22 +44,40 @@ quick-stack: ## unoptimized build and tests with stack
 	  --test-arguments='-j4 --hide-successes --ansi-tricks=false $(TESTARGS)'
 .PHONY: quick-stack
 
-check: fix_spacing check-cabal checkdocs ## prerelease checks
+prerelease: README.md fix_spacing check-cabal check-stack checkdocs man uncommitted_changes ## prerelease checks
+.PHONY: prerelease
+
+uncommitted_changes:
+	! git diff | grep '.'
+.PHONY: uncommitted_changes
+
+authors:  ## prints unique authors since LASTRELEASE (version)
+	git log --pretty=format:"%an" $(LASTRELEASE)..HEAD | sort | uniq
+
+
+check-stack:
 	stack-lint-extra-deps # check that stack.yaml dependencies are up to date
 	! grep 'git:' stack.yaml # use only released versions
-	! grep 'git:' cabal.project # use only released versions
-.PHONY: check
+.PHONY: check-stack
 
 check-cabal: git-files.txt sdist-files.txt
 	@echo "Checking to see if all committed test/data files are in sdist."
 	diff -u $^
-	cabal check
-	cabal outdated
+	@for pkg in . pandoc-lua-engine pandoc-server pandoc-cli; \
+	do \
+	     pushd $$pkg ; \
+	     cabal check ; \
+	     cabal outdated ; \
+	     popd ; \
+	done
+	! grep 'git:' cabal.project # use only released versions
+
 .PHONY: check-cabal
 
 checkdocs:
 	@echo "Checking for tabs in manual."
-	! grep -q -n -e "\t" MANUAL.txt changelog.md
+	! grep -q -n -e "\t" \
+	   MANUAL.txt changelog.md doc/pandoc-server.md doc/pandoc-lua.md
 .PHONY: checkdocs
 
 bench: ## build and run benchmarks
@@ -163,27 +181,31 @@ update-website: ## update website and upload
 	make -C $(WEBSITE) upload
 .PHONY: update-website
 
-modules.dot: $(PANDOCSOURCEFILES)
-	@echo "digraph G {" > $@
-	@echo "overlap=\"scale\"" >> $@
+modules.csv: $(PANDOCSOURCEFILES)
 	@rg '^import.*Text\.Pandoc\.' --with-filename $^ \
 		| rg -v 'Text\.Pandoc\.(Definition|Builder|Walk|Generic)' \
 		| sort \
 		| uniq \
 		| sed -e 's/src\///' \
 	        | sed -e 's/\//\./g' \
-		| sed -e 's/\.hs:import *\(qualified *\)*\([^ ]*\).*/ -> \2/' \
-		| sed -e 's/Text\.Pandoc\([^ ]*\)/"T\.P\1"/g' >> $@
+		| sed -e 's/\.hs:import *\(qualified *\)*\([^ ]*\).*/,\2/' \
+		> $@
+
+modules.dot: modules.csv
+	@echo "digraph G {" > $@
+	@echo "overlap=\"scale\"" >> $@
+	@sed -e 's/\([^,]*\),\(.*\)/  "\1" -> "\2";/' $< >> $@
 	@echo "}" >> $@
 
-# To get the module dependencies of T.P.Parsing:
-# make modules.pdf ROOTNODE=T.P.Parsing
+# To get the module dependencies of Text.Pandoc.Parsing:
+# make modules.pdf ROOT=Text.Pandoc.Parsing
 modules.pdf: modules.dot
-	gvpr -f tools/cliptree.gvpr -a '"$(ROOTNODE)"' $< | dot -Tpdf > $@
+	gvpr -f tools/cliptree.gvpr -a '"$(ROOT)"' $< | dot -Tpdf > $@
 
-# make moduledeps ROOTNODE=T.P.Parsing
-moduledeps: modules.dot  ## Print dependencies of a module ROOTNODE
-	gvpr -f tools/depthfirst.gvpr -a '"$(ROOTNODE)"' modules.dot
+# make moduledeps ROOT=Text.Pandoc.Parsing
+moduledeps: modules.csv  ## Print transitive dependencies of a module ROOT
+	@echo "$(ROOT)"
+	@lua tools/moduledeps.lua transitive $(ROOT) | sort
 .PHONY: moduledeps
 
 clean: ## clean up

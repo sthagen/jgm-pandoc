@@ -269,7 +269,9 @@ variables.
     be picked up by pandoc.
     ([WriterOptions](#type-writeroptions))
 
-    This variable is also set in custom writers.
+    This variable is also set in custom writers, but, starting
+    with pandoc 3.0, contains only the default options. The actual
+    writer options can be accessed via new-style writers.
 
     *Since: pandoc 2.17*
 
@@ -3542,6 +3544,36 @@ Usage:
     )
     local html = pandoc.write(doc, 'html')
     assert(html == "<p><strong>Tea</strong></p>")
+
+### `write_classic (doc[, writer_options])` {#pandoc.write_custom}
+
+Runs a classic custom Lua writer, using the functions defined
+in the current environment.
+
+Parameters:
+
+`doc`
+:   document to convert ([Pandoc](#type-pandoc))
+
+`writer_options`
+:   options passed to the writer; may be a [WriterOptions] object
+    or a table with a subset of the keys and values of a
+    WriterOptions object; defaults to the default values
+    documented in the manual. ([WriterOptions]|table)
+
+Returns:
+-   converted document (string)
+
+Usage:
+
+    -- Adding this function converts a classic writer into a
+    -- new-style custom writer.
+    function Writer (doc, opts)
+      PANDOC_DOCUMENT = doc
+      PANDOC_WRITER_OPTIONS = opts
+      loadfile(PANDOC_SCRIPT_FILE)()
+      return pandoc.write_classic(doc, opts)
+    end
 
 [WriterOptions]: #type-writeroptions
 
