@@ -49,6 +49,51 @@ and can contain arbitrary binary data.
 If both `Writer` and `ByteStringWriter` functions are defined,
 then only the `Writer` function will be used.
 
+## Format extensions
+
+Writers can be customized through format extensions, such as
+`smart`, `citations`, or `hard_line_breaks`. The global
+`writer_extensions` table indicates supported extensions with a
+key. Extensions enabled by default are assigned a true value,
+while those that are supported but disabled are assigned a false
+value.
+
+Example: A writer with the following global table supports the
+extensions `smart` and `citations`, with the former enabled and
+the latter disabled by default:
+
+``` lua
+writer_extensions = {
+  smart = true,
+  citations = false,
+}
+```
+
+The users control extensions as usual, e.g., `pandoc -t
+my-writer.lua+citations`. The extensions are accessible through
+the writer options' `extensions` field, e.g.:
+
+``` lua
+function Writer (doc, opts)
+  print(
+    'The citations extension is',
+    opts.extensions:includes 'citations' and 'enabled' or 'disabled'
+  )
+  -- ...
+end
+```
+
+## Default template
+
+The default template of a custom writer is defined by the return
+value of the global function `Template`. Pandoc uses the default
+template for rendering when the user has not specified a template,
+but invoked with the `-s`/`--standalone` flag.
+
+The `Template` global can be left undefined, in which case pandoc
+will throw an error when it would otherwise use the default
+template.
+
 ## Example: modified Markdown writer
 
 Writers have access to all modules described in the [Lua filters
@@ -71,6 +116,11 @@ function Writer (doc, opts)
     end
   }
   return pandoc.write(doc:walk(filter), 'gfm', opts)
+end
+
+function Template ()
+  local template = pandoc.template
+  return template.compile(template.default 'gfm')
 end
 ```
 

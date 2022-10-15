@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
@@ -38,6 +39,7 @@ import Text.Pandoc
 import Text.Pandoc.App.FormatHeuristics (formatFromFilePaths)
 import Text.Pandoc.App.Opt (Opt (..))
 import Text.Pandoc.App.CommandLineOptions (engines, setVariable)
+import qualified Text.Pandoc.Format as Format
 import Text.Pandoc.Highlighting (lookupHighlightingStyle)
 import Text.Pandoc.Scripting (ScriptingEngine (engineWriteCustom))
 import qualified Text.Pandoc.UTF8 as UTF8
@@ -88,10 +90,6 @@ optToOutputSettings scriptingEngine opts = do
                              return ("html", Nothing)
                            Just f  -> return (f, Nothing)
 
-  let format = if ".lua" `T.isSuffixOf` writerName
-                  then writerName
-                  else T.toLower $ baseWriterName writerName
-
   let makeSandboxed pureWriter =
           let files = maybe id (:) (optReferenceDoc opts) .
                       maybe id (:) (optEpubMetadata opts) .
@@ -105,17 +103,42 @@ optToOutputSettings scriptingEngine opts = do
                  ByteStringWriter w ->
                    ByteStringWriter $ \o d -> sandbox files (w o d)
 
-  (writer, writerExts) <-
-    if ".lua" `T.isSuffixOf` format
-    then (,mempty) <$> engineWriteCustom scriptingEngine (T.unpack writerName)
-    else if optSandbox opts
-         then
-           case runPure (getWriter writerName) of
-             Left e -> throwError e
-             Right (w, wexts) ->return (makeSandboxed w, wexts)
-         else getWriter (T.toLower writerName)
+  flvrd@(Format.FlavoredFormat format _extsDiff) <-
+    Format.parseFlavoredFormat writerName
 
   let standalone = optStandalone opts || not (isTextFormat format) || pdfOutput
+  let processCustomTemplate getDefault =
+        case optTemplate opts of
+          _ | not standalone -> return Nothing
+          Nothing -> Just <$> getDefault
+          Just tp -> do
+            -- strip off extensions
+            let tp' = case takeExtension tp of
+                        "" -> tp <.> T.unpack format
+                        _  -> tp
+            getTemplate tp'
+              >>= runWithPartials . compileTemplate tp'
+              >>= (\case
+                      Left  e -> throwError $ PandocTemplateError (T.pack e)
+                      Right t -> return $ Just t)
+
+  (writer, writerExts, mtemplate) <-
+    if "lua" `T.isSuffixOf` format
+    then do
+      (w, extsConf, mt) <- engineWriteCustom scriptingEngine (T.unpack format)
+      wexts <- Format.applyExtensionsDiff extsConf flvrd
+      templ <- processCustomTemplate mt
+      return (w, wexts, templ)
+    else do
+      tmpl <- processCustomTemplate (compileDefaultTemplate format)
+      if optSandbox opts
+      then case runPure (getWriter flvrd) of
+             Right (w, wexts) -> return (makeSandboxed w, wexts, tmpl)
+             Left e           -> throwError e
+      else do
+           (w, wexts) <- getWriter flvrd
+           return (w, wexts, tmpl)
+
 
   let addSyntaxMap existingmap f = do
         res <- liftIO (parseSyntaxDefinition f)
@@ -184,21 +207,8 @@ optToOutputSettings scriptingEngine opts = do
                       setVariableM "dzslides-core" dzcore vars
                   else return vars)
 
-  templ <- case optTemplate opts of
-                  _ | not standalone -> return Nothing
-                  Nothing -> Just <$> compileDefaultTemplate format
-                  Just tp -> do
-                    -- strip off extensions
-                    let tp' = case takeExtension tp of
-                                   "" -> tp <.> T.unpack format
-                                   _  -> tp
-                    res <- getTemplate tp' >>= runWithPartials . compileTemplate tp'
-                    case res of
-                      Left  e -> throwError $ PandocTemplateError $ T.pack e
-                      Right t -> return $ Just t
-
   let writerOpts = def {
-          writerTemplate         = templ
+          writerTemplate         = mtemplate
         , writerVariables        = variables
         , writerTabStop          = optTabStop opts
         , writerTableOfContents  = optTableOfContents opts

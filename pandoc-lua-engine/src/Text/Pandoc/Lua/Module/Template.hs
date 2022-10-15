@@ -12,11 +12,16 @@ module Text.Pandoc.Lua.Module.Template
   ) where
 
 import HsLua
+import HsLua.Module.DocLayout (peekDoc, pushDoc)
 import Text.Pandoc.Error (PandocError)
-import Text.Pandoc.Lua.Marshal.Template (pushTemplate)
+import Text.Pandoc.Lua.Marshal.AST (peekMeta, pushBlocks, pushInlines)
+import Text.Pandoc.Lua.Marshal.Context (peekContext, pushContext)
+import Text.Pandoc.Lua.Marshal.Template (peekTemplate, pushTemplate)
 import Text.Pandoc.Lua.PandocLua (PandocLua (unPandocLua), liftPandocLua)
+import Text.Pandoc.Writers.Shared (metaToContext')
 import Text.Pandoc.Templates
-  (compileTemplate, getDefaultTemplate, runWithPartials, runWithDefaultPartials)
+  ( compileTemplate, getDefaultTemplate, renderTemplate
+  , runWithPartials, runWithDefaultPartials )
 
 import qualified Data.Text as T
 
@@ -35,7 +40,20 @@ documentedModule = Module
 -- | Template module functions.
 functions :: [DocumentedFunction PandocError]
 functions =
-  [ defun "compile"
+  [ defun "apply"
+     ### liftPure2 renderTemplate
+     <#> parameter peekTemplate "Template" "template" "template to apply"
+     <#> parameter peekContext "table" "context" "variable values"
+     =#> functionResult pushDoc "Doc" "rendered template"
+     #? T.unlines
+     [ "Applies a context with variable assignments to a template,"
+     , "returning the rendered template. The `context` parameter must be a"
+     , "table with variable names as keys and [Doc], string, boolean, or"
+     , "table as values, where the table can be either be a list of the"
+     , "aforementioned types, or a nested context."
+     ]
+
+  , defun "compile"
      ### (\template mfilepath -> unPandocLua $
            case mfilepath of
              Just fp -> runWithPartials (compileTemplate fp template)
@@ -58,4 +76,28 @@ functions =
      =#> functionResult pushText "string"
            "string representation of the writer's default template"
 
+  , defun "meta_to_context"
+     ### (\meta blockWriterIdx inlineWriterIdx -> unPandocLua $ do
+             let blockWriter blks = liftPandocLua $ do
+                   pushvalue blockWriterIdx
+                   pushBlocks blks
+                   callTrace 1 1
+                   forcePeek $ peekDoc top
+             let inlineWriter blks = liftPandocLua $ do
+                   pushvalue inlineWriterIdx
+                   pushInlines blks
+                   callTrace 1 1
+                   forcePeek $ peekDoc top
+             metaToContext' blockWriter inlineWriter meta)
+     <#> parameter peekMeta "Meta" "meta" "document metadata"
+     <#> parameter pure "function" "blocks_writer"
+           "converter from Blocks to Doc values"
+     <#> parameter pure "function" "inlines_writer"
+           "converter from Inlines to Doc values"
+     =#> functionResult pushContext "table" "template context"
+     #? T.unlines
+     [ "Creates template context from the document's [Meta]{#type-meta}"
+     , "data, using the given functions to convert [Blocks] and [Inlines]"
+     , "to [Doc] values."
+     ]
   ]

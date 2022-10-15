@@ -21,6 +21,8 @@ description:         This package provides a pandoc scripting engine based on
 extra-source-files:  README.md
                    , test/bytestring.bin
                    , test/bytestring.lua
+                   , test/bytestring-reader.lua
+                   , test/extensions.lua
                    , test/lua/*.lua
                    , test/lua/module/*.lua
                    , test/lua/module/partial.test
@@ -30,6 +32,8 @@ extra-source-files:  README.md
                    , test/tables.native
                    , test/testsuite.native
                    , test/writer.custom
+                   , test/writer-template.lua
+                   , test/writer-template.out.txt
 
 source-repository head
   type:                git
@@ -65,7 +69,7 @@ library
                      , Text.Pandoc.Lua.Init
                      , Text.Pandoc.Lua.Marshal.CommonState
                      , Text.Pandoc.Lua.Marshal.Context
-                     , Text.Pandoc.Lua.Marshal.Extensions
+                     , Text.Pandoc.Lua.Marshal.Format
                      , Text.Pandoc.Lua.Marshal.PandocError
                      , Text.Pandoc.Lua.Marshal.ReaderOptions
                      , Text.Pandoc.Lua.Marshal.Reference
@@ -131,4 +135,5 @@ test-suite test-pandoc-lua-engine
                      , text                  >= 1.1.1   && < 2.1
   other-modules:       Tests.Lua
                      , Tests.Lua.Module
+                     , Tests.Lua.Reader
                      , Tests.Lua.Writer

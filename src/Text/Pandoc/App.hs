@@ -58,12 +58,12 @@ import Text.Pandoc.App.OutputSettings (OutputSettings (..), optToOutputSettings)
 import Text.Collate.Lang (Lang (..), parseLang)
 import Text.Pandoc.Filter (Filter (JSONFilter, LuaFilter), Environment (..),
                            applyFilters)
+import qualified Text.Pandoc.Format as Format
 import Text.Pandoc.PDF (makePDF)
 import Text.Pandoc.Scripting (ScriptingEngine (..))
 import Text.Pandoc.SelfContained (makeSelfContained)
 import Text.Pandoc.Shared (eastAsianLineBreakFilter,
          headerShift, isURI, filterIpynbOutput, defaultUserDataDir, tshow)
-import Text.Pandoc.Sources (toSources)
 import Text.Pandoc.Writers.Shared (lookupMetaString)
 import Text.Pandoc.Readers.Markdown (yamlToMeta)
 import qualified Text.Pandoc.UTF8 as UTF8
@@ -148,8 +148,8 @@ convertWithOpts' scriptingEngine istty datadir opts = do
                                (map (T.pack . takeExtension) sources) "markdown"
                            return "markdown"
 
-  let readerNameBase = T.takeWhile (\c -> c /= '+' && c /= '-') readerName
-
+  flvrd@(Format.FlavoredFormat readerNameBase _extsDiff) <-
+    Format.parseFlavoredFormat readerName
   let makeSandboxed pureReader =
         let files = maybe id (:) (optReferenceDoc opts) .
                     maybe id (:) (optEpubMetadata opts) .
@@ -165,18 +165,16 @@ convertWithOpts' scriptingEngine istty datadir opts = do
 
   (reader, readerExts) <-
     if ".lua" `T.isSuffixOf` readerName
-       then return ( TextReader $ \ropts s ->
-                       engineReadCustom scriptingEngine
-                                        (T.unpack readerName)
-                                        ropts
-                                        (toSources s)
-                   , mempty
-                   )
+       then do
+            let scriptPath = T.unpack readerNameBase
+            (r, extsConf) <- engineReadCustom scriptingEngine scriptPath
+            rexts         <- Format.applyExtensionsDiff extsConf flvrd
+            return (r, rexts)
        else if optSandbox opts
-               then case runPure (getReader readerName) of
+               then case runPure (getReader flvrd) of
                       Left e -> throwError e
                       Right (r, rexts) -> return (makeSandboxed r, rexts)
-               else getReader readerName
+               else getReader flvrd
 
   outputSettings <- optToOutputSettings scriptingEngine opts
   let format = outputFormat outputSettings

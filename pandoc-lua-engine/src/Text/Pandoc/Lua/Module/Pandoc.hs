@@ -30,6 +30,7 @@ import HsLua hiding (pushModule)
 import System.Exit (ExitCode (..))
 import Text.Pandoc.Definition
 import Text.Pandoc.Error (PandocError (..))
+import Text.Pandoc.Format (parseFlavoredFormat)
 import Text.Pandoc.Lua.Orphans ()
 import Text.Pandoc.Lua.Marshal.AST
 import Text.Pandoc.Lua.Marshal.Filter (peekFilter)
@@ -206,32 +207,21 @@ functions =
     =?> "output string, or error triple"
 
   , defun "read"
-    ### (\content mformatspec mreaderOptions -> do
-            let formatSpec = fromMaybe "markdown" mformatspec
-                readerOpts = fromMaybe def mreaderOptions
-                readAction = getReader formatSpec >>= \case
-                  (TextReader r, es)       ->
-                    r readerOpts{readerExtensions = es}
-                      (case content of
-                         Left bs       -> toSources $ UTF8.toText bs
-                         Right sources -> sources)
-                  (ByteStringReader r, es) ->
-                    case content of
-                      Left bs -> r readerOpts{readerExtensions = es}
-                                   (BSL.fromStrict bs)
-                      Right _ -> liftPandocLua $ Lua.failLua
-                                 "Cannot use bytestring reader with Sources"
-            try (unPandocLua readAction) >>= \case
-              Right pd ->
-                -- success, got a Pandoc document
-                return pd
-              Left  (PandocUnknownReaderError f) ->
-                Lua.failLua . T.unpack $ "Unknown reader: " <> f
-              Left  (PandocUnsupportedExtensionError e f) ->
-                Lua.failLua . T.unpack $
-                "Extension " <> e <> " not supported for " <> f
-              Left e ->
-                throwM e)
+    ### (\content mformatspec mreaderOptions -> unPandocLua $ do
+            let readerOpts = fromMaybe def mreaderOptions
+            formatSpec <- parseFlavoredFormat $ fromMaybe "markdown" mformatspec
+            getReader formatSpec >>= \case
+              (TextReader r, es)       ->
+                 r readerOpts{readerExtensions = es}
+                   (case content of
+                      Left bs       -> toSources $ UTF8.toText bs
+                      Right sources -> sources)
+              (ByteStringReader r, es) ->
+                 case content of
+                   Left bs -> r readerOpts{readerExtensions = es}
+                                (BSL.fromStrict bs)
+                   Right _ -> throwM $ PandocLuaError
+                              "Cannot use bytestring reader with Sources")
     <#> parameter (\idx -> (Left  <$> peekByteString idx)
                        <|> (Right <$> peekSources idx))
           "string|Sources" "content" "text to parse"
@@ -255,10 +245,10 @@ functions =
     =#> functionResult pushInline "Inline" "modified Inline"
 
   , defun "write"
-    ### (\doc mformatspec mwriterOpts -> do
-            let formatSpec = fromMaybe "html" mformatspec
-                writerOpts = fromMaybe def mwriterOpts
-            unPandocLua $ getWriter formatSpec >>= \case
+    ### (\doc mformatspec mwriterOpts -> unPandocLua $ do
+            let writerOpts = fromMaybe def mwriterOpts
+            formatSpec <- parseFlavoredFormat $ fromMaybe "html" mformatspec
+            getWriter formatSpec >>= \case
               (TextWriter w, es)      -> Right <$>
                 w writerOpts{ writerExtensions = es } doc
               (ByteStringWriter w, es) -> Left <$>

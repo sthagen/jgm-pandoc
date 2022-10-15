@@ -16,10 +16,10 @@
 Data structures and functions for representing markup extensions.
 -}
 module Text.Pandoc.Extensions ( Extension(..)
+                              , readExtension
                               , Extensions
                               , emptyExtensions
                               , extensionsFromList
-                              , parseFormatSpec
                               , extensionEnabled
                               , enableExtension
                               , disableExtension
@@ -32,16 +32,14 @@ module Text.Pandoc.Extensions ( Extension(..)
                               , githubMarkdownExtensions
                               , multimarkdownExtensions )
 where
-import Data.Bits (clearBit, setBit, testBit, (.|.))
 import Data.Data (Data)
-import Data.List (foldl')
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
-import Safe (readMay)
-import Text.Parsec
+import Text.Read (readMaybe)
 import Data.Aeson.TH (deriveJSON)
 import Data.Aeson
+import qualified Data.Set as Set
 
 -- | Individually selectable syntax extensions.
 data Extension =
@@ -141,13 +139,13 @@ data Extension =
 
 $(deriveJSON defaultOptions{ constructorTagModifier = drop 4 } ''Extension)
 
-newtype Extensions = Extensions Integer
+newtype Extensions = Extensions (Set.Set Extension)
   deriving (Show, Read, Eq, Ord, Data, Typeable, Generic)
 
 instance Semigroup Extensions where
-  (Extensions a) <> (Extensions b) = Extensions (a .|. b)
+  (Extensions a) <> (Extensions b) = Extensions (a <> b)
 instance Monoid Extensions where
-  mempty = Extensions 0
+  mempty = Extensions mempty
   mappend = (<>)
 
 instance FromJSON Extensions where
@@ -157,20 +155,26 @@ instance ToJSON Extensions where
   toJSON exts = toJSON $
     [ext | ext <- [minBound..maxBound], extensionEnabled ext exts]
 
+-- | Reads a single extension from a string.
+readExtension :: String -> Maybe Extension
+readExtension name = case name of
+  "lhs" -> Just Ext_literate_haskell
+  _     -> readMaybe ("Ext_" ++ name)
+
 extensionsFromList :: [Extension] -> Extensions
 extensionsFromList = foldr enableExtension emptyExtensions
 
 emptyExtensions :: Extensions
-emptyExtensions = Extensions 0
+emptyExtensions = Extensions mempty
 
 extensionEnabled :: Extension -> Extensions -> Bool
-extensionEnabled x (Extensions exts) = testBit exts (fromEnum x)
+extensionEnabled x (Extensions exts) = x `Set.member` exts
 
 enableExtension :: Extension -> Extensions -> Extensions
-enableExtension x (Extensions exts) = Extensions (setBit exts (fromEnum x))
+enableExtension x (Extensions exts) = Extensions (Set.insert x exts)
 
 disableExtension :: Extension -> Extensions -> Extensions
-disableExtension x (Extensions exts) = Extensions (clearBit exts (fromEnum x))
+disableExtension x (Extensions exts) = Extensions (Set.delete x exts)
 
 -- | Extensions to be used with pandoc-flavored markdown.
 pandocExtensions :: Extensions
@@ -604,29 +608,3 @@ getAllExtensions f = universalExtensions <> getAll f
     extensionsFromList
     [ Ext_smart ]
   getAll _                 = mempty
-
-
--- | Parse a format-specifying string into a markup format,
--- a set of extensions to enable, and a set of extensions to disable.
-parseFormatSpec :: T.Text
-                -> Either ParseError (T.Text, [Extension], [Extension])
-parseFormatSpec = parse formatSpec ""
-  where formatSpec = do
-          name <- formatName
-          (extsToEnable, extsToDisable) <- foldl' (flip ($)) ([],[]) <$>
-                                             many extMod
-          return (T.pack name, reverse extsToEnable, reverse extsToDisable)
-        formatName = many1 $ noneOf "-+"
-        extMod = do
-          polarity <- oneOf "-+"
-          name <- many $ noneOf "-+"
-          ext <- case readMay ("Ext_" ++ name) of
-                       Just n  -> return n
-                       Nothing
-                         | name == "lhs" -> return Ext_literate_haskell
-                         | otherwise -> unexpected $
-                                          "unknown extension: " ++ name
-          return $ \(extsToEnable, extsToDisable) ->
-                    case polarity of
-                        '+' -> (ext : extsToEnable, extsToDisable)
-                        _   -> (extsToEnable, ext : extsToDisable)

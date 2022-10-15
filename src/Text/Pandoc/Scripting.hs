@@ -18,12 +18,13 @@ where
 import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (MonadIO)
 import Data.Text (Text)
-import Text.Pandoc.Definition (Pandoc)
 import Text.Pandoc.Class.PandocMonad (PandocMonad)
+import Text.Pandoc.Definition (Pandoc)
 import Text.Pandoc.Error (PandocError (PandocNoScriptingEngine))
 import Text.Pandoc.Filter.Environment (Environment)
-import Text.Pandoc.Options (ReaderOptions)
-import Text.Pandoc.Sources (Sources)
+import Text.Pandoc.Format (ExtensionsConfig)
+import Text.Pandoc.Templates (Template)
+import Text.Pandoc.Readers (Reader)
 import Text.Pandoc.Writers (Writer)
 
 -- | Structure to define a scripting engine.
@@ -36,20 +37,22 @@ data ScriptingEngine = ScriptingEngine
     -- ^ Use the scripting engine to run a filter.
 
   , engineReadCustom :: forall m. (PandocMonad m, MonadIO m)
-                     => FilePath -> ReaderOptions -> Sources -> m Pandoc
+                     => FilePath -> m (Reader m, ExtensionsConfig)
     -- ^ Function to parse input into a 'Pandoc' document.
 
   , engineWriteCustom :: forall m. (PandocMonad m, MonadIO m)
-                      => FilePath -> m (Writer m)
+                      => FilePath -> m (WriterProperties m)
     -- ^ Invoke the given script file to convert to any custom format.
   }
+
+type WriterProperties m = (Writer m, ExtensionsConfig, m (Template Text))
 
 noEngine :: ScriptingEngine
 noEngine = ScriptingEngine
   { engineName = "none"
   , engineApplyFilter = \_env _args _fp _doc ->
       throwError PandocNoScriptingEngine
-  , engineReadCustom = \_fp _ropts _sources ->
+  , engineReadCustom = \_fp ->
       throwError PandocNoScriptingEngine
   , engineWriteCustom = \_fp ->
       throwError PandocNoScriptingEngine
