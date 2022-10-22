@@ -43,7 +43,8 @@ import Text.Pandoc.Options (TopLevelDivision (TopLevelDefault),
 import Text.Pandoc.Class (readFileStrict, fileExists, setVerbosity, report,
                           PandocMonad(lookupEnv), getUserDataDir)
 import Text.Pandoc.Error (PandocError (PandocParseError, PandocSomeError))
-import Text.Pandoc.Shared (defaultUserDataDir, findM, ordNub)
+import Data.Containers.ListUtils (nubOrd)
+import Text.Pandoc.Data (defaultUserDataDir)
 import qualified Text.Pandoc.Parsing as P
 import Text.Pandoc.Readers.Metadata (yamlMap)
 import Text.Pandoc.Class.PandocPure
@@ -800,7 +801,14 @@ fullDefaultsPath dataDir file = do
               else file
   defaultDataDir <- liftIO defaultUserDataDir
   let defaultFp = fromMaybe defaultDataDir dataDir </> "defaults" </> fp
-  fromMaybe fp <$> findM fileExists [fp, defaultFp]
+  fpExists <- fileExists fp
+  if fpExists
+     then return fp
+     else do
+       defaultFpExists <- fileExists defaultFp
+       if defaultFpExists
+          then return defaultFp
+          else return fp
 
 -- | In a list of lists, append another list in front of every list which
 -- starts with specific element.
@@ -815,4 +823,4 @@ expand ps ns n = concatMap (ext n ns) ps
 cyclic :: Ord a => [[a]] -> Bool
 cyclic = any hasDuplicate
   where
-    hasDuplicate xs = length (ordNub xs) /= length xs
+    hasDuplicate xs = length (nubOrd xs) /= length xs

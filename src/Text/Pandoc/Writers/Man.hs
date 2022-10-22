@@ -27,6 +27,7 @@ import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.DocLayout
 import Text.Pandoc.Shared
+import Text.Pandoc.URI
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Writers.Math
 import Text.Pandoc.Writers.Shared
@@ -73,7 +74,7 @@ pandocToMan opts (Pandoc meta blocks) = do
               $ setFieldsFromTitle
               $ defField "has-tables" hasTables
               $ defField "hyphenate" True
-              $ defField "pandoc-version" pandocVersionText metadata
+              $ metadata
   return $ render colwidth $
     case writerTemplate opts of
        Nothing  -> main

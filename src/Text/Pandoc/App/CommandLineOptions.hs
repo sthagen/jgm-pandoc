@@ -1,11 +1,9 @@
 {-# LANGUAGE CPP                 #-}
-{-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE TypeApplications    #-}
 {- |
    Module      : Text.Pandoc.App.CommandLineOptions
    Copyright   : Copyright (C) 2006-2022 John MacFarlane
@@ -27,6 +25,7 @@ module Text.Pandoc.App.CommandLineOptions (
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.State.Strict
+import Data.Containers.ListUtils (nubOrd)
 import Data.Aeson.Encode.Pretty (encodePretty', Config(..), keyOrder,
          defConfig, Indent(..), NumberFormat(..))
 import Data.Bifunctor (second)
@@ -52,7 +51,7 @@ import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), IpynbOutput (..),
                             fullDefaultsPath)
 import Text.Pandoc.Filter (Filter (..))
 import Text.Pandoc.Highlighting (highlightingStyles, lookupHighlightingStyle)
-import Text.Pandoc.Shared (ordNub, elemText, safeStrRead, defaultUserDataDir)
+import Text.Pandoc.Shared (safeStrRead)
 import Text.Printf
 import qualified Control.Exception as E
 import qualified Data.ByteString as BS
@@ -117,7 +116,7 @@ engines = map ("html",) htmlEngines ++
           ]
 
 pdfEngines :: [String]
-pdfEngines = ordNub $ map snd engines
+pdfEngines = nubOrd $ map snd engines
 
 -- | A list of functions, each transforming the options data structure
 --   in response to a command-line option.
@@ -830,12 +829,10 @@ options =
     , Option "" ["list-extensions"]
                  (OptArg
                   (\arg _ -> do
-                     let extList :: [Extension]
-                         extList = [minBound..maxBound]
-                     let allExts =
-                           case arg of
-                             Nothing  -> extensionsFromList extList
-                             Just fmt -> getAllExtensions $ T.pack fmt
+                     let allExts = getAllExtensions $
+                                    case arg of
+                                      Nothing  -> "markdown"
+                                      Just fmt -> T.pack fmt
                      let formatName = maybe "markdown" T.pack arg
                      if formatName `notElem`
                          (map fst (readers :: [(Text, Reader PandocPure)]) ++
@@ -851,7 +848,7 @@ options =
                                            then '-'
                                            else ' ') : drop 4 (show x)
                           mapM_ (UTF8.hPutStrLn stdout . T.pack . showExt)
-                             [ex | ex <- extList, extensionEnabled ex allExts]
+                             (extensionsToList allExts)
                           exitSuccess )
                   "FORMAT")
                  ""
@@ -1008,7 +1005,7 @@ writersNames = sort
   ("pdf" : map fst (writers :: [(Text, Writer PandocIO)]))
 
 splitField :: String -> (String, String)
-splitField = second (tailDef "true") . break (`elemText` ":=")
+splitField = second (tailDef "true") . break (\c -> c == ':' || c == '=')
 
 deprecatedOption :: String -> String -> IO ()
 deprecatedOption o msg =

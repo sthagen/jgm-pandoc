@@ -33,6 +33,7 @@ import Control.Monad.State.Strict
 import Data.Char (ord)
 import Data.List (intercalate, intersperse, partition, delete, (\\), foldl')
 import Data.List.NonEmpty (NonEmpty((:|)))
+import Data.Containers.ListUtils (nubOrd)
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -44,7 +45,6 @@ import Text.DocLayout (render, literal, Doc)
 import Text.Blaze.Internal (MarkupM (Empty), customLeaf, customParent)
 import Text.DocTemplates (FromContext (lookupContext), Context (..))
 import Text.Blaze.Html hiding (contents)
-import Text.Pandoc.Translations (Term(Abstract))
 import Text.Pandoc.CSS (cssAttributes)
 import Text.Pandoc.Definition
 import Text.Pandoc.Highlighting (formatHtmlBlock, formatHtml4Block,
@@ -69,7 +69,7 @@ import Text.Blaze.Html.Renderer.Text (renderHtml)
 import qualified Text.Blaze.XHtml1.Transitional as H
 import qualified Text.Blaze.XHtml1.Transitional.Attributes as A
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
-import Text.Pandoc.Translations (translateTerm)
+import Text.Pandoc.Translations (Term(Abstract), translateTerm)
 import Text.Pandoc.Class.PandocPure (runPure)
 import Text.Pandoc.Error
 import Text.Pandoc.Logging
@@ -830,7 +830,7 @@ blockToHtmlInner opts (Div (ident, "section":dclasses, dkvs)
     res <- blockListToHtml opts innerSecs
     modify $ \st -> st{ stInSection = inSection }
     return res
-  let classes' = ordNub $
+  let classes' = nubOrd $
                   ["title-slide" | titleSlide] ++ ["slide" | slide] ++
                   ["section" | (slide || writerSectionDivs opts) &&
                                not html5 ] ++

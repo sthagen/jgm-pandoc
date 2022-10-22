@@ -31,9 +31,12 @@ import Text.Pandoc.Extensions
   , getAllExtensions
   , getDefaultExtensions
   , readExtension
+  , showExtension
   )
-import Text.Parsec
+import Text.Pandoc.Parsing
 import qualified Data.Text as T
+
+type Parser = Parsec T.Text ()
 
 -- | Format specifier with the format's name and the lists of extensions
 -- to be enabled or disabled.
@@ -82,8 +85,8 @@ applyExtensionsDiff extConf (FlavoredFormat fname extsDiff) = do
         filter (\ext -> not $ extensionEnabled ext (extsSupported extConf))
                (extsToEnable extsDiff ++ extsToDisable extsDiff)
   case unsupported of
-    ext:_ -> throwError $ PandocUnsupportedExtensionError
-             (T.drop 4 . T.pack $ show ext) fname
+    ext:_ -> throwError $ PandocUnsupportedExtensionError (showExtension ext)
+                          fname
     []    -> let enabled = foldr enableExtension
                                  (extsDefault extConf)
                                  (extsToEnable extsDiff)
@@ -107,7 +110,7 @@ parseFlavoredFormat spec =
     Left err -> throwError $ PandocFormatError spec (T.pack $ show err)
   where
     fixSourcePos = do
-      pos <- statePos <$> getParserState
+      pos <- getPosition
       setPosition (incSourceColumn pos (T.length prefix))
     formatSpec = do
       name <- parseFormatName
@@ -115,18 +118,16 @@ parseFlavoredFormat spec =
       return ( T.pack name, extsDiff )
     parseFormatName = many1 $ noneOf "-+"
     (prefix, spec') = case splitExtension (T.unpack spec) of
-                        (_, "") -> ("", T.toLower $ spec) -- no extension
+                        (_, "") -> ("", T.toLower spec) -- no extension
                         (p,s)   -> (T.pack p, T.pack s)
 
-pExtensionsDiff :: Stream s m Char => ParsecT s u m ExtensionsDiff
+pExtensionsDiff :: Parser ExtensionsDiff
 pExtensionsDiff = foldl' (flip ($)) (ExtensionsDiff [] []) <$> many extMod
   where
     extMod = do
       polarity <- oneOf "-+"
       name <- many $ noneOf "-+"
-      ext <- case readExtension name of
-               Just n  -> return n
-               Nothing -> unexpected $ "unknown extension: " ++ name
+      let ext = readExtension name
       return $ \extsDiff ->
         case polarity of
           '+' -> extsDiff{extsToEnable  = (ext : extsToEnable extsDiff)}

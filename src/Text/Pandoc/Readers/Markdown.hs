@@ -51,11 +51,12 @@ import Text.Pandoc.Readers.HTML (htmlInBalanced, htmlTag, isBlockTag,
                                  isCommentTag, isInlineTag, isTextTag)
 import Text.Pandoc.Readers.LaTeX (applyMacros, rawLaTeXBlock, rawLaTeXInline)
 import Text.Pandoc.Shared
+import Text.Pandoc.URI (escapeURI, isURI)
 import Text.Pandoc.XML (fromEntities)
 import Text.Pandoc.Readers.Metadata (yamlBsToMeta, yamlBsToRefs, yamlMetaBlock)
 -- import Debug.Trace (traceShowId)
 
-type MarkdownParser m = ParserT Sources ParserState m
+type MarkdownParser m = ParsecT Sources ParserState m
 
 type F = Future ParserState
 
@@ -157,14 +158,14 @@ inList = do
   ctx <- stateParserContext <$> getState
   guard (ctx == ListItemState)
 
-spnl :: PandocMonad m => ParserT Sources st m ()
+spnl :: PandocMonad m => ParsecT Sources st m ()
 spnl = try $ do
   skipSpaces
   optional newline
   skipSpaces
   notFollowedBy (char '\n')
 
-spnl' :: PandocMonad m => ParserT Sources st m Text
+spnl' :: PandocMonad m => ParsecT Sources st m Text
 spnl' = try $ do
   xs <- many spaceChar
   ys <- option "" $ try $ (:) <$> newline
@@ -591,7 +592,7 @@ registerImplicitHeader raw attr@(ident, _, _)
 -- hrule block
 --
 
-hrule :: PandocMonad m => ParserT Sources st m (F Blocks)
+hrule :: PandocMonad m => ParsecT Sources st m (F Blocks)
 hrule = try $ do
   skipSpaces
   start <- satisfy isHruleChar
@@ -611,7 +612,7 @@ indentedLine = indentSpaces >> anyLineNewline
 blockDelimiter :: PandocMonad m
                => (Char -> Bool)
                -> Maybe Int
-               -> ParserT Sources ParserState m Int
+               -> ParsecT Sources ParserState m Int
 blockDelimiter f len = try $ do
   skipNonindentSpaces
   c <- lookAhead (satisfy f)
@@ -759,7 +760,7 @@ lhsCodeBlockBirdWith c = try $ do
   blanklines
   return $ T.intercalate "\n" lns'
 
-birdTrackLine :: PandocMonad m => Char -> ParserT Sources st m Text
+birdTrackLine :: PandocMonad m => Char -> ParsecT Sources st m Text
 birdTrackLine c = try $ do
   char c
   -- allow html tags on left margin:
@@ -1204,7 +1205,7 @@ lineBlock = do
 -- and the length including trailing space.
 dashedLine :: PandocMonad m
            => Char
-           -> ParserT Sources st m (Int, Int)
+           -> ParsecT Sources st m (Int, Int)
 dashedLine ch = do
   dashes <- many1 (char ch)
   sp     <- many spaceChar
@@ -1434,7 +1435,7 @@ pipeTableCell =
       return $ B.plain <$> result)
     <|> return mempty
 
-pipeTableHeaderPart :: PandocMonad m => ParserT Sources st m (Alignment, Int)
+pipeTableHeaderPart :: PandocMonad m => ParsecT Sources st m (Alignment, Int)
 pipeTableHeaderPart = try $ do
   skipMany spaceChar
   left <- optionMaybe (char ':')
@@ -1450,7 +1451,7 @@ pipeTableHeaderPart = try $ do
       (Just _,Just _)   -> AlignCenter, len)
 
 -- Succeed only if current line contains a pipe.
-scanForPipe :: PandocMonad m => ParserT Sources st m ()
+scanForPipe :: PandocMonad m => ParsecT Sources st m ()
 scanForPipe = do
   Sources inps <- getInput
   let ln = case inps of
@@ -1727,7 +1728,7 @@ whitespace = spaceChar >> return <$> (lb <|> regsp) <?> "whitespace"
   where lb = spaceChar >> skipMany spaceChar >> option B.space (endline >> return B.linebreak)
         regsp = skipMany spaceChar >> return B.space
 
-nonEndline :: PandocMonad m => ParserT Sources st m Char
+nonEndline :: PandocMonad m => ParsecT Sources st m Char
 nonEndline = satisfy (/='\n')
 
 str :: PandocMonad m => MarkdownParser m (F Inlines)
@@ -2011,7 +2012,7 @@ rawLaTeXInline' = do
     s <- rawLaTeXInline
     return $ return $ B.rawInline "tex" s -- "tex" because it might be context
 
-rawConTeXtEnvironment :: PandocMonad m => ParserT Sources st m Text
+rawConTeXtEnvironment :: PandocMonad m => ParsecT Sources st m Text
 rawConTeXtEnvironment = try $ do
   string "\\start"
   completion <- inBrackets (letter <|> digit <|> spaceChar)
@@ -2020,7 +2021,7 @@ rawConTeXtEnvironment = try $ do
                        (try $ string "\\stop" >> textStr completion)
   return $ "\\start" <> completion <> T.concat contents <> "\\stop" <> completion
 
-inBrackets :: PandocMonad m => ParserT Sources st m Char -> ParserT Sources st m Text
+inBrackets :: PandocMonad m => ParsecT Sources st m Char -> ParsecT Sources st m Text
 inBrackets parser = do
   char '['
   contents <- manyChar parser

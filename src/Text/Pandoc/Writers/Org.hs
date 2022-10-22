@@ -29,6 +29,7 @@ import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.DocLayout
 import Text.Pandoc.Shared
+import Text.Pandoc.URI
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Citeproc.Locator (parseLocator, LocatorMap(..), LocatorInfo(..))
 import Text.Pandoc.Writers.Shared
@@ -513,8 +514,8 @@ orgPath src = case T.uncons src of
     isUrl :: Text -> Bool
     isUrl cs =
       let (scheme, path) = T.break (== ':') cs
-      in T.all (\c -> isAlphaNum c || c `elemText` ".-") scheme
-         && not (T.null path)
+       in T.all (\c -> isAlphaNum c || T.any (== c) ".-") scheme
+          && not (T.null path)
 
 -- | Translate from pandoc's programming language identifiers to those used by
 -- org-mode.

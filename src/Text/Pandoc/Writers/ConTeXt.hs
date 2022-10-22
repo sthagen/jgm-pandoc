@@ -30,6 +30,7 @@ import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.DocLayout
 import Text.Pandoc.Shared
+import Text.Pandoc.URI (isURI)
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Walk (query)
 import Text.Pandoc.Writers.Shared
@@ -537,7 +538,7 @@ inlineToConTeXt (Subscript lst) = do
 inlineToConTeXt (SmallCaps lst) = do
   contents <- inlineListToConTeXt lst
   return $ braces $ "\\sc " <> contents
-inlineToConTeXt (Code _ str) | not ('{' `elemText` str || '}' `elemText` str) =
+inlineToConTeXt (Code _ str) | not (T.any (\c -> c == '{' || c == '}') str) =
   return $ "\\type" <> braces (literal str)
 inlineToConTeXt (Code _ str) = do
   opts <- gets stOptions

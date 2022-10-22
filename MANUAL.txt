@@ -1112,6 +1112,10 @@ header when requesting a document from a URL:
 
 :   Link to a CSS style sheet. This option can be used repeatedly to
     include multiple files. They will be included in the order specified.
+    This option only affects HTML (including HTML slide shows)
+    and EPUB output.  It should be used together with
+    `-s/--standalone`, because the link to the stylesheet goes
+    in the document header.
 
     A stylesheet is required for generating EPUB.  If none is
     provided using this option (or the `css` or `stylesheet`
@@ -1535,7 +1539,6 @@ Nonzero exit codes have the following meanings:
    62 PandocShouldNeverHappenError
    63 PandocSomeError
    64 PandocParseError
-   65 PandocParsecError
    66 PandocMakePDFError
    67 PandocSyntaxMapError
    83 PandocFilterError
@@ -3154,6 +3157,9 @@ on the output format, and include the following:
 
 `curdir`
 :   working directory from which pandoc is run.
+
+`pandoc-version`
+:   pandoc version.
 
 `toc`
 :   non-null value if `--toc/--table-of-contents` was specified
@@ -7132,7 +7138,7 @@ However, there is no REPL yet, and the `-i` option has no effect.
 For full documentation, see the [pandoc-lua] man page.
 
 [lua standalone]: https://www.lua.org/manual/5.4/manual.html#7
-[pandoc-server]: https://github.com/jgm/pandoc/blob/master/doc/pandoc-lua.md
+[pandoc-lua]: https://github.com/jgm/pandoc/blob/master/doc/pandoc-lua.md
 
 # A note on security
 

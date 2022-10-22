@@ -23,6 +23,7 @@ import Control.Monad.Except (catchError, throwError)
 import Control.Monad.Reader
 import Control.Monad.State.Strict
 import qualified Data.ByteString.Lazy as BL
+import Data.Containers.ListUtils (nubOrd)
 import Data.Char (isSpace, isLetter)
 import Data.List (intercalate, isPrefixOf, isSuffixOf)
 import Data.String (fromString)
@@ -35,7 +36,6 @@ import qualified Data.Text.Lazy as TL
 import Data.Time.Clock.POSIX
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import Skylighting
-import Text.Collate.Lang (renderLang)
 import Text.Pandoc.Class (PandocMonad, report, toLang, getMediaBag)
 import Text.Pandoc.Translations (translateTerm)
 import Text.Pandoc.MediaBag (lookupMedia, MediaItem(..))
@@ -64,7 +64,7 @@ import Text.TeXMath
 import Text.Pandoc.Writers.OOXML
 import Text.Pandoc.XML.Light as XML
 import Data.Generics (mkT, everywhere)
-import Text.Collate.Lang (Lang(..))
+import Text.Collate.Lang (renderLang, Lang(..))
 
 squashProps :: EnvProps -> [Element]
 squashProps (EnvProps Nothing es) = es
@@ -634,7 +634,7 @@ baseListId = 1000
 mkNumbering :: [ListMarker] -> [Element]
 mkNumbering lists =
   elts ++ zipWith mkNum lists [baseListId..(baseListId + length lists - 1)]
-    where elts = map mkAbstractNum (ordNub lists)
+    where elts = map mkAbstractNum (nubOrd lists)
 
 maxListLevel :: Int
 maxListLevel = 8

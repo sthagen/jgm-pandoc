@@ -9,8 +9,8 @@ packages:
 - 'pandoc-lua-engine'
 - 'pandoc-server'
 extra-deps:
-- skylighting-core-0.13
-- skylighting-0.13
+- skylighting-core-0.13.1
+- skylighting-0.13.1
 - skylighting-format-ansi-0.1
 - skylighting-format-latex-0.1
 - skylighting-format-blaze-html-0.1.1
@@ -20,8 +20,10 @@ extra-deps:
 - hslua-cli-1.2.0
 - hslua-classes-2.2.0
 - hslua-core-2.2.1
+- hslua-list-1.1.0
 - hslua-marshalling-2.2.1
 - hslua-module-version-1.0.3
+- hslua-module-zip-1.0.0
 - hslua-objectorientation-2.2.1
 - hslua-packaging-2.2.1
 - lua-2.2.1
