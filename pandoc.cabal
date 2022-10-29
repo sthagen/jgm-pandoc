@@ -180,8 +180,6 @@ data-files:
                  data/dzslides/template.html
                  -- default abbreviations file
                  data/abbreviations
-                 -- sample lua custom writer
-                 data/sample.lua
                  -- sample lua custom reader
                  data/creole.lua
                  -- lua init script
@@ -465,7 +463,7 @@ library
                  Glob                  >= 0.7      && < 0.11,
                  JuicyPixels           >= 3.1.6.1  && < 3.4,
                  SHA                   >= 1.6      && < 1.7,
-                 aeson                 >= 2.0      && < 2.2,
+                 aeson                 >= 2.0.1.0  && < 2.2,
                  aeson-pretty          >= 0.8.9    && < 0.9,
                  array                 >= 0.5      && < 0.6,
                  attoparsec            >= 0.12     && < 0.15,
@@ -509,8 +507,8 @@ library
                  random                >= 1        && < 1.3,
                  safe                  >= 0.3.18   && < 0.4,
                  scientific            >= 0.3      && < 0.4,
-                 skylighting           >= 0.13.1   && < 0.14,
-                 skylighting-core      >= 0.13.1   && < 0.14,
+                 skylighting           >= 0.13.1.1 && < 0.14,
+                 skylighting-core      >= 0.13.1.1 && < 0.14,
                  split                 >= 0.2      && < 0.3,
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
@@ -571,7 +569,7 @@ library
                    Text.Pandoc.Readers.TikiWiki,
                    Text.Pandoc.Readers.Txt2Tags,
                    Text.Pandoc.Readers.Docx,
-                   Text.Pandoc.Readers.Odt,
+                   Text.Pandoc.Readers.ODT,
                    Text.Pandoc.Readers.EPUB,
                    Text.Pandoc.Readers.Muse,
                    Text.Pandoc.Readers.Man,
@@ -582,7 +580,7 @@ library
                    Text.Pandoc.Readers.RTF,
                    Text.Pandoc.Writers,
                    Text.Pandoc.Writers.Native,
-                   Text.Pandoc.Writers.Docbook,
+                   Text.Pandoc.Writers.DocBook,
                    Text.Pandoc.Writers.JATS,
                    Text.Pandoc.Writers.OPML,
                    Text.Pandoc.Writers.HTML,
@@ -677,17 +675,17 @@ library
                    Text.Pandoc.Readers.LaTeX.Parsing,
                    Text.Pandoc.Readers.LaTeX.SIunitx,
                    Text.Pandoc.Readers.LaTeX.Table,
-                   Text.Pandoc.Readers.Odt.Base,
-                   Text.Pandoc.Readers.Odt.Namespaces,
-                   Text.Pandoc.Readers.Odt.StyleReader,
-                   Text.Pandoc.Readers.Odt.ContentReader,
-                   Text.Pandoc.Readers.Odt.Generic.Fallible,
-                   Text.Pandoc.Readers.Odt.Generic.SetMap,
-                   Text.Pandoc.Readers.Odt.Generic.Utils,
-                   Text.Pandoc.Readers.Odt.Generic.Namespaces,
-                   Text.Pandoc.Readers.Odt.Generic.XMLConverter,
-                   Text.Pandoc.Readers.Odt.Arrows.State,
-                   Text.Pandoc.Readers.Odt.Arrows.Utils,
+                   Text.Pandoc.Readers.ODT.Base,
+                   Text.Pandoc.Readers.ODT.Namespaces,
+                   Text.Pandoc.Readers.ODT.StyleReader,
+                   Text.Pandoc.Readers.ODT.ContentReader,
+                   Text.Pandoc.Readers.ODT.Generic.Fallible,
+                   Text.Pandoc.Readers.ODT.Generic.SetMap,
+                   Text.Pandoc.Readers.ODT.Generic.Utils,
+                   Text.Pandoc.Readers.ODT.Generic.Namespaces,
+                   Text.Pandoc.Readers.ODT.Generic.XMLConverter,
+                   Text.Pandoc.Readers.ODT.Arrows.State,
+                   Text.Pandoc.Readers.ODT.Arrows.Utils,
                    Text.Pandoc.Readers.Org.BlockStarts,
                    Text.Pandoc.Readers.Org.Blocks,
                    Text.Pandoc.Readers.Org.DocumentTree,
@@ -789,7 +787,7 @@ test-suite test-pandoc
                   Tests.Readers.RST
                   Tests.Readers.RTF
                   Tests.Readers.Docx
-                  Tests.Readers.Odt
+                  Tests.Readers.ODT
                   Tests.Readers.Txt2Tags
                   Tests.Readers.EPUB
                   Tests.Readers.Muse
@@ -799,7 +797,7 @@ test-suite test-pandoc
                   Tests.Readers.DokuWiki
                   Tests.Writers.Native
                   Tests.Writers.ConTeXt
-                  Tests.Writers.Docbook
+                  Tests.Writers.DocBook
                   Tests.Writers.HTML
                   Tests.Writers.JATS
                   Tests.Writers.Jira

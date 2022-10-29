@@ -53,19 +53,20 @@ then only the `Writer` function will be used.
 
 Writers can be customized through format extensions, such as
 `smart`, `citations`, or `hard_line_breaks`. The global
-`writer_extensions` table indicates supported extensions with a
+`Extensions` table indicates supported extensions with a
 key. Extensions enabled by default are assigned a true value,
 while those that are supported but disabled are assigned a false
 value.
 
 Example: A writer with the following global table supports the
-extensions `smart` and `citations`, with the former enabled and
-the latter disabled by default:
+extensions `smart`, `citations`, and `foobar`, with `smart` enabled and
+the others disabled by default:
 
 ``` lua
-writer_extensions = {
+Extensions = {
   smart = true,
   citations = false,
+  foobar = false
 }
 ```
 
@@ -195,31 +196,6 @@ For example,
 function Para(s)
   return "<paragraph>" .. s .. "</paragraph>"
 end
-```
-
-The best way to go about creating a classic custom writer is to
-modify the example that comes with pandoc. To get the example,
-you can do
-
-```
-pandoc --print-default-data-file sample.lua > sample.lua
-```
-
-## A custom HTML writer
-
-`sample.lua` is a full-features HTML writer, with explanatory
-comments. To use it, just use the path to the custom writer as
-the writer name:
-
-```
-pandoc -t sample.lua myfile.md
-```
-
-`sample.lua` defines all the functions needed by any custom
-writer, so you can design your own custom writer by modifying
-the functions in `sample.lua` according to your needs.
-
-``` {.lua include="sample.lua"}
 ```
 
 ## Template variables
