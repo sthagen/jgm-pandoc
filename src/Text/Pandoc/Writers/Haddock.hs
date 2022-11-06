@@ -14,7 +14,9 @@ Conversion of 'Pandoc' documents to haddock markup.
 Haddock:  <http://www.haskell.org/haddock/doc/html/>
 -}
 module Text.Pandoc.Writers.Haddock (writeHaddock) where
+import Control.Monad (zipWithM)
 import Control.Monad.State.Strict
+    ( StateT, MonadState(get), modify, evalStateT )
 import Data.Char (isAlphaNum)
 import Data.Default
 import Data.Text (Text)

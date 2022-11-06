@@ -67,9 +67,10 @@ import Control.Monad
   , unless
   , void
   , when
+  , MonadPlus(mzero)
   )
 import Control.Monad.Except ( MonadError(throwError) )
-import Control.Monad.Identity ( Identity(..), MonadPlus(mzero) )
+import Control.Monad.Identity ( Identity(..) )
 import Data.Char
   ( chr
   , isAlphaNum
@@ -85,7 +86,6 @@ import Data.List (intercalate, sortOn)
 import Data.Ord (Down(..))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Text.HTML.TagSoup.Entity (lookupEntity)
 import Text.Pandoc.Asciify (toAsciiText)
 import Text.Pandoc.Builder (Attr, Inline(Str), Inlines, trimInlines)
 import Text.Pandoc.Class.PandocMonad (PandocMonad, readFileFromDirs, report)
@@ -98,9 +98,10 @@ import Text.Pandoc.Options
 import Text.Pandoc.Shared (tshow, uniqueIdent)
 import Text.Pandoc.URI (schemes, escapeURI)
 import Text.Pandoc.Sources
-import Text.Pandoc.XML (fromEntities)
+import Text.Pandoc.XML (fromEntities, lookupEntity)
 import Text.Parsec
   ( (<|>)
+  , Parsec
   , ParsecT
   , SourcePos
   , sourceLine
@@ -133,7 +134,6 @@ import Text.Parsec
   , updateState
   )
 import Text.Parsec.Pos (initialPos, newPos)
-import Text.Parsec (Parsec)
 import Text.Pandoc.Error
   ( PandocError(PandocParseError) )
 import Text.Pandoc.Parsing.Capabilities
@@ -449,21 +449,16 @@ lineClump = blanklines
 -- pairs of open and close, which must be different. For example,
 -- @charsInBalanced '(' ')' anyChar@ will parse "(hello (there))"
 -- and return "hello (there)".
-charsInBalanced :: (Stream s m Char, UpdateSourcePos s Char) => Char -> Char -> ParsecT s st m Char
-                -> ParsecT s st m Text
+charsInBalanced :: (Stream s m Char, UpdateSourcePos s Char)
+                => Char -> Char -> ParsecT s st m Text -> ParsecT s st m Text
 charsInBalanced open close parser = try $ do
   char open
   let isDelim c = c == open || c == close
-  raw <- many $  T.pack <$> many1 (notFollowedBy (satisfy isDelim) >> parser)
+  raw <- many $ mconcat <$> many1 (notFollowedBy (satisfy isDelim) >> parser)
              <|> (do res <- charsInBalanced open close parser
                      return $ T.singleton open <> res <> T.singleton close)
   char close
-  return $ T.concat raw
-
--- old charsInBalanced would be:
--- charsInBalanced open close (noneOf "\n" <|> char '\n' >> notFollowedBy blankline)
--- old charsInBalanced' would be:
--- charsInBalanced open close anyChar
+  return $ mconcat raw
 
 -- Parsers for email addresses and URIs
 
@@ -530,7 +525,7 @@ uri = try $ do
 
     wordChar = satisfy isWordChar
     percentEscaped = try $ (:) <$> char '%' <*> many1 hexDigit
-    entity = try $ pure <$> characterReference
+    entity = try $ T.unpack <$> characterReference
     punct = try $ many1 (char ',') <|> fmap pure (satisfy (\c -> not (isSpace c) && c /= '<' && c /= '>'))
     uriChunk = many1 wordChar
            <|> percentEscaped
@@ -585,21 +580,17 @@ escaped :: (Stream s m Char, UpdateSourcePos s Char)
 escaped parser = try $ char '\\' >> parser
 
 -- | Parse character entity.
-characterReference :: (Stream s m Char, UpdateSourcePos s Char) => ParsecT s st m Char
+characterReference :: (Stream s m Char, UpdateSourcePos s Char) => ParsecT s st m Text
 characterReference = try $ do
   char '&'
-  ent <- many1Till nonspaceChar (char ';')
-  let ent' = case ent of
-                  '#':'X':xs -> '#':'x':xs  -- workaround tagsoup bug
-                  '#':_      -> ent
-                  _          -> ent ++ ";"
-  case lookupEntity ent' of
-       Just (c : _) -> return c
+  ent <- many1TillChar nonspaceChar (char ';')
+  case lookupEntity (ent <> ";") of
+       Just t       -> return t
        _            -> Prelude.fail "entity not found"
 
 -- | Parses a character reference and returns a Str element.
 charRef :: (Stream s m Char, UpdateSourcePos s Char) => ParsecT s st m Inline
-charRef = Str . T.singleton <$> characterReference
+charRef = Str <$> characterReference
 
 lineBlockLine :: Monad m => ParsecT Sources st m Text
 lineBlockLine = try $ do

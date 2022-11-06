@@ -12,8 +12,10 @@
 Conversion of 'Pandoc' format into Texinfo.
 -}
 module Text.Pandoc.Writers.Texinfo ( writeTexinfo ) where
+import Control.Monad (zipWithM)
 import Control.Monad.Except (throwError)
 import Control.Monad.State.Strict
+    ( StateT, MonadState(get), gets, modify, evalStateT )
 import Data.Char (chr, ord, isAlphaNum)
 import Data.List (maximumBy, transpose, foldl')
 import Data.List.NonEmpty (nonEmpty)

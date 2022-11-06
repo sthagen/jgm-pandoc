@@ -14,7 +14,9 @@
 Conversion of 'Pandoc' format into ConTeXt.
 -}
 module Text.Pandoc.Writers.ConTeXt ( writeConTeXt ) where
+import Control.Monad (liftM)
 import Control.Monad.State.Strict
+    ( StateT, MonadState(put, get), gets, modify, evalStateT )
 import Data.Char (ord, isDigit)
 import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty ((:|)))
@@ -310,9 +312,9 @@ tableToConTeXt (Ann.Table attr caption colspecs thead tbodies tfoot) = do
     ]
 
 setupCols :: [ColSpec] -> Doc Text
-setupCols = vcat . map toColSetup . zip [1::Int ..]
+setupCols = vcat . zipWith toColSetup [1::Int ..]
   where
-    toColSetup (i, (align, width)) =
+    toColSetup i (align, width) =
       let opts = filter (not . isEmpty)
                  [ case align of
                      AlignLeft    -> "align=right"

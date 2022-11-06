@@ -25,9 +25,12 @@ However, @\<literal style="html">@ tag is used for HTML raw blocks
 even though it is supported only in Emacs Muse.
 -}
 module Text.Pandoc.Writers.Muse (writeMuse) where
+import Control.Monad (zipWithM)
 import Control.Monad.Except (throwError)
 import Control.Monad.Reader
+    ( asks, MonadReader(local), ReaderT(runReaderT) )
 import Control.Monad.State.Strict
+    ( StateT, gets, modify, evalStateT )
 import Data.Char (isAlphaNum, isAsciiLower, isAsciiUpper, isDigit, isSpace)
 import Data.Default
 import Data.List (intersperse, transpose)
