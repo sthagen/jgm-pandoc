@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TemplateHaskell #-}
 {- |
@@ -804,33 +805,39 @@ getMediaobject :: PandocMonad m => Element -> DB m Inlines
 getMediaobject e = do
   figTitle <- gets dbFigureTitle
   ident <- gets dbFigureId
-  (imageUrl, attr) <-
-    case filterElements (named "imageobject") e of
-      []  -> return (mempty, nullAttr)
-      (z:_) -> case filterChild (named "imagedata") z of
-                    Nothing -> return (mempty, nullAttr)
-                    Just i  -> let atVal a = attrValue a i
-                                   w = case atVal "width" of
-                                         "" -> []
-                                         d  -> [("width", d)]
-                                   h = case atVal "depth" of
-                                         "" -> []
-                                         d  -> [("height", d)]
-                                   id' = case atVal "id" of
-                                           x | T.null x  -> ident
-                                             | otherwise -> x
-                                   cs = T.words $ atVal "role"
-                                   atr = (id', cs, w ++ h)
-                               in  return (atVal "fileref", atr)
+  let (imageUrl, tit, attr) =
+        case filterElements (named "imageobject") e of
+          []  -> (mempty, mempty, nullAttr)
+          (z:_) ->
+            let tit' = maybe "" strContent $
+                         filterChild (named "objectinfo") z >>=
+                         filterChild (named "title")
+                (imageUrl', attr') =
+                  case filterChild (named "imagedata") z of
+                        Nothing -> (mempty, nullAttr)
+                        Just i  -> let atVal a = attrValue a i
+                                       w = case atVal "width" of
+                                             "" -> []
+                                             d  -> [("width", d)]
+                                       h = case atVal "depth" of
+                                             "" -> []
+                                             d  -> [("height", d)]
+                                       id' = case atVal "id" of
+                                               x | T.null x  -> ident
+                                                 | otherwise -> x
+                                       cs = T.words $ atVal "role"
+                                       atr = (id', cs, w ++ h)
+                                   in  (atVal "fileref", atr)
+            in  (imageUrl', tit', attr')
   let getCaption el = case filterChild (\x -> named "caption" x
                                             || named "textobject" x
                                             || named "alt" x) el of
                         Nothing -> return mempty
-                        Just z  -> mconcat <$>
+                        Just z  -> trimInlines . mconcat <$>
                                          mapM parseInline (elContent z)
   let (capt, title) = if null figTitle
-                         then (getCaption e, "")
-                         else (return figTitle, "fig:")
+                         then (getCaption e, tit)
+                         else (return figTitle, "fig:" <> tit)
   fmap (imageWith attr imageUrl title) capt
 
 getBlocks :: PandocMonad m => Element -> DB m Blocks
@@ -1271,7 +1278,10 @@ parseInline (Elem e) =
         "ulink" -> innerInlines (link (attrValue "url" e) "")
         "link" -> do
              ils <- innerInlines id
-             let href = case findAttr (QName "href" (Just "http://www.w3.org/1999/xlink") Nothing) e of
+             let href = case findAttrBy
+                               (\case
+                                 QName "href" _ _ -> True
+                                 _ -> False) e of
                                Just h -> h
                                _      -> "#" <> attrValue "linkend" e
              let ils' = if ils == mempty then str href else ils
