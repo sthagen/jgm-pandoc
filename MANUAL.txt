@@ -1250,6 +1250,11 @@ header when requesting a document from a URL:
     in a Markdown source document you can also specify `cover-image`
     in a YAML metadata block (see [EPUB Metadata], below).
 
+`--epub-title-page=true`|`false`
+
+:   Determines whether a the title page is included in the EPUB
+    (default is `true`).
+
 `--epub-metadata=`*FILE*
 
 :   Look in the specified XML file for metadata for the EPUB.
@@ -1953,6 +1958,10 @@ To include the built-in citeproc filter, use either `citeproc` or
 +----------------------------------+-----------------------------------+
 | ```                              | ``` yaml                          |
 | --epub-cover-image cover.jpg     | epub-cover-image: cover.jpg       |
+| ```                              | ```                               |
++----------------------------------+-----------------------------------+
+| ```                              | ``` yaml                          |
+| --epub-title-page=false          | epub-title-page: false            |
 | ```                              | ```                               |
 +----------------------------------+-----------------------------------+
 | ```                              | ``` yaml                          |
@@ -3094,23 +3103,26 @@ The `--css` option also affects the output.
 ### Variables for ms
 
 `fontfamily`
-:    `A` (Avant Garde), `B` (Bookman), `C` (Helvetica), `HN` (Helvetica
-     Narrow), `P` (Palatino), or `T` (Times New Roman). This setting does not
-     affect source code, which is always displayed using monospace Courier.
-     These built-in fonts are limited in their coverage of characters.
-     Additional fonts may be installed using the script
-     [`install-fonts.sh`](https://www.schaffter.ca/mom/bin/install-font.sh)
-     provided by Peter Schaffter and documented in detail on 
-     [his web site](https://www.schaffter.ca/mom/momdoc/appendices.html#steps).
+:   `A` (Avant Garde), `B` (Bookman), `C` (Helvetica), `HN`
+    (Helvetica Narrow), `P` (Palatino), or `T` (Times New Roman).
+    This setting does not affect source code, which is always
+    displayed using monospace Courier. These built-in fonts are
+    limited in their coverage of characters. Additional fonts may
+    be installed using the script [`install-font.sh`] provided
+    by Peter Schaffter and documented in detail on [his web
+    site][ms-font-steps].
 
 `indent`
-:    paragraph indent (e.g. `2m`)
+:   paragraph indent (e.g. `2m`)
 
 `lineheight`
-:    line height (e.g. `12p`)
+:   line height (e.g. `12p`)
 
 `pointsize`
-:    point size (e.g. `10p`)
+:   point size (e.g. `10p`)
+
+[`install-font.sh`]: https://www.schaffter.ca/mom/bin/install-font.sh
+[ms-font-steps]: https://www.schaffter.ca/mom/momdoc/appendices.html#steps
 
 ### Variables set automatically
 

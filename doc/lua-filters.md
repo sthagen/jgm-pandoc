@@ -3495,13 +3495,23 @@ reStructuredText, and Org, then these will be included in the
 resulting document. Any media elements are added to those
 retrieved from the other parsed input files.
 
+The `format` parameter defines the format flavor that will be
+parsed. This can be either a string, using `+` and `-` to enable
+and disable extensions, or a table with fields `format` (string)
+and `extensions` (table). The `extensions` table can be a list of
+all enabled extensions, or a table with extensions as keys and
+their activation status as values (`true` or `'enable'` to enable
+an extension, `false` or `'disable'` to disable it).
+
 Parameters:
 
 `markup`
 :   the markup to be parsed (string|Sources)
 
 `format`
-:   format specification, defaults to `"markdown"` (string)
+:   format specification; defaults to `"markdown"`. See the
+    description above for a complete description of this
+    parameter. (string|table)
 
 `reader_options`
 :   options passed to the reader; may be a ReaderOptions object or
@@ -3532,7 +3542,9 @@ Parameters:
 :   document to convert ([Pandoc](#type-pandoc))
 
 `format`
-:   format specification, defaults to `'html'` (string)
+:   format specification; defaults to `"html"`. See the
+    documentation of [`pandoc.read`](#pandoc.read) for a complete
+    description of this parameter. (string|table)
 
 `writer_options`
 :   options passed to the writer; may be a WriterOptions object
@@ -3583,6 +3595,36 @@ Usage:
 
 [WriterOptions]: #type-writeroptions
 
+# Module pandoc.cli
+
+Command line options and argument parsing.
+
+## Fields {#pandoc.cli-fields}
+
+### default\_options {#pandoc.cli.default_options}
+
+Default CLI options, using a JSON-like representation (table).
+
+## Functions
+
+### parse_options {#pandoc.cli.parse_options}
+
+`parse_options (args)`
+
+Parses command line arguments into pandoc options. Typically this
+function will be used in stand-alone pandoc Lua scripts, taking
+the list of arguments from the global `arg`.
+
+Parameters:
+
+`args`
+:   list of command line arguments ({string,...})
+
+Returns:
+
+-   parsed options, using their JSON-like representation. (table)
+
+
 # Module pandoc.utils
 
 This module exposes internal pandoc functions and utility
@@ -3606,9 +3648,10 @@ Parameters:
 :   List of [Block](#type-block) elements to be flattened.
 
 `sep`
-:   List of [Inline](#type-inline) elements inserted as
-    separator between two consecutive blocks; defaults to `{
-    pandoc.Space(), pandoc.Str'¶', pandoc.Space()}`.
+:   List of [Inline](#type-inline) elements inserted as separator
+    between two consecutive blocks; defaults to
+    `{pandoc.Str'\u{2029}'}`, i.e., to the PARAGRAPH SEPARATOR
+    Unicode character.
 
 Returns:
 
@@ -5172,7 +5215,7 @@ Returns
 `real_length (str)`
 
 Returns the real length of a string in a monospace font: 0 for a
-combining chaeracter, 1 for a regular character, 2 for an East
+combining character, 1 for a regular character, 2 for an East
 Asian wide character.
 
 Parameters

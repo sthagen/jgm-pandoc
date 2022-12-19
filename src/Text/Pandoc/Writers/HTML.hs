@@ -341,15 +341,7 @@ pandocToHtml opts (Pandoc meta blocks) = do
           H.link ! A.rel "stylesheet" !
             A.href (toValue $ url <> "katex.min.css")
 
-        _ -> case lookupContext "mathml-script"
-                  (writerVariables opts) of
-                    Just s | not (stHtml5 st) ->
-                      H.script ! A.type_ "text/javascript"
-                        $ preEscapedString
-                          ("/*<![CDATA[*/\n" <> T.unpack s <>
-                          "/*]]>*/\n")
-                          | otherwise -> mempty
-                    Nothing -> mempty
+        _ -> mempty
   let mCss :: Maybe [Text] = lookupContext "css" metadata
   let context :: Context Text
       context =   (if stHighlighting st
@@ -931,7 +923,9 @@ blockToHtmlInner opts (RawBlock f str) = do
      else if (f == Format "latex" || f == Format "tex") &&
              allowsMathEnvironments (writerHTMLMathMethod opts) &&
              isMathEnvironment str
-             then blockToHtml opts $ Plain [Math DisplayMath str]
+             then do
+               modify (\st -> st {stMath = True})
+               blockToHtml opts $ Plain [Math DisplayMath str]
              else do
                report $ BlockNotRendered (RawBlock f str)
                return mempty
@@ -1520,9 +1514,13 @@ inlineToHtml opts inline = do
            case istex of
              True
                | allowsMathEnvironments mm && isMathEnvironment str
-                 -> inlineToHtml opts $ Math DisplayMath str
+                 -> do
+                    modify (\st -> st {stMath = True})
+                    inlineToHtml opts $ Math DisplayMath str
                | allowsRef mm && isRef str
-                 -> inlineToHtml opts $ Math InlineMath str
+                 -> do
+                    modify (\st -> st {stMath = True})
+                    inlineToHtml opts $ Math InlineMath str
              _ -> do report $ InlineNotRendered inline
                      return mempty
     (Link attr txt (s,_)) | "mailto:" `T.isPrefixOf` s -> do
