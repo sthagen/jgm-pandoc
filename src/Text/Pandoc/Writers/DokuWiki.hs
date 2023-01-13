@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.DokuWiki
-   Copyright   : Copyright (C) 2008-2022 John MacFarlane
+   Copyright   : Copyright (C) 2008-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Clare Macrae <clare.macrae@googlemail.com>
@@ -36,7 +36,7 @@ import Text.Pandoc.ImageSize
 import Text.Pandoc.Logging
 import Text.Pandoc.Options (WrapOption (..), WriterOptions (writerTableOfContents,
                             writerTemplate, writerWrapText))
-import Text.Pandoc.Shared (camelCaseToHyphenated, linesToPara,
+import Text.Pandoc.Shared (camelCaseToHyphenated, figureDiv, linesToPara,
                            removeFormatting, trimr, tshow)
 import Text.Pandoc.URI (escapeURI, isURI)
 import Text.Pandoc.Templates (renderTemplate)
@@ -108,17 +108,6 @@ blockToDokuWiki opts (Div _attrs bs) = do
 
 blockToDokuWiki opts (Plain inlines) =
   inlineListToDokuWiki opts inlines
-
--- title beginning with fig: indicates that the image is a figure
--- dokuwiki doesn't support captions - so combine together alt and caption into alt
-blockToDokuWiki opts (SimpleFigure attr txt (src, tit)) = do
-      capt <- if null txt
-              then return ""
-              else (" " <>) `fmap` inlineListToDokuWiki opts txt
-      let opt = if null txt
-                then ""
-                else "|" <> if T.null tit then capt else tit <> capt
-      return $ "{{" <> src <> imageDims opts attr <> opt <> "}}\n"
 
 blockToDokuWiki opts (Para inlines) = do
   indent <- asks stIndent
@@ -222,6 +211,9 @@ blockToDokuWiki opts x@(OrderedList attribs items) = do
                                    , stBackSlashLB = backSlash})
                       (mapM (orderedListItemToDokuWiki opts) items)
         return $ vcat contents <> if T.null indent then "\n" else ""
+
+blockToDokuWiki opts (Figure attr capt body) =
+  blockToDokuWiki opts $ figureDiv attr capt body
 
 -- TODO Need to decide how to make definition lists work on dokuwiki - I don't think there
 --      is a specific representation of them.

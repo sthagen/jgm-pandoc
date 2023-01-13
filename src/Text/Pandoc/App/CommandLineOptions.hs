@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts    #-}
 {- |
    Module      : Text.Pandoc.App.CommandLineOptions
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -782,16 +782,29 @@ options =
                   "FILE")
                  "" -- "Directory of fonts to embed"
 
-    , Option "" ["epub-chapter-level"]
+    , Option "" ["split-level"]
                  (ReqArg
                   (\arg opt ->
                       case safeStrRead arg of
                            Just t | t >= 1 && t <= 6 ->
-                                    return opt { optEpubChapterLevel = t }
+                                    return opt { optSplitLevel = t }
                            _      -> optError $ PandocOptionError
-                                    "chapter level must be a number between 1 and 6")
+                                    "split level must be a number between 1 and 6")
                  "NUMBER")
-                 "" -- "Header level at which to split chapters in EPUB"
+                 "" -- "Header level at which to split documents in chunked HTML or EPUB"
+
+    , Option "" ["epub-chapter-level"]
+                 (ReqArg
+                  (\arg opt -> do
+                      deprecatedOption "--epub-chapter-level"
+                                       "use --split-level"
+                      case safeStrRead arg of
+                           Just t | t >= 1 && t <= 6 ->
+                                    return opt { optSplitLevel = t }
+                           _      -> optError $ PandocOptionError
+                                    "split level must be a number between 1 and 6")
+                 "NUMBER")
+                 "" -- "Header level at which to split documents in chunked HTML or EPUB"
 
     , Option "" ["ipynb-output"]
                  (ReqArg
@@ -992,7 +1005,7 @@ usageMessage programName = usageInfo (programName ++ " [OPTIONS] [FILES]")
 
 copyrightMessage :: String
 copyrightMessage = intercalate "\n" [
- "Copyright (C) 2006-2022 John MacFarlane. Web:  https://pandoc.org",
+ "Copyright (C) 2006-2023 John MacFarlane. Web:  https://pandoc.org",
  "This is free software; see the source for copying conditions. There is no",
  "warranty, not even for merchantability or fitness for a particular purpose." ]
 

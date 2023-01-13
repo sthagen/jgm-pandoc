@@ -293,6 +293,9 @@ $if(numbersections)$
 $else$
 \setcounter{secnumdepth}{-\maxdimen} % remove section numbering
 $endif$
+$if(subfigure)$
+\usepackage{subcaption}
+$endif$
 $if(beamer)$
 $else$
 $if(block-headings)$
@@ -343,6 +346,12 @@ $if(lang)$
 \fi
 $if(babel-lang)$
 \babelprovide[main,import]{$babel-lang$}
+$if(mainfont)$
+\ifPDFTeX
+\else
+\babelfont[$babel-lang$]{rm}{$mainfont$}
+\fi
+$endif$
 $endif$
 $for(babel-otherlangs)$
 \babelprovide[import]{$babel-otherlangs$}

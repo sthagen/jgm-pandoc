@@ -6,7 +6,7 @@
 {-# LANGUAGE TupleSections       #-}
 {- |
    Module      : Text.Pandoc.App
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley@edu>
@@ -106,7 +106,7 @@ optToOutputSettings scriptingEngine opts = do
   flvrd@(Format.FlavoredFormat format _extsDiff) <-
     Format.parseFlavoredFormat writerName
 
-  let standalone = optStandalone opts || not (isTextFormat format) || pdfOutput
+  let standalone = optStandalone opts || isBinaryFormat format || pdfOutput
   let templateOrThrow = \case
         Left  e -> throwError $ PandocTemplateError (T.pack e)
         Right t -> pure t
@@ -249,8 +249,8 @@ optToOutputSettings scriptingEngine opts = do
         , writerEpubSubdirectory = T.pack $ optEpubSubdirectory opts
         , writerEpubMetadata     = epubMetadata
         , writerEpubFonts        = optEpubFonts opts
-        , writerEpubChapterLevel = optEpubChapterLevel opts
         , writerEpubTitlePage    = optEpubTitlePage opts
+        , writerSplitLevel       = optSplitLevel opts
         , writerTOCDepth         = optTOCDepth opts
         , writerReferenceDoc     = optReferenceDoc opts
         , writerSyntaxMap        = syntaxMap
@@ -300,6 +300,6 @@ pdfWriterAndProg mWriter mEngine =
 
       isCustomWriter w = ".lua" `T.isSuffixOf` w
 
-isTextFormat :: T.Text -> Bool
-isTextFormat s =
-  s `notElem` ["odt","docx","epub2","epub3","epub","pptx","pdf"]
+isBinaryFormat :: T.Text -> Bool
+isBinaryFormat s =
+  s `elem` ["odt","docx","epub2","epub3","epub","pptx","pdf","chunkedhtml"]

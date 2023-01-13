@@ -3,7 +3,7 @@
 {-# LANGUAGE PatternGuards #-}
 {- |
    Module      : Text.Pandoc.Writers.Jira
-   Copyright   : © 2010-2022 Albert Krewinkel, John MacFarlane
+   Copyright   : © 2010-2023 Albert Krewinkel, John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -114,6 +114,7 @@ toJiraBlocks blocks = do
                        Just header -> header : bodyRows
                        Nothing     -> bodyRows
           return $ Jira.Table rows
+        Figure attr _ body         -> toJiraPanel attr body
   jiraBlocks <- mapM convert blocks
   return $ mconcat jiraBlocks
 

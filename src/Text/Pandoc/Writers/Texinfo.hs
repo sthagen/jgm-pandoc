@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.Texinfo
-   Copyright   : Copyright (C) 2008-2022 John MacFarlane
+   Copyright   : Copyright (C) 2008-2023 John MacFarlane
                                2012 Peter Wang
    License     : GNU GPL, version 2 or above
 
@@ -124,15 +124,6 @@ blockToTexinfo (Div _ bs) = blockListToTexinfo bs
 
 blockToTexinfo (Plain lst) =
   inlineListToTexinfo lst
-
--- title beginning with fig: indicates that the image is a figure
-blockToTexinfo (SimpleFigure attr txt (src, tit)) = do
-      capt <- if null txt
-              then return empty
-              else (\c -> text "@caption" <> braces c) `fmap`
-                     inlineListToTexinfo txt
-      img  <- inlineToTexinfo (Image attr txt (src,tit))
-      return $ text "@float" $$ img $$ capt $$ text "@end float"
 
 blockToTexinfo (Para lst) =
   inlineListToTexinfo lst    -- this is handled differently from Plain in blockListToTexinfo
@@ -257,10 +248,43 @@ blockToTexinfo (Table _ blkCapt specs thead tbody tfoot) = do
                   text "@end multitable"
   return $ if isEmpty captionText
               then tableBody <> blankline
-              else text "@float" $$
+              else text "@float Table" $$
                    tableBody $$
                    inCmd "caption" captionText $$
                    text "@end float"
+
+blockToTexinfo (Figure _ caption [SimpleFigure attr figCaption tgt]) = do
+  let capt = if null figCaption
+             then let (Caption _ cblks) = caption
+                  in blocksToInlines cblks
+             else figCaption
+  captionText <- if null capt
+                 then return empty
+                 else (text "@caption" <>) . braces <$> inlineListToTexinfo capt
+  img  <- inlineToTexinfo (Image attr figCaption tgt)
+  return $ text "@float Figure" $$ img $$ captionText $$ text "@end float"
+
+blockToTexinfo (Figure _ fCaption [
+    Table attr tCaption@(Caption _ cbody) specs thead tbody tfoot]) = do
+  let caption = case cbody of
+                  [] -> fCaption
+                  _  -> tCaption
+  blockToTexinfo (Table attr caption specs thead tbody tfoot)
+
+blockToTexinfo (Figure _ (Caption _ caption) body) = do
+  captionText <- inlineListToTexinfo $ blocksToInlines caption
+  content <- blockListToTexinfo body
+  return $ text ("@float" ++ floatType body) $$ content $$ (
+      if isEmpty captionText
+         then empty
+         else inCmd "caption" captionText
+    ) $$ text "@end float"
+  where
+  -- floatType according to
+  -- https://www.gnu.org/software/texinfo/manual/texinfo/html_node/_0040float.html
+  floatType [SimpleFigure {}] = " Figure"
+  floatType [Table {}] = " Table"
+  floatType _ = ""
 
 tableHeadToTexinfo :: PandocMonad m
                    => [Alignment]

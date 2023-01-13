@@ -1,9 +1,9 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {- |
-   Module      : Text.Pandoc.Readers.Org
-   Copyright   : © 2019-2022 Albert Krewinkel
-   License     : GNU GPL, version 2 or above
+   Module      : Text.Pandoc.Readers.Jira
+   Copyright   : © 2019-2023 Albert Krewinkel
+   License     : GPL-2.0-or-later
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
 

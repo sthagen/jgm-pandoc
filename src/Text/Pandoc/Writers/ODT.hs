@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {- |
    Module      : Text.Pandoc.Writers.ODT
-   Copyright   : Copyright (C) 2008-2022 John MacFarlane
+   Copyright   : Copyright (C) 2008-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -13,7 +13,6 @@ Conversion of 'Pandoc' documents to ODT.
 -}
 module Text.Pandoc.Writers.ODT ( writeODT ) where
 import Codec.Archive.Zip
-import Control.Monad
 import Control.Monad.Except (catchError, throwError)
 import Control.Monad.State.Strict
 import qualified Data.ByteString.Lazy as B
@@ -94,7 +93,8 @@ pandocToODT opts doc@(Pandoc meta _) = do
   lang <- toLang (getLang opts meta)
   refArchive <-
        case writerReferenceDoc opts of
-             Just f -> liftM toArchive $ lift $ P.readFileLazy f
+             Just f -> lift $ toArchive . B.fromStrict . fst <$>
+                                (P.fetchItem (T.pack f))
              Nothing -> lift $ toArchive . B.fromStrict <$>
                                 readDataFile "reference.odt"
   -- handle formulas and pictures

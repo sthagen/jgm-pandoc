@@ -3,7 +3,7 @@
 {-# LANGUAGE ViewPatterns      #-}
 {- |
    Module      : Text.Pandoc.Writers.Man
-   Copyright   : Copyright (C) 2007-2022 John MacFarlane
+   Copyright   : Copyright (C) 2007-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -173,7 +173,6 @@ blockToMan opts (Table _ blkCapt specs thead tbody tfoot) =
   return $ literal ".PP" $$ caption' $$
            literal ".TS" $$ literal "tab(@);" $$ coldescriptions $$
            colheadings' $$ vcat body $$ literal ".TE"
-
 blockToMan opts (BulletList items) = do
   contents <- mapM (bulletListItemToMan opts) items
   return (vcat contents)
@@ -186,6 +185,8 @@ blockToMan opts (OrderedList attribs items) = do
 blockToMan opts (DefinitionList items) = do
   contents <- mapM (definitionListItemToMan opts) items
   return (vcat contents)
+blockToMan opts (Figure attr capt body) = do
+  blockToMan opts (figureDiv attr capt body)
 
 -- | Convert bullet list item (list of blocks) to man.
 bulletListItemToMan :: PandocMonad m => WriterOptions -> [Block] -> StateT WriterState m (Doc Text)

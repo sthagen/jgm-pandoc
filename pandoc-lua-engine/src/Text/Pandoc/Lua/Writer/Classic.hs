@@ -6,7 +6,7 @@
 {-# LANGUAGE TypeApplications    #-}
 {- |
    Module      : Text.Pandoc.Lua.Writer.Classic
-   Copyright   : Copyright (C) 2012-2022 John MacFarlane
+   Copyright   : Copyright (C) 2012-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -156,6 +156,12 @@ blockToCustom (CodeBlock attr str) =
 
 blockToCustom (BlockQuote blocks) =
   invoke "BlockQuote" (Stringify blocks)
+
+blockToCustom (Figure attr (Caption _ cbody) content) =
+  invoke "Figure"
+    (Stringify cbody)
+    (Stringify content)
+    (attrToMap attr)
 
 blockToCustom (Table _ blkCapt specs thead tbody tfoot) =
   let (capt, aligns, widths, headers, rows) = toLegacyTable blkCapt specs thead tbody tfoot

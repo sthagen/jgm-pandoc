@@ -2,7 +2,7 @@
 {-# LANGUAGE ViewPatterns      #-}
 {- |
    Module      : Text.Pandoc.Writers.RST
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -263,20 +263,6 @@ blockToRST (Div (ident,classes,_kvs) bs) = do
            nest 3 contents $$
            blankline
 blockToRST (Plain inlines) = inlineListToRST inlines
-blockToRST (SimpleFigure attr txt (src, tit)) = do
-  description <- inlineListToRST txt
-  dims <- imageDimsToRST attr
-  let fig = "figure:: " <> literal src
-      alt = ":alt: " <> if T.null tit then description else literal tit
-      capt = description
-      (_,cls,_) = attr
-      classes = case cls of
-                   []               -> empty
-                   ["align-right"]  -> ":align: right"
-                   ["align-left"]   -> ":align: left"
-                   ["align-center"] -> ":align: center"
-                   _ -> ":figclass: " <> literal (T.unwords cls)
-  return $ hang 3 ".. " (fig $$ alt $$ classes $$ dims $+$ capt) $$ blankline
 blockToRST (Para [Image attr txt (src, _)]) = do
   description <- inlineListToRST txt
   dims <- imageDimsToRST attr
@@ -408,6 +394,36 @@ blockToRST (DefinitionList items) = do
   contents <- mapM definitionListItemToRST items
   -- ensure that sublists have preceding blank line
   return $ blankline $$ vcat contents $$ blankline
+
+blockToRST (Figure (ident, classes, _) _ body) = do
+  let figure attr txt (src, tit) = do
+        description <- inlineListToRST txt
+        dims <- imageDimsToRST attr
+        let fig = "figure:: " <> literal src
+            alt = ":alt: " <> if T.null tit then description else literal tit
+            capt = description
+            (_,cls,_) = attr
+            align = case cls of
+                      []               -> empty
+                      ["align-right"]  -> ":align: right"
+                      ["align-left"]   -> ":align: left"
+                      ["align-center"] -> ":align: center"
+                      _ -> ":figclass: " <> literal (T.unwords cls)
+        return $ hang 3 ".. " (fig $$ alt $$ align $$ dims $+$ capt)
+              $$ blankline
+  case body of
+    [Para  [Image attr txt tgt]] -> figure attr txt tgt
+    [Plain [Image attr txt tgt]] -> figure attr txt tgt
+    _ -> do
+      content <- blockListToRST body
+      return $ blankline $$ (
+        ".. container:: float" <> space <>
+        literal (T.unwords (filter (/= "container") classes))) $$
+        (if T.null ident
+         then blankline
+         else "   :name: " <> literal ident $$ blankline) $$
+        nest 3 content $$
+        blankline
 
 -- | Convert bullet list item (list of blocks) to RST.
 bulletListItemToRST :: PandocMonad m => [Block] -> RST m (Doc Text)

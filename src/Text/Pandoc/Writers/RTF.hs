@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {- |
    Module      : Text.Pandoc.Writers.RTF
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -270,6 +270,8 @@ blockToRTF indent alignment (Table _ blkCapt specs thead tbody tfoot) = do
                 else tableRowToRTF True indent aligns sizes headers
   rows' <- T.concat <$> mapM (tableRowToRTF False indent aligns sizes) rows
   return $ header' <> rows' <> rtfPar indent 0 alignment caption'
+blockToRTF indent alignment (Figure attr capt body) =
+  blockToRTF indent alignment $ figureDiv attr capt body
 
 tableRowToRTF :: PandocMonad m
               => Bool -> Int -> [Alignment] -> [Double] -> [[Block]] -> m Text

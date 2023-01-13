@@ -3,8 +3,8 @@
 {- |
    Module      : Text.Pandoc.Writers.Org
    Copyright   : © 2010-2015 Puneeth Chaganti <punchagan@gmail.com>
-                   2010-2022 John MacFarlane <jgm@berkeley.edu>
-                   2016-2022 Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
+                   2010-2023 John MacFarlane <jgm@berkeley.edu>
+                   2016-2023 Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -20,20 +20,22 @@ import Control.Monad (zipWithM)
 import Control.Monad.State.Strict
     ( StateT, gets, modify, evalStateT )
 import Data.Char (isAlphaNum, isDigit)
-import Data.List (intersperse, partition, transpose)
+import Data.List (intersperse, partition, dropWhileEnd, transpose)
 import Data.List.NonEmpty (nonEmpty)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map as M
+import Text.DocLayout
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Definition
 import Text.Pandoc.Logging
 import Text.Pandoc.Options
-import Text.DocLayout
 import Text.Pandoc.Shared
 import Text.Pandoc.URI
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Citeproc.Locator (parseLocator, LocatorMap(..), LocatorInfo(..))
+import Text.Pandoc.Walk (query)
 import Text.Pandoc.Writers.Shared
 
 data WriterState =
@@ -123,12 +125,6 @@ blockToOrg (Div attr@(ident,_,_) bs) = do
      then return mempty
      else divToOrg attr bs
 blockToOrg (Plain inlines) = inlineListToOrg inlines
-blockToOrg (SimpleFigure attr txt (src, tit)) = do
-      capt <- if null txt
-              then return empty
-              else ("#+caption: " <>) `fmap` inlineListToOrg txt
-      img <- inlineToOrg (Image attr txt (src,tit))
-      return $ capt $$ img $$ blankline
 blockToOrg (Para inlines) = do
   contents <- inlineListToOrg inlines
   return $ contents <> blankline
@@ -153,12 +149,28 @@ blockToOrg b@(RawBlock f str)
       return empty
 blockToOrg HorizontalRule = return $ blankline $$ "--------------" $$ blankline
 blockToOrg (Header level attr inlines) = do
-  contents <- inlineListToOrg inlines
-  let headerStr = text $ if level > 999 then " " else replicate level '*'
+  let tagName inline = case inline of
+        Span (_, _, kv) _ -> (:[]) <$> lookup "tag-name" kv
+        _                 -> Nothing
+  let (htext, tagsInlines) = break (isJust . tagName) inlines
+  contents <- inlineListToOrg $ dropWhileEnd (== Space) htext
+  columns  <- writerColumns <$> gets stOptions
+  let headerDoc = mconcat
+        [ text $ if level > 999 then " " else replicate level '*'
+        , literal " "
+        , contents
+        ]
+  let tags = case query tagName tagsInlines of
+               Nothing -> ""
+               Just ts -> T.cons ':' (T.intercalate ":" ts) `T.snoc` ':'
+  let tagsDoc = if T.null tags
+                then empty
+                else (<> literal tags) . text . (`replicate` ' ') . max 1 $
+                     columns - offset headerDoc - realLength tags
   let drawerStr = if attr == nullAttr
                   then empty
                   else cr <> propertiesDrawer attr
-  return $ headerStr <> " " <> contents <> drawerStr <> cr
+  return $ nowrap (headerDoc <> tagsDoc) <> drawerStr <> cr
 blockToOrg (CodeBlock (ident,classes,kvs) str) = do
   let name = if T.null ident
              then empty
@@ -234,6 +246,18 @@ blockToOrg (OrderedList (start, _, delim) items) = do
 blockToOrg (DefinitionList items) = do
   contents <- mapM definitionListItemToOrg items
   return $ vcat contents $$ blankline
+blockToOrg (Figure (ident, _, _) caption body) = do
+  -- Represent the figure as content that can be internally linked from other
+  -- parts of the document.
+  capt <- case caption of
+            Caption _ []  -> pure empty
+            Caption _ cpt -> ("#+caption: " <>) <$>
+                             inlineListToOrg (blocksToInlines cpt)
+  contents <-  blockListToOrg body
+  let anchor = if T.null ident
+               then empty
+               else "<<" <> literal ident <> ">>"
+  return (capt $$ anchor $$ contents $$ blankline)
 
 -- | Convert bullet list item (list of blocks) to Org.
 bulletListItemToOrg :: PandocMonad m => [Block] -> Org m (Doc Text)

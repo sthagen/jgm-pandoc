@@ -3,7 +3,7 @@
 {- |
    Module      : Text.Pandoc.Readers.Textile
    Copyright   : Copyright (C) 2010-2012 Paul Rivier
-                               2010-2022 John MacFarlane
+                               2010-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Paul Rivier <paul*rivier#demotera*com>
@@ -607,17 +607,21 @@ link = try $ do
   attr <- attributes
   name <- trimInlines . mconcat <$>
           withQuoteContext InDoubleQuote (many1Till inline (char '"'))
-  char ':'
-  let stop = if bracketed
-                then char ']'
-                else lookAhead $ space <|> eof' <|>
-                       try (oneOf "!.,;:" *>
-                              (space <|> newline <|> eof'))
-  url <- T.pack <$> many1Till nonspaceChar stop
+  url <- linkUrl bracketed
   let name' = if B.toList name == [Str "$"] then B.str url else name
   return $ if attr == nullAttr
               then B.link url "" name'
               else B.spanWith attr $ B.link url "" name'
+
+linkUrl :: PandocMonad m => Bool -> TextileParser m Text
+linkUrl bracketed = do
+  char ':'
+  let stop = if bracketed
+                then char ']'
+                else lookAhead $ space <|> eof' <|>
+                       try (oneOf "!.,;:*" *>
+                              (space <|> newline <|> eof'))
+  T.pack <$> many1Till nonspaceChar stop
 
 -- | image embedding
 image :: PandocMonad m => TextileParser m Inlines
@@ -630,7 +634,11 @@ image = try $ do
   src <- T.pack <$> many1 (noneOf " \t\n\r!(")
   alt <- fmap T.pack $ option "" $ try $ char '(' *> manyTill anyChar (char ')')
   char '!'
-  return $ B.imageWith attr src alt (B.str alt)
+  let img = B.imageWith attr src alt (B.str alt)
+  try (do -- image link
+         url <- linkUrl False
+         return (B.link url "" img))
+   <|> return img
 
 escapedInline :: PandocMonad m => TextileParser m Inlines
 escapedInline = escapedEqs <|> escapedTag

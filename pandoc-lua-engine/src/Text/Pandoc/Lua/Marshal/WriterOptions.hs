@@ -5,7 +5,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {- |
    Module      : Text.Pandoc.Lua.Marshaling.WriterOptions
-   Copyright   : © 2021-2022 Albert Krewinkel, John MacFarlane
+   Copyright   : © 2021-2023 Albert Krewinkel, John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -75,10 +75,15 @@ typeWriterOptions = deftype "WriterOptions"
     (pushViaJSON, writerEmailObfuscation)
     (peekViaJSON, \opts x -> opts{ writerEmailObfuscation = x })
 
+  , property "split_level"
+    "Level at which EPUB or chunked HTML documents are split into files"
+    (pushIntegral, writerSplitLevel)
+    (peekIntegral, \opts x -> opts{ writerSplitLevel = x })
+
   , property "epub_chapter_level"
-    "Header level for chapters (separate files)"
-    (pushIntegral, writerEpubChapterLevel)
-    (peekIntegral, \opts x -> opts{ writerEpubChapterLevel = x })
+    "Deprecated synonym for split_level"
+    (pushIntegral, writerSplitLevel)
+    (peekIntegral, \opts x -> opts{ writerSplitLevel = x })
 
   , property "epub_fonts"
     "Paths to fonts to embed"
