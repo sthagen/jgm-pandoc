@@ -1,9 +1,11 @@
 # Revision history for pandoc
 
-## pandoc 3.0 (PROVISIONAL YYYY-MM-DD)
+## pandoc 3.0 (2023-01-18)
 
   * Split pandoc-server, pandoc-cli, and pandoc-lua-engine
-   into separate packages (#8309).
+    into separate packages (#8309). Note that installing
+    the `pandoc` package from Hackage will no longer give you the
+    `pandoc` executable; for that you need to install `pandoc-cli`.
 
   * Pandoc now behaves like a Lua interpreter when called as
     `pandoc-lua` or when `pandoc lua` is used (#8311, Albert Krewinkel).
@@ -18,13 +20,6 @@
 
   * New command line option: `--epub-title-page=true|false` allows
     the EPUB title page to be omitted (#6097).
-
-  * Replace `--epub-chapter-level` with `--split-level`, which also
-    now affects the `chunkedhtml` format. `--epub-chapter-level`
-    will still function as a deprecated synonynm.
-    `epub-chapter-level` will also continue to work in defaults
-    files, ande `epub_chapter_level` will still work for Lua
-    marshalling.
 
   * `--reference-doc` can now accept a URL argument (#8535) and
     load a remote reference doc.
@@ -50,12 +45,19 @@
   * In `--verbose` mode add message when running citeproc (as with
     other filters).
 
-  * Add new `mark` extension for highlighted text (#7743).
+  * Add new `mark` extension for highlighted text in Markdown,
+    using `==` delimiters (#7743).
 
-  * pandoc-server:
-
-    + Add simple CORS support to pandoc-server (#8427).
-    + Print message to stderr when starting the server.
+  * Add new extensions `wikilinks_title_after_pipe` and
+    `wikilinks_title_before_pipe` for `commonmark` and `markdown`.
+    (#2923, Albert Krewinkel). The former enables links of style
+    `[[Name of page|Title]]` and the latter `[[Title|Name of
+    page]]`. Titles are optional in both variants, so this works
+    for both: `[[https://example.org]]`, `[[Name of page]]`. The
+    writer is modified to render links with title `wikilink` as
+    a wikilink if a respective extension is enabled. Pandoc will
+    use `wikilinks_title_after_pipe` if both extensions are
+    enabled.
 
   * Add prefixes to identifiers with `--file-scope` (#6384).
     This change only affects the case where `--file-scope` is used
@@ -76,9 +78,82 @@
     (If `-o` is used with an argument without an extension,
     it is treated as a directory and the zip file is automatically
     extracted there, unless it already exists.) The top page will
-    contain a table of contents if `--toc` is used.  The option
+    contain a table of contents if `--toc` is used.  A
+    `sitemap.json` file is also included. The option
     `--split-level` determines the level at which sections are
     to be split.
+
+  * Support complex figures (Albert Krewinkel, Aner Lucero).
+    There is now a dedicate Figure block constructor for
+    figures.  The old hack of representing a figure as
+    `Para [Image attr [..alt..] (source, "fig:title")]`
+    has been dropped.  Here is a summary of figure support
+    in different formats:
+
+    + Markdown reader: paragraphs containing just an image are treated as
+      figures if the `implicit_figures` extension is enabled. The identifier
+      is used as the figure's identifier and the image description is also
+      used as figure caption; all other attributes are treated as belonging
+      to the image.
+    + Markdown writer: figures are output as implicit figures if possible,
+      via HTML if the `raw_html` extension is enabled, and as Div elements
+      otherwise.
+    + HTML reader: `<figure>` elements are parsed as figures, with the
+      caption taken from the respective `<figcaption>` elements.
+    + HTML writer: the alt text is no longer constructed from the caption,
+      as was the case with implicit figures. This reduces duplication, but
+      comes at the risk of images that are missing alt texts. Authors should
+      take care to provide alt texts for all images. Some readers, most
+      notably the Markdown reader with the `implicit_figures` extension,
+      add a caption that's identical to the image description. The writer
+      checks for this and adds an `aria-hidden` attribute to the
+      `<figcaption>` element in that case.
+    + JATS reader: The `<fig>` and `<caption>` elements are parsed into
+      figure elements, even if the contents is more complex.
+    + JATS writer: The `<fig>` and `<caption>` elements are used write
+      figures.
+    + LaTeX reader: support for figures with non-image contents and for
+      subfigures.
+    + LaTeX writer: complex figures, e.g. with non-image contents and
+      subfigures, are supported. The `subfigure` template variable is set if
+      the document contains subfigures, triggering the conditional loading
+      of the *subcaption* package. Contants of figures that contain tables
+      are become unwrapped, as longtable environments are not allowed within
+      figures.
+    + DokuWiki, Haddock, Jira, Man, MediaWiki, Ms, Muse, PPTX, RTF, TEI,
+      ZimWiki writers: Figures are rendered like Div elements.
+    + Asciidoc writer: The figure contents is unwrapped; each image in the
+      the figure becomes a separate figure.
+    + Classic custom writers: Figures are passed to the global function
+      `Figure(caption, contents, attr)`, where `caption` and `contents` are
+      strings and `attr` is a table of key-value pairs.
+    + ConTeXt writer: Figures are wrapped in a "placefigure" environment
+      with `\startplacefigure`/`\endplacefigure`, adding the features
+      caption and listing title as properties. Subfigures are place in a
+      single row with the `\startfloatcombination` environment.
+    + DocBook writer: Uses `mediaobject` elements, unless the figure contains
+      subfigures or tables, in which case the figure content is unwrapped.
+    - Docx writer: figures with multiple content blocks are rendered as
+      tables with style `FigureTable`; like before, single-image figures are
+      still output as paragraphs with style `Figure` or `Captioned Figure`,
+      depending on whether a caption is attached.
+    + DokuWiki writer: Caption and "alt-text" are no longer combined. The
+      alt text of a figure will now be lost in the conversion.
+    + FB2 writer: The figure caption is added as alt text to the images in
+      the figure; pre-existing alt texts are kept.
+    + ICML writer: Only single-image figures are supported. The contents of
+      figures with additional elements gets unwrapped.
+    + OpenDocument writer: A separate paragraph is generated for each block
+      element in a figure, each with style `FigureWithCaption`. Behavior for
+      single-image figures therefore remains unchanged.
+    + Org writer: Only the first element in a figure is given a caption;
+      additional block elements in the figure are appended without any
+      caption being added.
+    + RST writer: Single-image figures are supported as before; the contents
+      of more complex images become nested in a container of type `float`.
+    + Texinfo writer: Figures are rendered as float with type `figure`.
+    + Textile writer: Figures are rendered with the help of HTML elements.
+    + XWiki: Figures are placed in a group.
 
   * Changes in custom readers/writers:
 
@@ -101,6 +176,11 @@
   * We now set the `pandoc-version` variable centrally rather
     than in the writers.  One effect is the man writer now emits
     a comment with the pandoc version.
+
+  * pandoc-server:
+
+    + Add simple CORS support to pandoc-server (#8427).
+    + Print message to stderr when starting the server.
 
   * Docx reader:
 
@@ -149,10 +229,18 @@
       This is not too useful yet, because writers don't do anything with
       the short caption.
 
-  * Mediawiki reader:
+  * MediaWiki reader:
 
     + Parse table cell with attributess, to support rowspan, colspan (#8231,
       Ruqi).
+    + Refine "blending" rules for MediaWiki links (#8525, Ruqi).
+      The rules for "blending" characters outside a link into the link are
+      described here: https://en.wikipedia.org/wiki/Help:Wikitext#Blend_link
+      These pose a problem for CJK languages, which generally don't have
+      spaces after links. However, it turns out that the blending behavior, as
+      implemented on Wikipedia, is (contrary to the documentation) only for
+      ASCII letters. This commit implements that restriction, which fixes
+      the problem for CJK.
 
   * HTML reader:
 
@@ -172,7 +260,7 @@
     + Handle empty paragraphs (#8487). Also, if attributes are added
       explicitly to a paragraph, put it in a Div with the attributes.
 
-   * Markdown reader:
+  * Markdown reader:
 
     + Allow fenced code block "bare" language to be combined
       with attributes (#8174, Siphalor), e.g.
@@ -227,6 +315,8 @@
 
     + Pass through unknown languages in code blocks (#8278), instead
       of producing `begin_example`.
+    + Use span attributes `tag-name` in headers as tags (#8513, Albert
+      Krewinkel). This enables round-tripping of tags in Org headings.
 
   * EndNote reader:
 
@@ -242,6 +332,7 @@
     + Add regression tests for #8437.
     + Render image alt text using textobject element (#8437).
     + Don't indent contents of title element.
+    + Store "unnumbered" class in DocBook role attribute (#1402, lifeunleaded).
 
   * ConTeXt writer (Albert Krewinkel):
 
@@ -252,11 +343,14 @@
       of `\type` was customized, as those changes would not have
       been applied to code rendered with `\mono`.
     + Add support for unlisted, unnumbered headings (#8486).
+    + Support `tagging` extension (Albert Krewinkel). Paragraphs
+      are enclosed by `\bpar` and `\epar` commands, and `highlight` commands
+      are used for emphasis. This results in much better tagging in PDF output.
 
   * LaTeX writer:
 
     + Do not repeat caption on headless tables (Albert Krewinkel).
-      The caption of headless tables was repeated on each page that 
+      The caption of headless tables was repeated on each page that
       contained part of the table. It is now made part of the
       "first head", i.e. the table head that is printed only once.
     + Add separator line between table's body and its foot
@@ -420,6 +514,10 @@
     + Use `styles.citations.html` partial in `styles.html`.
     + Fix class name `hanging` -> `hanging-indent` in
       `styles.citations.html`.
+    + Put Consolas before Lucida Console for code font (#8543).
+      This is to prevent Lucida Console from being used on Windows, where
+      it causes spacing issues in some applications, with boldface
+      glyphs wider than regular ones.
 
   * EPUB CSS changes: Reduce the amount of inline CSS used for EPUBs
     (#8379). Almost everything is now in the default EPUB CSS
@@ -455,8 +553,6 @@
 
   * Text.Pandoc.App:
 
-    + Parameterize `convertWithOpts` over scripting engine [API Change]
-      (Albert Krewinkel).
     + Move initial input-to-Pandoc code to internal submodule (Albert
       Krewinkel).
     + Change `parseOptionsFromArgs` and `parseOptions` (#8406)
@@ -465,18 +561,15 @@
     + Add `handleOptInfo` function.  This performs the IO actions for
       things like `--version` that were previously done in
       `parseOptionsFromArgs` [API change].
-    + Add argument for a `ScriptingEngine` [API change].
+    + `convertWithOpts`: add argument for a `ScriptingEngine` [API change].
     + Unify check for standalone output (Albert Krewinkel).
+    + New `optEpubTitlePage` field on `Opt` [API change] (#6097).
+    + Remove `optEpubChapterLevel`, add `optSplitLevel` [API change].
+    + Export `IpynbOutput(..)` [API change].
 
   * Text.Pandoc.App.OutputSettings:
 
-    + Remove unused field `outputWriterName` in `OutputSettings`
-      [API change].
-
-  * Text.Pandoc.App.Opt:
-
-    + New `optEpubTitlePage` field on `Opts` [API change] (#6097).
-    + Remove `optEpubChapterLevel`, add `optSplitLevel` [API change].
+    + Remove unused field `outputWriterName` in `OutputSettings`.
 
   * Text.Pandoc.Citeproc:
 
@@ -496,6 +589,8 @@
     + Add internal module Text.Pandoc.Citeproc.Name (#8345). This exports
       `toName`, which previously had been part of T.P.Citeproc.BibTeX,
       and allows for cleaner module dependencies.
+
+  * Export module `Text.Pandoc.Slides` [API Change] (Albert Krewinkel).
 
   * Add new module Text.Pandoc.Format [API change] (Albert Krewinkel).
     The module provides functions and types for format spec parsing and
@@ -523,8 +618,11 @@
     + Add `extensionsToList` function.
     + Revise `readExtension` so it can handle `CustomExtension`, and so
       that it returns a Text rather than `Maybe Text`.
-    + Add `showExtension`.
+    + Add `showExtension` [API change].
     + Add `Ext_mark` extension [API change].
+    + Add `Ext_tagging` constructor [API change] (Albert Krewinkel).
+    + Add `Ext_wikilinks_title_after_pipe`, `Ext_wikilinks_title_before_pipe`
+      [API change] (Albert Krewinkel).
 
   * Text.Pandoc.PDF:
 
@@ -596,6 +694,8 @@
       `pandoc.utils.blocks_to_inlines` Lua function.
     + `defaultUserDataDir` is no longer exported (it has been
       moved to T.P.Data) [API change].
+    + New function `figureDiv`, offering offers a standardized way
+      to convert a figure into a Div element (Albert Krewinkel) [API change].
 
   * Text.Pandoc.Writers.Shared:
 
@@ -623,10 +723,6 @@
     + New `writerEpubTitlePage` field on `WriterOptions` (#6097)
       [API change].
     + Remove `writerEpubChapterLevel`, add `writerSplitLevel` [API change].
-
-  * Text.Pandoc.App:
-
-    + Export `IpynbOutput(..)` [API change].
 
   * Text.Pandoc.Filter:
 
@@ -663,21 +759,9 @@
       internally
     + Add Wrapper type documentation (#8490, William Rusnack).
 
-
   * New exported module Text.Pandoc.Scripting (Albert Krewinkel).
     The module contains the central data structure for scripting engines
     (e.g., Lua) [API change].
-
-    The whole scripting engine has been refactored (#8417, John MacFarlane
-    and Albert Krewinkel).
-
-    The new type `CustomComponents` is exported, and the
-    `ScriptEngine` fields are changed. Instead of separate fields for custom
-    readers and writers, we now have a single function that loads any number
-    of "components" from a script: these may be custom readers, custom
-    writers, templates for writers, or extension configs. (This supports
-    having a custom reader and a custom writer for a format
-    together in the same file.)
 
   * Text.Pandoc.Error:
 
@@ -686,6 +770,8 @@
     + Add new PandocError constructor `PandocFormatError` [API change]
       (Albert Krewinkel). The new error is used to report problems with
       input or output format specifications.
+    + Add new PandocError constructor `PandocNoTemplateError`
+      (Albert Krewinkel).
     + Remove `PandocParsecError` constructor from `PandocError` (#8385).
       Henceforth we just use `PandocParseError`.
 
@@ -702,6 +788,9 @@
       `readDefaultDataFile`, `setTranslations`, and `translateTerm`
       [API change].
     + Text.Pandoc.Class now exports `checkUserDataDir` [API change].
+
+  * T.P.Class.IO: export function `writeMedia` [API change] (Albert Krewinkel).
+    This is useful for the `pandoc.mediabag` module.
 
   * Separate out Text.Pandoc.Data and Text.Pandoc.Translations from
     Text.Pandoc.Class (#8348). This makes Text.Pandoc.Class
@@ -820,11 +909,15 @@
     + Add functions `pandoc.text.toencoding`, `pandoc.text.fromencoding`
       (#8512, Albert Krewinkel).
     + Add `pandoc.cli` module. Allow processing of CLI options in Lua.
-    + Support `-D` CLI option for custom writers [API change].
+    + Support `-D` CLI option for custom writers.
       A new error `PandocNoTemplateError` (code 87) is thrown if a template
       is required but cannot be found.
     + Allow table structure as format spec. This allows to pass structured
       values as format specifiers to `pandoc.write` and `pandoc.read`.
+    + Add function `pandoc.mediabag.write` (Albert Krewinkel).
+    + Add module `pandoc.structure` (Albert Krewinkel). The function
+      `make_sections` has been given a friendlier interface and moved to the
+      new module; the old `pandoc.utils.make_sections` has been deprecated.
 
   * Custom writers:
 
@@ -885,6 +978,9 @@
   * Use latest versions of `commonmark-extensions`, `texmath`,
     `citeproc`, `gridtables`, and `skylighting`.
 
+  * Use pandoc-types 1.23.  This adds the `Figure` Block
+    constructor and removes the `Null` Block constructor.
+
   * Require aeson >= 2.0.
 
   * Use jira-wiki-markup 1.5.0 (#8511, Albert Krewinkel). Fixes issues with
@@ -892,7 +988,7 @@
 
   * Use doctemplates 0.11, avoiding a transitive dependency on HsYAML.
 
-  * Use skylighting 0.13.1.2
+  * Use skylighting 0.13.1.2.
 
   * Allow mtl 2.3.1 (Alexander Batischev).
 
@@ -914,8 +1010,7 @@
 
   * Documentation:
 
-    + Deprecate `PANDOC_WRITER_OPTIONS` in custom writers (Albert 
-      Krewinkel).
+    + Deprecate `PANDOC_WRITER_OPTIONS` in custom writers (Albert Krewinkel).
     + Document `pandoc.write_classic` (Albert Krewinkel).
     + Document new table features (Albert Krewinkel).
     + Clarify what background-image does in reveal.js (#6450).
@@ -924,12 +1019,10 @@
     + Update grid table documentation (#8346).
     + Add note about MathJax fonts to `--embed-resources`.
     + Use cabal's --package-env more (#8317, Artem Pelenitsyn).
-    + Modify Zerobrane instructions to use Lua 5.4 (#8353, Ian Max
-      Andolina).
+    + Modify Zerobrane instructions to use Lua 5.4 (#8353, Ian Max Andolina).
     + Fix documentation for highlight-style in `pandoc-server.md`.
     + Fix link to fedora package site (#8246, Akos Marton).
-    + Rephrase paragraph on format extensions (#8375, Ilona
-      Silverwood).
+    + Rephrase paragraph on format extensions (#8375, Ilona Silverwood).
     + Update README.template (#8496, Sven Wick).
     + Fix a tiny typo in lua-filters.md (TomBen).
     + Clarify that `--css` should be used with `-s`.
@@ -941,6 +1034,8 @@
       (Albert Krewinkel).
     + Fix epub-embed-font documentation (#8455, Terence Eden).
     + Removed obsolete Templates section in CONTRIBUTING.md.
+    + Add manual section on accessible PDFs, archiving standards (#8312,
+      Albert Krewinkel).
 
   * Tests.Command: remove unused `runTest`.
 
@@ -970,7 +1065,7 @@
   * Add `server` flag to pandoc-cli, allowing it to be compiled without
     server support.
 
-  * pandoc-cli: Allow building a binary without Lua support (Albert 
+  * pandoc-cli: Allow building a binary without Lua support (Albert
     Krewinkel). Disabling the `lua` cabal flag will result in a
     binary without Lua.
 

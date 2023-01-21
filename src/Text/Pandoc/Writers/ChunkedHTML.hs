@@ -28,7 +28,8 @@ import Text.Pandoc.Class (PandocMonad, getPOSIXTime, runPure,
 import Text.Pandoc.MediaBag (mediaItems)
 import qualified Data.ByteString.Lazy as BL
 import Text.Pandoc.Chunks (splitIntoChunks, Chunk(..), ChunkedDoc(..),
-                           SecInfo(..))
+                           SecInfo(..), tocToList)
+import Text.Pandoc.URI (isURI)
 import Data.Text (Text)
 import Data.Tree
 import qualified Data.Text as T
@@ -86,9 +87,8 @@ writeChunkedHTML opts (Pandoc meta blocks) = do
   let Node secinfo secs = chunkedTOC chunkedDoc
   let tocTree = Node secinfo{ secTitle = docTitle meta,
                               secPath = "index.html" } secs
-  let tocBlocks = buildTOC opts tocTree
   renderedTOC <- writeHtml5String opts{ writerTemplate = Nothing }
-                    (Pandoc nullMeta tocBlocks)
+                    (Pandoc nullMeta [buildTOC opts tocTree])
   let opts' = opts{ writerVariables =
                         defField "table-of-contents" renderedTOC
                       $ writerVariables opts }
@@ -100,9 +100,12 @@ writeChunkedHTML opts (Pandoc meta blocks) = do
   return $ fromArchive archive
 
 
+-- We include in the zip only local media that is in the working directory
+-- or below.
 addMedia :: PandocMonad m => Inline -> m Inline
 addMedia il@(Image _ _ (src,_))
-  | fp <- normalise (T.unpack src)
+  | not (isURI src)
+  , fp <- normalise (T.unpack src)
   , isRelative fp
   , not (".." `isInfixOf` fp) = do
   (bs, mbMime) <- fetchItem (T.pack fp)
@@ -110,22 +113,8 @@ addMedia il@(Image _ _ (src,_))
   return il
 addMedia il = return il
 
-buildTOC :: WriterOptions -> Tree SecInfo -> [Block]
-buildTOC opts tocTree = buildTOCPart tocTree
- where
-  buildTOCPart (Node secinfo subsecs) =
-    Plain [Link nullAttr
-            ((maybe [] (\num ->
-               if writerNumberSections opts
-                  then [Span ("",["toc-section-number"],[])
-                                  [Str num, Space]]
-                  else []) (secNumber secinfo))
-             ++ secTitle secinfo)
-            (secPath secinfo, "") | secLevel secinfo > 0] :
-    if null subsecs
-       then []
-       else [BulletList (map buildTOCPart $ filter aboveThreshold subsecs)]
-  aboveThreshold (Node sec _) = secLevel sec <= writerTOCDepth opts
+buildTOC :: WriterOptions -> Tree SecInfo -> Block
+buildTOC opts = tocToList (writerNumberSections opts) (writerTOCDepth opts)
 
 chunkToEntry :: PandocMonad m
              => WriterOptions -> Meta -> Chunk -> Chunk -> m Entry
@@ -178,4 +167,3 @@ addContextVars opts topChunk chunk context =
   formatHeading ch = SimpleVal . literal . either (const "") id . runPure $
     writeHtml5String opts{ writerTemplate = Nothing }
       (Pandoc nullMeta [Plain $ chunkHeading ch])
-

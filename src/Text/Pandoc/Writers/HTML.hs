@@ -497,10 +497,12 @@ listItemToHtml opts bls
       let checkbox  = if checked
                       then checkbox' ! A.checked ""
                       else checkbox'
-          checkbox' = H.input ! A.type_ "checkbox" ! A.disabled ""
+          checkbox' = H.input ! A.type_ "checkbox"
       isContents <- inlineListToHtml opts is
       bsContents <- blockListToHtml opts bs
-      return $ constr (checkbox >> isContents) >> bsContents
+      return $ constr (checkbox >> isContents) >>
+               (if null bs then mempty else nl) >>
+               bsContents
 
 -- | Construct table of contents from list of elements.
 tableOfContents :: PandocMonad m => WriterOptions -> [Block]
@@ -725,7 +727,6 @@ adjustNumbers opts doc =
    showSecNum = T.intercalate "." . map tshow
 
 blockToHtmlInner :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
-blockToHtmlInner _ Null = return mempty
 blockToHtmlInner opts (Plain lst) = inlineListToHtml opts lst
 blockToHtmlInner opts (Para lst) = do
   slideVariant <- gets stSlideVariant

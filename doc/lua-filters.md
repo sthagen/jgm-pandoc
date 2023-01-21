@@ -1183,17 +1183,6 @@ Fields:
 `tag`, `t`
 :   the literal `LineBlock` (string)
 
-### Null {#type-null}
-
-A null element; this element never produces any output in the
-target format.
-
-Values of this type can be created with the
-[`pandoc.Null`](#pandoc.null) constructor.
-
-`tag`, `t`
-:   the literal `Null` (string)
-
 ### OrderedList {#type-orderedlist}
 
 An ordered list.
@@ -2403,6 +2392,69 @@ Usage:
 [TableHead]: #type-tablehead
 [Version]: #type-version
 
+## Chunk {#type-chunk}
+
+Part of a document; usually chunks are each written to a separate
+file.
+
+Fields:
+
+`heading`
+:   heading text ([Inlines][])
+
+`id`
+:   identifier (string)
+
+`level`
+:   level of topmost heading in chunk (integer)
+
+`number`
+:   chunk number (integer)
+
+`section_number`
+:   hierarchical section number (string)
+
+`path`
+:   target filepath for this chunk (string)
+
+`up`
+:   link to the enclosing section, if any ([Chunk][]|nil)
+
+`prev`
+:   link to the previous section, if any ([Chunk][]|nil)
+
+`next`
+:   link to the next section, if any ([Chunk][]|nil)
+
+`unlisted`
+:   whether the section in this chunk should be listed in the TOC
+    even if the chunk has no section number. (boolean)
+
+`contents`
+:   the chunk's block contents ([Blocks][])
+
+## ChunkedDoc {#type-chunkeddoc}
+
+A Pandoc document divided into [Chunks]{#type-chunk}.
+
+The table of contents info in field `toc` is rose-tree structure
+represented as a list. The node item is always placed at index
+`0`; subentries make up the rest of the list. Each node item
+contains the fields `title` ([Inlines][]), `number` (string|nil),
+`id` (string), `path` (string), and `level` (integer).
+
+Fields:
+
+`chunks`
+:   list of chunks that make up the document (list of
+    [Chunks](#type-chunk)).
+
+`meta`
+:   the document's metadata ([Meta][])
+
+`toc`
+:   table of contents information (table)
+
 # Module text
 
 UTF-8 aware text manipulation functions, implemented in Haskell.
@@ -2698,12 +2750,6 @@ Parameters:
 :   inline content
 
 Returns: [LineBlock] object
-
-### `Null ()` {#pandoc.null}
-
-Creates a null element.
-
-Returns: [Null] object
 
 ### `OrderedList (items[, listAttributes])` {#pandoc.orderedlist}
 
@@ -3754,6 +3800,10 @@ Usage:
 
 ### `make_sections (number_sections, base_level, blocks)` {#pandoc.utils.make_sections}
 
+**Deprecated** Use
+[`pandoc.structure.make_sections`](#pandoc.structure.make_sections)
+instead.
+
 Converts list of [Block](#type-block) elements into sections.
 `Div`s will be created beginning at each `Header`
 and containing following content until the next `Header`
@@ -3779,14 +3829,6 @@ Parameters:
 Returns:
 
 -   [Blocks][].
-
-Usage:
-
-    local blocks = {
-      pandoc.Header(2, pandoc.Str 'first'),
-      pandoc.Header(2, pandoc.Str 'second'),
-    }
-    local newblocks = pandoc.utils.make_sections(true, 1, blocks)
 
 ### references {#pandoc.references}
 
@@ -4137,6 +4179,26 @@ Usage:
     local diagram_url = "https://pandoc.org/diagram.jpg"
     local mt, contents = pandoc.mediabag.fetch(diagram_url)
 
+### write {#pandoc.mediabag.write}
+
+`write (dir[, fp])`
+
+Writes the contents of mediabag to the given target directory. If
+`fp` is given, then only the resource with the given name will be
+extracted. Omitting that parameter means that the whole mediabag
+gets extracted. An error is thrown if `fp` is given but cannot be
+found in the mediabag.
+
+Parameters:
+
+`dir`
+:   path of the target directory (string)
+
+`fp`
+:   canonical name (relative path) of resource (string)
+
+Since: *3.0*
+
 # Module pandoc.List
 
 This module defines pandoc's list type. It comes with useful
@@ -4379,6 +4441,27 @@ Returns:
 
 -   default extensions enabled for `format` (FormatExtensions)
 
+### extensions {#pandoc.format.extensions}
+
+Returns the extension configuration for the given format.
+The configuration is represented as a table with all supported
+extensions as keys and their default status as value, with
+`true` indicating that the extension is enabled by default,
+while `false` marks a supported extension that's disabled.
+
+This function can be used to assign a value to the `Extensions`
+global in custom readers and writers.
+
+Parameters:
+
+`format`
+:   format identifier (string)
+
+Returns:
+
+-  extensions config
+
+
 # Module pandoc.path
 
 Module for file path manipulations.
@@ -4553,6 +4636,134 @@ Parameters:
 Returns:
 
 -   list of directories in search path (list of strings)
+
+# Module pandoc.structure
+
+Access to the higher-level document structure, including
+hierarchical sections and the table of contents.
+
+## Functions
+
+### make\_sections {#pandoc.structure.make_sections}
+
+`make_sections  (blocks, opts)`
+
+Puts [Blocks] into a hierarchical structure: a list of sections
+(each a Div with class "section" and first element a Header).
+
+The optional `opts` argument can be a table; two settings are
+recognized: If `number_sections` is true, a `number` attribute
+containing the section number will be added to each `Header`. If
+`base_level` is an integer, then `Header` levels will be
+reorganized so that there are no gaps, with numbering levels
+shifted by the given value. Finally, an integer `slide_level`
+value triggers the creation of slides at that heading level.
+
+Note that a [WriterOptions][] object can be passed as the opts
+table; this will set the `number_section` and `slide_level` values
+to those defined on the command line.
+
+Parameters:
+
+`blocks`
+:   list of blocks to process ([Blocks][]|[Pandoc][])
+
+`opts`
+:   options (table)
+
+Returns:
+
+-   [Blocks][].
+
+Usage:
+
+    local blocks = {
+      pandoc.Header(2, pandoc.Str 'first'),
+      pandoc.Header(2, pandoc.Str 'second'),
+    }
+    local opts = PANDOC_WRITER_OPTIONS
+    local newblocks = pandoc.structure.make_sections(blocks, opts)
+
+### slide\_level {#pandoc.structure.slide_level}
+
+`slide_level (blocks)`
+
+Find level of header that starts slides (defined as the least
+header level that occurs before a non-header/non-hrule in the
+blocks).
+
+Parameters:
+
+`blocks`
+:   document body ([Blocks][]|[Pandoc][])
+
+Returns:
+
+-   slide level (integer)
+
+### split\_into\_chunks {#pandoc.structure.split_into_chunks}
+
+`split_into_chunks (doc, opts)`
+
+Converts a [Pandoc][] document into a
+[ChunkedDoc](#type-chunkeddoc).
+
+Parameters:
+
+`doc`
+:   document to split ([Pandoc][])
+
+`opts`
+:   split options (table)
+
+    The following options are supported:
+
+    `path_template`
+    :   template used to generate the chunks' filepaths
+        `%n` will be replaced with the chunk number (padded with
+        leading 0s to 3 digits), `%s` with the section number of
+        the heading, `%h` with the (stringified) heading text,
+        `%i` with the section identifier. For example,
+        `"section-%s-%i.html"` might be resolved to
+        `"section-1.2-introduction.html"`.
+
+        Default is `"chunk-%n"` (string)
+
+    `number_sections`
+    :   whether sections should be numbered; default is `false`
+        (boolean)
+
+    `chunk_level`
+    :   The heading level the document should be split into
+        chunks. The default is to split at the top-level, i.e.,
+        `1`. (integer)
+
+    `base_heading_level`
+    :   The base level to be used for numbering. Default is `nil`
+        (integer|nil)
+
+Returns:
+
+-   [ChunkedDoc](#types-chunkeddoc)
+
+### table\_of\_contents {#pandoc.structure.table_of_contents}
+
+`table_of_contents (toc_source, opts)`
+
+Generates a table of contents for the given object.
+
+Parameters:
+
+`toc_source`
+:   list of command line arguments
+    ([Blocks]|[Pandoc]|[ChunkedDoc](#type-chunkeddoc)`)
+
+`opts`
+:   options ([WriterOptions])
+
+Returns:
+
+-   Table of contents as a BulletList object ([Block])
 
 # Module pandoc.system
 
