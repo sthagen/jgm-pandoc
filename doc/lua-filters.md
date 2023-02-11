@@ -452,7 +452,7 @@ AST elements not updated
     end
     ```
 
-Pattern behavior is locate dependent
+Pattern behavior is locale dependent
 :   The character classes in Lua's pattern library depend on the
     current locale: E.g., the character `©` will be treated as
     punctuation, and matched by the pattern `%p`, on CP-1252
@@ -1123,6 +1123,36 @@ Fields:
 
 `tag`, `t`
 :   the literal `Div` (string)
+
+### Figure {#type-figure}
+
+Figure with caption and arbitrary block contents.
+
+Values of this type can be created with the
+[`pandoc.Figure`](#pandoc.figure) constructor.
+
+Fields:
+
+`content`
+:   block content ([Blocks][])
+
+`caption`
+:   figure caption ([Caption][])
+
+`attr`
+:   element attributes ([Attr][])
+
+`identifier`
+:   alias for `attr.identifier` (string)
+
+`classes`
+:   alias for `attr.classes` ([List][] of strings)
+
+`attributes`
+:   alias for `attr.attributes` ([Attributes][])
+
+`tag`, `t`
+:   the literal `Figure` (string)
 
 ### Header {#type-header}
 
@@ -2085,6 +2115,9 @@ Pandoc writer options
 
 Fields:
 
+`chunk_template`
+:   Template used to generate chunked HTML filenames (string)
+
 `cite_method`
 :   How to print cites -- one of 'citeproc', 'natbib', or
     'biblatex' (string)
@@ -2370,6 +2403,8 @@ Usage:
 [Citations]: #type-citation
 [ColSpec]: #type-colspec
 [CommonState]: #type-commonstate
+[Div]: #type-div
+[Figure]: #type-figure
 [Image]: #type-image
 [Inline]: #type-inline
 [Inlines]: #type-inlines
@@ -2716,6 +2751,23 @@ Parameters:
 :   element attributes
 
 Returns: [Div] object
+
+### `Figure (content[, caption[, attr]])` {#pandoc.div}
+
+Creates a [Figure][] element.
+
+Parameters:
+
+`content`
+:   figure block content
+
+`caption`
+:   figure caption
+
+`attr`
+:   element attributes
+
+Returns: [Figure][] object
 
 ### `Header (level, content[, attr])` {#pandoc.header}
 
@@ -4555,7 +4607,7 @@ presence of symlinks means `../b` may not reach `a/b` if it starts
 from `a/c`. For a worked example see [this blog
 post](https://neilmitchell.blogspot.co.uk/2015/10/filepaths-are-subtle-symlinks-are-hard.html).
 
-Set `unsafe` to a truthy value to a allow `..` in paths.
+Set `unsafe` to a truthy value to allow `..` in paths.
 
 Parameters:
 

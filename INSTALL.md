@@ -205,10 +205,9 @@ The easiest way to build pandoc from source is to use [stack][stack]:
 
 1.  Install [stack][stack]. Note that Pandoc requires stack >= 1.7.0.
 
-2.  Change to the pandoc source directory and issue the following commands:
-
+2.
         stack setup
-        stack install
+        stack install pandoc-cli
 
     `stack setup` will automatically download the ghc compiler
     if you don't have it.  `stack install` will install the
@@ -228,7 +227,7 @@ The easiest way to build pandoc from source is to use [stack][stack]:
 
 3.  Use `cabal` to install pandoc and its dependencies:
 
-        cabal install pandoc
+        cabal install pandoc-cli
 
     This procedure will install the released version of pandoc,
     which will be downloaded automatically from HackageDB.
@@ -325,7 +324,6 @@ test`.
 To run particular tests (pattern-matching on their names), use
 the `-p` option:
 
-    cabal install pandoc --enable-tests
     cabal test --test-options='-p markdown'
 
 Or with stack:

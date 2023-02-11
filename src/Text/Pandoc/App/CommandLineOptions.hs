@@ -793,6 +793,13 @@ options =
                  "NUMBER")
                  "" -- "Header level at which to split documents in chunked HTML or EPUB"
 
+    , Option "" ["chunk-template"]
+                 (ReqArg
+                  (\arg opt ->
+                     return opt{ optChunkTemplate = Just (T.pack arg) })
+                 "PATHTEMPLATE")
+                 "" -- "Template for file paths in chunkedhtml"
+
     , Option "" ["epub-chapter-level"]
                  (ReqArg
                   (\arg opt -> do
@@ -979,7 +986,7 @@ options =
     , Option "" ["print-highlight-style"]
                  (ReqArg
                   (\arg opts ->
-                    optInfo $ PrintDefaultDataFile (optOutputFile opts)
+                    optInfo $ PrintHighlightStyle (optOutputFile opts)
                                (T.pack arg))
                   "STYLE|FILE")
                  "" -- "Print default template for FORMAT"

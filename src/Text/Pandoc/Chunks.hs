@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {- |
    Module      : Text.Pandoc.Chunks
@@ -26,9 +26,11 @@ module Text.Pandoc.Chunks
   , tocToList
   , SecInfo(..)
   ) where
+
 import Text.Pandoc.Definition
 import Text.Pandoc.Shared (makeSections, stringify, inlineListToIdentifier)
 import Text.Pandoc.Walk (Walkable(..))
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import Text.Printf (printf)
 import Data.Maybe (fromMaybe, isNothing)
@@ -38,6 +40,8 @@ import Data.String (IsString)
 import GHC.Generics (Generic)
 import Text.HTML.TagSoup (Tag (TagOpen), fromAttrib, parseTags)
 import Data.Tree (Tree(..))
+import Data.Data (Data)
+import Data.Typeable (Typeable)
 
 -- | Split 'Pandoc' into 'Chunk's, e.g. for conversion into
 -- a set of HTML pages or EPUB chapters.
@@ -236,6 +240,7 @@ resolvePathTemplate :: PathTemplate
                     -> FilePath
 resolvePathTemplate (PathTemplate templ) chunknum headingText ident secnum =
   T.unpack .
+  T.filter (\c -> c /= '/' && c /= '\\') .
   T.replace "%n" (T.pack $ printf "%03d" chunknum) .
   T.replace "%s" secnum .
   T.replace "%h" headingText .
@@ -253,7 +258,7 @@ resolvePathTemplate (PathTemplate templ) chunknum headingText ident secnum =
 -- @"section-1.2-introduction.html"@.
 newtype PathTemplate =
   PathTemplate { unPathTemplate :: Text }
-  deriving (Show, IsString)
+  deriving (Show, IsString, Data, Typeable, Generic, ToJSON, FromJSON)
 
 -- | A part of a document (typically a chapter or section, or
 -- the part of a section before its subsections).

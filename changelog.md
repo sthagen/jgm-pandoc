@@ -1,5 +1,52 @@
 # Revision history for pandoc
 
+## pandoc 3.1 (2023-02-09)
+
+  * Fix regression with `--print-highlight-style` option (#8586).
+
+  * Add new `--chunk-template` option (#8581), allowing more control
+    over the filenames in chunked HTML output.
+
+  * Text.Pandoc.App: Add `optChunkTemplate` constructor to Opt [API change].
+
+  * Text.Pandoc.Options: add `writerChunkTemplate` constructor to
+    `WriterOptions` [API change].
+
+  * Text.Pandoc.Chunks: add Data, Typeable, Generic, ToJSON, FromJSON
+    instances for `PathTemplate` [API change].
+
+  * Text.Pandoc.Citeproc: Fix bug in `metaValueToReference` (#8611).
+    This bug caused us to get some repeated content when converting
+    MetaBlock to Inlines.
+
+  * Textile reader:
+
+    + Support footnote backlinks (#8585, Stephen Altamirano).
+    + Don't allow brackets in URLs (#8582).
+
+  * ODT reader: fix blockquote indent detection (#3437, Daniel Kessler).
+
+  * LaTeX writer: include short figure/table caption if one is given
+    (Albert Krewinkel). Short captions are used by LaTeX when generating
+    the list of figures or list of tables. Adding a short caption will
+    now overwrite the full caption in these lists.
+
+  * Powerpoint writer: fix handling of simple figures (#8565,
+    Albert Krewinkel). This ensures that simple figures are displayed
+    in the same way as before the introduction of a dedicated `Figure`
+    constructor in the AST.
+
+  * Improve handling of `%` in bib(la)tex parsing (#8597, #8595).
+
+  * Use released skylighting 0.13.2.1
+
+  * INSTALL.md: direct people to cabal install pandoc-cli.
+
+  * doc/lua-filters.md: document 'Figure' type and constructor (Albert
+    Krewinkel). Fix typos (Martin Joerg).
+
+  * Fix link in manual (#8583, Salim B).
+
 ## pandoc 3.0.1 (2023-01-25)
 
   * Fix use of extensions with custom readers (#8571).
