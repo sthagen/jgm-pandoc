@@ -1,10 +1,4 @@
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE BangPatterns        #-}
-{-# LANGUAGE MultiWayIf          #-}
 {-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications    #-}
-{-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.ChunkedHTML
    Copyright   : Copyright (C) 2023 John MacFarlane
@@ -45,6 +39,7 @@ import Data.Aeson (toJSON, encode)
 import System.FilePath (isRelative, normalise)
 import Data.List (isInfixOf)
 import Text.Pandoc.Walk (walkM)
+import Text.Pandoc.Builder (setMeta)
 
 -- | Splits document into HTML chunks, dividing them by section,
 -- and returns a zip archive of a folder of files.
@@ -126,10 +121,7 @@ chunkToEntry opts meta topChunk chunk = do
  where
   opts' = opts{ writerVariables =
                   addContextVars opts' topChunk chunk $ writerVariables opts }
-  meta' = if chunk == topChunk
-             then meta
-             else Meta $ M.fromList [("pagetitle", MetaString
-                                     (stringify $ chunkHeading chunk))]
+  meta' = setMeta "pagetitle" (MetaString (stringify $ chunkHeading chunk)) meta
   blocks = chunkContents chunk
 
 tocTreeToContext :: Tree SecInfo -> Context Text
