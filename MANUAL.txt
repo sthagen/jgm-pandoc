@@ -1480,9 +1480,8 @@ results only for basic math, usually you will want to use
 
 :   Convert TeX math to [MathML] (in `epub3`, `docbook4`,
     `docbook5`, `jats`, `html4` and `html5`).  This is the
-    default in `odt` output. Note that currently only Firefox
-    and Safari (and select e-book readers) natively support
-    MathML.
+    default in `odt` output. MathML is supported natively by
+    the main web browsers and select e-book readers.
 
 `--webtex`[`=`*URL*]
 
@@ -2909,7 +2908,7 @@ Pandoc uses these variables when [creating a PDF] with a LaTeX engine.
     12pt.  To use another size, set `documentclass` to one of
     the [KOMA-Script] classes, such as `scrartcl` or `scrbook`.
 
-`mainfont`, `sansfont`, `monofont`, `mathfont`, `CJKmainfont`
+`mainfont`, `sansfont`, `monofont`, `mathfont`, `CJKmainfont`, `CJKsansfont`, `CJKmonofont`
 :   font families for use with `xelatex` or
     `lualatex`: take the name of any system font, using the
     [`fontspec`] package.  `CJKmainfont` uses the [`xecjk`] package.
