@@ -1,0 +1,21 @@
+task:
+  name: MacOS
+  trigger_type: manual
+  timeout_in: 90m
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-monterey-base:latest
+  brew_script: brew install cabal-install
+  cabal_store_cache:
+    folder: ~/.cabal/store
+    fingerprint_script: cat pandoc.cabal
+  deps_script:
+    - cabal update
+    - cabal build pandoc-cli -fembed_data_files -fserver -flua --dependencies-only
+  upload_caches:
+    - cabal_store
+  install_script: |
+    sh macos/make_macos_release.sh
+    ls
+    zip -r macos_release_candidate.zip macos_release_candidate
+  artifacts:
+    path: macos_release_candidate.zip
