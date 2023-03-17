@@ -375,8 +375,7 @@ header when requesting a document from a URL:
     `$HOME/.local/share`, overridable by setting the `XDG_DATA_HOME`
     environment variable).  If that directory does not exist and
     `$HOME/.pandoc` exists, it will be used (for backwards compatibility).
-    On Windows the default user data directory is
-    `C:\Users\USERNAME\AppData\Roaming\pandoc`.
+    On Windows the default user data directory is `%APPDATA%\pandoc`.
     You can find the default user data directory on your system by
     looking at the output of `pandoc --version`.
     Data files placed in this directory (for example, `reference.odt`,
@@ -1014,7 +1013,9 @@ header when requesting a document from a URL:
     current section, or the document. The default is
     `document`. Currently this option only affects the
     `markdown`, `muse`, `html`, `epub`, `slidy`, `s5`, `slideous`,
-    `dzslides`, and `revealjs` writers.
+    `dzslides`, and `revealjs` writers.  In slide formats,
+    specifying `--reference-location=section` will cause notes
+    to be rendered at the bottom of a slide.
 
 `--markdown-headings=setext`|`atx`
 

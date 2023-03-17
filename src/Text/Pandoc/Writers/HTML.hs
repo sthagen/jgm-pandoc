@@ -543,7 +543,14 @@ footnoteSection refLocation startCounter notes = do
                 = H5.section ! A.id "footnotes"
                              ! A.class_ className
                              ! customAttribute "epub:type" "footnotes" $ x
-        | html5 = H5.section ! A5.id "footnotes"
+        | html5
+        , refLocation == EndOfDocument
+        , slideVariant == RevealJsSlides -- need a section for a new slide:
+                = H5.section ! A5.id "footnotes"
+                             ! A5.class_ className
+                             ! A5.role "doc-endnotes"
+                             $ x
+        | html5 = H5.aside   ! A5.id "footnotes"
                              ! A5.class_ className
                              ! A5.role "doc-endnotes"
                              $ x
@@ -795,7 +802,18 @@ blockToHtmlInner opts (Div (ident, "section":dclasses, dkvs)
     modify $ \st -> st{ stInSection = True }
     res <- blockListToHtml opts innerSecs
     modify $ \st -> st{ stInSection = inSection }
-    return res
+    notes <- gets stNotes
+    let emitNotes = writerReferenceLocation opts == EndOfSection &&
+                     not (null notes)
+    if emitNotes
+      then do
+        st <- get
+        renderedNotes <- footnoteSection (writerReferenceLocation opts)
+                           (stEmittedNotes st + 1) (reverse notes)
+        modify (\st' -> st'{ stNotes = mempty,
+                             stEmittedNotes = stEmittedNotes st' + length notes })
+        return (res <> renderedNotes)
+      else return res
   let classes' = nubOrd $
                   ["title-slide" | titleSlide] ++ ["slide" | slide] ++
                   ["section" | (slide || writerSectionDivs opts) &&
@@ -1056,8 +1074,6 @@ blockToHtmlInner opts (Figure attrs (Caption _ captBody)  body) = do
 -- the block if necessary.
 blockToHtml :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
 blockToHtml opts block = do
-  -- Ignore inserted section divs -- they are not blocks as they came from
-  -- the document itself (at least not when coming from markdown)
   let isSection = case block of
         Div (_, classes, _) _ | "section" `elem` classes -> True
         _ -> False
@@ -1067,8 +1083,7 @@ blockToHtml opts block = do
   doc <- blockToHtmlInner opts block
   st <- get
   let emitNotes =
-        (writerReferenceLocation opts == EndOfBlock && stBlockLevel st == 1) ||
-        (writerReferenceLocation opts == EndOfSection && isSection)
+        writerReferenceLocation opts == EndOfBlock && stBlockLevel st == 1
   res <- if emitNotes
     then do
       notes <- if null (stNotes st)
@@ -1561,7 +1576,8 @@ inlineToHtml opts inline = do
                                             else alternate
                               in (tg $ H.a ! A.href (toValue s) $ toHtml linkTxt
                                  , [A5.controls ""] )
-                            normSrc = maybe (T.unpack s) uriPath (parseURIReference $ T.unpack s)
+                            s' = fromMaybe s $ T.stripSuffix ".gz" s
+                            normSrc = maybe (T.unpack s) uriPath (parseURIReference $ T.unpack s')
                             (tag, specAttrs) = case mediaCategory normSrc of
                               Just "image" -> imageTag
                               Just "video" -> mediaTag H5.video "Video"

@@ -1,21 +1,69 @@
 task:
-  name: MacOS
+  name: macos_arm64
   trigger_type: manual
   timeout_in: 90m
   macos_instance:
     image: ghcr.io/cirruslabs/macos-monterey-base:latest
-  brew_script: brew install cabal-install
+  brew_script:
+    - brew update
+    - brew install ghc cabal-install
   cabal_store_cache:
     folder: ~/.cabal/store
-    fingerprint_script: cat pandoc.cabal
+    fingerprint_key: macos_2023_03_12
   deps_script:
     - cabal update
-    - cabal build pandoc-cli -fembed_data_files -fserver -flua --dependencies-only
+    - cabal build all -fembed_data_files -fserver -flua --dependencies-only
   upload_caches:
     - cabal_store
   install_script: |
     sh macos/make_macos_release.sh
-    ls
-    zip -r macos_release_candidate.zip macos_release_candidate
   artifacts:
-    path: macos_release_candidate.zip
+    path: macos-arm64/**
+
+task:
+  name: linux_arm64
+  trigger_type: manual
+  timeout_in: 90m
+  arm_container:
+    image: glcr.b-data.ch/ghc/ghc-musl:9.4.4
+    cpu: 4
+    memory: 12G
+  env:
+    CABALOPTS: -f-export-dynamic -fembed_data_files -fserver -flua --enable-executable-static -j4
+    GHCOPTS: -j4 +RTS -A256m -RTS -split-sections -optc-Os -optl=-pthread
+  cabal_store_cache:
+    folder: ~/.cabal/store
+    fingerprint_key: linux_arm64_2023_03_11
+  deps_script:
+    - cabal update
+    - cabal build --dependencies-only $CABALOPTS --ghc-options="$GHCOPTS" pandoc-cli
+  upload_caches:
+    - cabal_store
+  package_script:
+    - bash linux/make_artifacts.sh
+  release_candidate_artifacts:
+    path: ./linux-arm64/*
+
+task:
+  name: linux_amd64
+  trigger_type: manual
+  timeout_in: 90m
+  container:
+    image: glcr.b-data.ch/ghc/ghc-musl:9.4.4
+    cpu: 4
+    memory: 12G
+  env:
+    CABALOPTS: -f-export-dynamic -fembed_data_files -fserver -flua --enable-executable-static -j4
+    GHCOPTS: -j4 +RTS -A256m -RTS -split-sections -optc-Os -optl=-pthread
+  cabal_store_cache:
+    folder: ~/.cabal/store
+    fingerprint_key: linux_amd64_2023_03_12
+  deps_script:
+    - cabal update
+    - cabal build --dependencies-only $CABALOPTS --ghc-options="$GHCOPTS" pandoc-cli
+  upload_caches:
+    - cabal_store
+  package_script:
+    - bash linux/make_artifacts.sh
+  release_candidate_artifacts:
+    path: ./linux-amd64/*

@@ -1,8 +1,11 @@
 #!/bin/bash
 set -e
 
-CABALOPTS="-f-export-dynamic -fembed_data_files --enable-executable-static -j4"
-GHCOPTS="-j4 +RTS -A256m -RTS -split-sections -optc-Os -optl=-pthread"
+cabal build $CABALOPTS --ghc-options="$GHCOPTS" pandoc-cli
+BINPATH=$(cabal list-bin $CABALOPTS --ghc-options="$GHCOPTS" pandoc-cli)
+echo "Built executable: $BINPATH"
+
+WORK="$(pwd)"
 
 MACHINE=$(uname -m)
 case "$MACHINE" in
@@ -14,39 +17,21 @@ case "$MACHINE" in
   *)       ARCHITECTURE=unknown;;
 esac
 
-ARTIFACTS="${ARTIFACTS:-/artifacts}"
+ARTIFACTS="$WORK/linux-${ARCHITECTURE}"
+echo "Creating $ARTIFACTS directory"
+mkdir -p $ARTIFACTS
 
-# This is our sentinel that tells us when we're done.
-rm -f $ARTIFACTS/DONE
-
-clean_up() {
-  echo "All done!" > "$ARTIFACTS/DONE"
-}
-trap clean_up EXIT
-
-# build binaries
-
-cabal --version
-ghc --version
-
-cabal update
-cabal clean
-cabal build $CABALOPTS --ghc-options="$GHCOPTS" all
-cabal test $CABALOPTS --ghc-options="$GHCOPTS" all
-
-# Copy executable to ARTIFACTS
-find dist-newstyle -name 'pandoc' -type f -perm /400 -exec cp {} "$ARTIFACTS"/ \;
-
-# Strip executable
+echo "Copying and stripping pandoc binary"
+cp "$BINPATH" "$ARTIFACTS/pandoc"
 strip "$ARTIFACTS/pandoc"
 
-# Confirm that we have static builds
+echo "Checking that the binary is statically linked..."
 file "$ARTIFACTS/pandoc" | grep "statically linked"
 
-# Confirm that it has +lua and +server support
+echo "Checking that the binary has +lua and +server support..."
 "$ARTIFACTS/pandoc" --version | grep -q '+server +lua'
 
-# Confirm that it has data files baked in:
+echo "Checking that the binary has data files baked in..."
 strings "$ARTIFACTS/pandoc" | grep -q '\$title\$'
 
 make_deb() {
@@ -54,32 +39,31 @@ make_deb() {
   REVISION=${REVISION:-1}
   DEBVER=$VERSION-$REVISION
   BASE=pandoc-$DEBVER-$ARCHITECTURE
-  DIST=/mnt/$BASE
+  DIST=$WORK/$BASE
   DEST=$DIST/usr
   COPYRIGHT=$DEST/share/doc/pandoc/copyright
 
-  cd /mnt
   mkdir -p "$DEST/bin"
   mkdir -p "$DEST/share/man/man1"
   mkdir -p "$DEST/share/doc/pandoc"
 
   find "$DIST" -type d -exec chmod 755 {} \;
   cp "$ARTIFACTS/pandoc" "$DEST/bin/"
-  cd "$DEST/bin"
+  pushd "$DEST/bin"
   ln -s pandoc pandoc-server
   ln -s pandoc pandoc-lua
-  cd /mnt
+  popd
   for manpage in pandoc.1 pandoc-lua.1 pandoc-server.1
   do
-    cp /mnt/man/$manpage "$DEST/share/man/man1/$manpage"
+    cp $WORK/man/$manpage "$DEST/share/man/man1/$manpage"
     gzip -9 "$DEST/share/man/man1/$manpage"
   done
-  cp /mnt/COPYRIGHT "$COPYRIGHT"
+  cp $WORK/COPYRIGHT "$COPYRIGHT"
   echo "" >> "$COPYRIGHT"
 
   INSTALLED_SIZE=$(du -k -s "$DEST" | awk '{print $1}')
   mkdir "$DIST/DEBIAN"
-  perl -pe "s/VERSION/$DEBVER/" /mnt/linux/control.in | \
+  perl -pe "s/VERSION/$DEBVER/" $WORK/linux/control.in | \
     perl -pe "s/ARCHITECTURE/$ARCHITECTURE/" | \
     perl -pe "s/INSTALLED_SIZE/$INSTALLED_SIZE/" \
     > "$DIST/DEBIAN/control"
@@ -88,28 +72,35 @@ make_deb() {
   fakeroot dpkg-deb -Zgzip -z9 --build "$DIST"
   rm -rf "$DIST"
   cp "$BASE.deb" "$ARTIFACTS/"
+  echo "Created $BASE.deb"
 }
 
 # Make tarball for pandoc
 make_tarball() {
   TARGET=pandoc-$VERSION
-  cd "$ARTIFACTS"
+  pushd "$ARTIFACTS"
   rm -rf "$TARGET"
   mkdir "$TARGET"
   mkdir "$TARGET/bin" "$TARGET/share" "$TARGET/share/man" "$TARGET/share/man/man1"
-  cp /mnt/man/pandoc.1 /mnt/man/pandoc-server.1 /mnt/man/pandoc-lua.1 "$TARGET/share/man/man1"
+  cp $WORK/man/pandoc.1 $WORK/man/pandoc-server.1 $WORK/man/pandoc-lua.1 "$TARGET/share/man/man1"
   gzip -9 "$TARGET"/share/man/man1/*.1
   mv pandoc "$TARGET/bin"
-  cd "$TARGET/bin"
+  pushd "$TARGET/bin"
   ln -s pandoc pandoc-server
   ln -s pandoc pandoc-lua
-  cd "$ARTIFACTS"
+  popd
 
   tar cvzf "$TARGET-linux-$ARCHITECTURE.tar.gz" "$TARGET"
+  echo "Created $TARGET-linux-$ARCHITECTURE.tar.gz"
   rm -r "$TARGET"
+  popd
 }
 
+echo "Making debian package..."
 make_deb
+
+echo "Making tarball..."
 make_tarball
 
+echo "Finished!"
 exit 0

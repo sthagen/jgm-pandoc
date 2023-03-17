@@ -22,7 +22,6 @@ import Control.Monad.Catch (throwM, try)
 import Control.Monad.Trans (MonadIO (..))
 import Data.Maybe (catMaybes)
 import HsLua as Lua hiding (status, try)
-import HsLua.Core.Run as Lua
 import Text.Pandoc.Class (PandocMonad (..))
 import Text.Pandoc.Data (readDataFile)
 import Text.Pandoc.Error (PandocError (PandocLuaError))
@@ -189,6 +188,7 @@ initLuaState = do
 initJsonMetatable :: PandocLua ()
 initJsonMetatable = liftPandocLua $ do
   newListMetatable HsLua.Aeson.jsonarray (pure ())
+  Lua.pop 1
 
 -- | Evaluate a @'PandocLua'@ computation, running all contained Lua
 -- operations.
