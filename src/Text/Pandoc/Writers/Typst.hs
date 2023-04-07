@@ -78,6 +78,9 @@ pandocToTypst options (Pandoc meta blocks) = do
   let context = defField "body" main
               $ defField "notes" notes
               $ defField "toc" (writerTableOfContents options)
+              $ (if isEnabled Ext_citations options
+                    then defField "citations" True
+                    else id)
               $ (case lookupMetaString "lang" meta of
                     "" -> id
                     lang ->
@@ -276,7 +279,10 @@ inlineToTypst inline =
          else inlinesToTypst inlines
     Link _attrs inlines (src,_tit) -> do
       contents <- inlinesToTypst inlines
-      return $ "#link" <> parens (doubleQuoted src) <>
+      let dest = case T.uncons src of
+                   Just ('#', ident) -> "<" <> literal ident <> ">"
+                   _ -> doubleQuoted src
+      return $ "#link" <> parens dest <>
                 if render Nothing contents == src
                    then mempty
                    else nowrap $ brackets contents
@@ -325,7 +331,7 @@ toLabel :: Text -> Doc Text
 toLabel ident =
   if T.null ident
      then mempty
-     else "#label" <> parens (doubleQuotes (literal ident))
+     else "<" <> literal ident <> ">"
 
 doubleQuoted :: Text -> Doc Text
 doubleQuoted = doubleQuotes . literal . escape
