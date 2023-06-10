@@ -2,12 +2,9 @@ packages: .
           pandoc-lua-engine
           pandoc-server
           pandoc-cli
+constraints: tls < 1.7
 tests: True
 flags: +embed_data_files
 constraints: skylighting-format-blaze-html >= 0.1.1,
              skylighting-format-context >= 0.1.0.2
 
-source-repository-package
-  type: git
-  location: https://github.com/jgm/texmath
-  tag: 6f22675a2fec126cfe8aed87af19aae4e55e5eb1
