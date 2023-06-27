@@ -4,7 +4,7 @@ version:         3.1.4
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
-copyright:       (c) 2006-2022 John MacFarlane
+copyright:       (c) 2006-2023 John MacFarlane
 author:          John MacFarlane <jgm@berkeley.edu>
 maintainer:      John MacFarlane <jgm@berkeley.edu>
 bug-reports:     https://github.com/jgm/pandoc/issues
@@ -475,7 +475,7 @@ library
                  bytestring            >= 0.9      && < 0.12,
                  case-insensitive      >= 1.2      && < 1.3,
                  citeproc              >= 0.8.1    && < 0.9,
-                 commonmark            >= 0.2.2    && < 0.3,
+                 commonmark            >= 0.2.3    && < 0.3,
                  commonmark-extensions >= 0.2.3.4  && < 0.3,
                  commonmark-pandoc     >= 0.2.1.3  && < 0.3,
                  containers            >= 0.6.0.1  && < 0.7,
