@@ -12,8 +12,6 @@ extra-deps:
 - hslua-cli-1.4.1
 - hslua-module-zip-1.1.0
 - hslua-repl-0.1.1
-- skylighting-0.13.3
-- skylighting-core-0.13.3
 - tls-1.7.0
 - crypton-connection-0.3.1
 - crypton-x509-1.7.6
@@ -24,11 +22,11 @@ extra-deps:
 - commonmark-0.2.3
 - typst-symbols-0.1.2
 - toml-parser-1.1.1.0
-- git: https://github.com/jgm/typst-hs
-  commit: 74cc25961afd03f9d6aeb8b8ef8e4631c94ca0e9
-- git: https://github.com/jgm/pandoc-types
-  commit: 2b68c905e75c65e66eaa4635e4c1bd6aabd6302f
-
+- pandoc-types-1.23.0.1
+- skylighting-core-0.13.4
+- skylighting-0.13.4
+- typst-0.3.0.0
+- xml-conduit-1.9.1.3
 
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
