@@ -23,7 +23,7 @@ import Data.ByteString.Base64 (encodeBase64)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
-import Data.Char (isAlphaNum, isAscii, isDigit)
+import Data.Char (isAlphaNum, isAscii)
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import Network.URI (escapeURIString)
 import System.FilePath (takeDirectory, takeExtension, (</>))
@@ -69,7 +69,8 @@ isSourceAttribute tagname (x,_) =
 data ConvertState =
   ConvertState
   { isHtml5 :: Bool
-  , svgMap  :: M.Map T.Text T.Text -- map from hash to id
+  , svgMap  :: M.Map T.Text (T.Text, [Attribute T.Text])
+    -- map from hash to (id, svg attributes)
   } deriving (Show)
 
 convertTags :: PandocMonad m =>
@@ -157,10 +158,8 @@ convertTags (t@(TagOpen tagname as):ts)
                            _ -> rest
              svgmap <- gets svgMap
              case M.lookup hash svgmap of
-               Just svgid -> do
-                 let attrs' = if ("id", svgid) `elem` attrs
-                                 then [(k,v) | (k,v) <- attrs, k /= "id"]
-                                 else attrs
+               Just (svgid, svgattrs) -> do
+                 let attrs' = combineSvgAttrs svgattrs attrs
                  return $ TagOpen "svg" attrs' :
                           TagOpen "use" [("href", "#" <> svgid)] :
                           TagClose "use" :
@@ -170,14 +169,12 @@ convertTags (t@(TagOpen tagname as):ts)
                   case dropWhile (not . isTagOpenName "svg") tags of
                     TagOpen "svg" svgattrs : tags' -> do
                       let attrs' = combineSvgAttrs svgattrs attrs
-                      let (svgId, attrs'') = -- keep original image id if present
-                            case lookup "id" as of
-                              Just id' -> (id', attrs')
-                              Nothing  ->
-                                let newid = "svg_" <> hash
-                                 in (newid, ("id", newid) :
-                                             filter (\(k,_) -> k /= "id") attrs')
-                      modify $ \st -> st{ svgMap = M.insert hash svgId (svgMap st) }
+                      let svgid = case lookup "id" attrs' of
+                                     Just id' -> id'
+                                     Nothing -> "svg_" <> hash
+                      let attrs'' = [(k,v) | (k,v) <- attrs', k /= "id"]
+                      modify $ \st ->
+                        st{ svgMap = M.insert hash (svgid, attrs'') (svgMap st) }
                       return $ TagOpen "svg" attrs'' : tags' ++ rest'
                     _ -> return $ TagOpen tagname attrs : rest
   where processAttribute (x,y) =
@@ -213,27 +210,21 @@ combineSvgAttrs svgAttrs imgAttrs =
   case (mbViewBox, mbHeight, mbWidth) of
     (Nothing, Just h, Just w) -> -- calculate viewBox
       combinedAttrs ++ [("viewBox", T.unwords ["0", "0", tshow w, tshow h])]
-    (Just (_minx,_miny,width,height), Nothing, Nothing) ->
+    (Just (_minx,_miny,w,h), Nothing, Nothing) ->
         combinedAttrs ++
-        [ ("width", tshow (floor width :: Int)) |
+        [ ("width", dropPointZero (tshow w)) |
             isNothing (lookup "width" combinedAttrs) ] ++
-        [ ("height", tshow (floor height :: Int)) |
+        [ ("height", dropPointZero (tshow h)) |
             isNothing (lookup "height" combinedAttrs) ]
     _ -> combinedAttrs
  where
+  dropPointZero t = case T.stripSuffix ".0" t of
+                       Nothing -> t
+                       Just t' -> t'
   combinedAttrs = imgAttrs ++
-    [(k,v') | (k,v) <- svgAttrs
-            , v' <- fixAttr k v
+    [(k, v) | (k, v) <- svgAttrs
             , isNothing (lookup k imgAttrs)
             , k `notElem` ["xmlns", "xmlns:xlink", "version"]]
-  fixAttr k v =
-    if k == "width" || k == "height"
-       then if T.all isDigit v
-               then [v]
-               else case T.stripSuffix "px" v of
-                      Just v' | T.all isDigit v' -> [v']
-                      _ -> []
-       else [v]
   parseViewBox t =
     case map (safeRead . addZero) $ T.words t of
       [Just llx, Just lly, Just urx, Just ury] -> Just (llx, lly, urx, ury)
