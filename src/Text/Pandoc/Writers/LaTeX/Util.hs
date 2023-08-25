@@ -93,9 +93,13 @@ stringToLaTeX context zs = do
             _      -> cs <> xs
     in case x of
          '\\'| isUrl -> emitc '/' -- NB. / works as path sep even on Windows
+         '#' | isUrl -> emits "\\#" -- see #9014
+         '%' | isUrl -> emits "\\%" -- see #9014
          c | isUrl ->
              if c `elem` ['{', '}', '|', '^', '~', '[', ']', '`']
-                then emits (escapeURIString (const False) [c])
+                then do
+                  emitc '\\'  -- escape the % see #9014
+                  emits (escapeURIString (const False) [c])
                 else emitc c
          '{' -> emits "\\{"
          '}' -> emits "\\}"
