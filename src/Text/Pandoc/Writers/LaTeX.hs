@@ -339,14 +339,13 @@ blockToLaTeX (Div (identifier,classes,kvs) bs) = do
                then do
                  modify $ \st -> st{ stHasCslRefs = True }
                  inner <- blockListToLaTeX bs
-                 return $ (if "hanging-indent" `notElem` classes
-                               then "\\setlength{\\cslhangindent}{0em}"
-                               else mempty)
-                          $$ ("\\setlength{\\cslentryspacing}" <> braces
-                               (case lookup "entry-spacing" kvs of
-                                  Nothing -> "0em"
-                                  Just s  -> (literal s <> "\\baselineskip")))
-                          $$ "\\begin{CSLReferences}"
+                 return $ ("\\begin{CSLReferences}"
+                            <> braces
+                                (if "hanging-indent" `elem` classes
+                                    then "1"
+                                    else "0")
+                            <> braces
+                               (maybe "1" literal (lookup "entry-spacing" kvs)))
                           $$ inner
                           $+$ "\\end{CSLReferences}"
                else blockListToLaTeX bs

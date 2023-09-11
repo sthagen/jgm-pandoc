@@ -1,6 +1,6 @@
 cabal-version:   2.4
 name:            pandoc
-version:         3.1.7
+version:         3.1.8
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -514,7 +514,7 @@ library
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
                  temporary             >= 1.1      && < 1.4,
-                 texmath               >= 0.12.8.1 && < 0.13,
+                 texmath               >= 0.12.8.2 && < 0.13,
                  text                  >= 1.1.1.0  && < 2.2,
                  text-conversions      >= 0.3      && < 0.4,
                  time                  >= 1.5      && < 1.14,
@@ -761,7 +761,7 @@ test-suite test-pandoc
                   mtl               >= 2.2     && < 2.4,
                   pandoc-types      >= 1.23.1  && < 1.24,
                   process           >= 1.2.3   && < 1.7,
-                  tasty             >= 0.11    && < 1.5,
+                  tasty             >= 0.11    && < 1.6,
                   tasty-golden      >= 2.3     && < 2.4,
                   tasty-hunit       >= 0.9     && < 0.11,
                   tasty-quickcheck  >= 0.8     && < 0.11,
