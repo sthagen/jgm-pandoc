@@ -30,7 +30,7 @@ import Typst ( parseTypst, evaluateTypst )
 import Text.Pandoc.Error (PandocError(..))
 import Text.Pandoc.Shared (tshow, blocksToInlines)
 import Control.Monad.Except (throwError)
-import Control.Monad (MonadPlus (mplus), void, mzero)
+import Control.Monad (MonadPlus (mplus), void, mzero, guard)
 import qualified Data.Foldable as F
 import qualified Data.Map as M
 import Data.Maybe (catMaybes, fromMaybe)
@@ -170,6 +170,14 @@ blockHandlers = M.fromList
       lev <- getField "level" fields <|> pure 1
       B.headerWith (fromMaybe "" mbident,[],[]) lev
          <$> pWithContents pInlines body)
+  ,("quote", \_ fields -> do
+      getField "block" fields >>= guard
+      body <- getField "body" fields >>= pWithContents pBlocks
+      attribution <-
+        ((\x -> B.para ("\x2104\xa0" <> x)) <$>
+          (getField "attribution" fields >>= pWithContents pInlines))
+        <|> pure mempty
+      pure $ B.blockQuote $ body <> attribution)
   ,("list", \_ fields -> do
       children <- V.toList <$> getField "children" fields
       B.bulletList <$> mapM (pWithContents pBlocks) children)
@@ -392,18 +400,20 @@ inlineHandlers = M.fromList
   ,("footnote", \_ fields ->
       B.note <$> (getField "body" fields >>= pWithContents pBlocks))
   ,("cite", \_ fields -> do
-      keys <- V.toList <$> getField "keys" fields
-      let toCitation key =
+      key <- getField "key" fields
+      (form :: Text) <- getField "form" fields <|> pure "normal"
+      let citation =
             B.Citation
               { B.citationId = key,
                 B.citationPrefix = mempty,
                 B.citationSuffix = mempty,
-                B.citationMode = B.NormalCitation,
+                B.citationMode = case form of
+                                    "year" -> B.SuppressAuthor
+                                    _ -> B.NormalCitation,
                 B.citationNoteNum = 0,
                 B.citationHash = 0
               }
-      let citations = map toCitation keys
-      pure $ B.cite citations (B.text $ "[" <> T.intercalate "," keys <> "]"))
+      pure $ B.cite [citation] (B.text $ "[" <> key <> "]"))
   ,("lower", \_ fields -> do
       body <- getField "text" fields
       walk (modString T.toLower) <$> pWithContents pInlines body)
@@ -431,6 +441,10 @@ inlineHandlers = M.fromList
   ,("underline", \_ fields -> do
       body <- getField "body" fields
       B.underline <$> pWithContents pInlines body)
+  ,("quote", \_ fields -> do
+      (getField "block" fields <|> pure False) >>= guard . not
+      body <- getField "body" fields >>= pWithContents pInlines
+      pure $ B.doubleQuoted body)
   ,("link", \_ fields -> do
       dest <- getField "dest" fields
       src <- case dest of

@@ -19,19 +19,20 @@ extra-deps:
 - crypton-x509-system-1.6.7
 - crypton-x509-validation-1.6.12
 - http-client-tls-0.3.6.3
-- typst-symbols-0.1.4
+- typst-symbols-0.1.5
 - toml-parser-1.3.0.0
 - skylighting-core-0.14.1
 - skylighting-0.14.1
 - skylighting-format-blaze-html-0.1.1.1
-- texmath-0.12.8.4
 - tls-1.9.0
 - commonmark-0.2.4
 - git: https://github.com/jgm/typst-hs
-  commit: 2a92d6b61b077ad6eaff857f45aa50004658082e
+  commit: eb825682d11ae9de911461f44122e1dbf944da52
 - git: https://github.com/jgm/commonmark-hs
   subdirs: [commonmark-extensions, commonmark-pandoc]
   commit: 0c4807c92b94b1b5ac0f0845daac276ab9d3495f
+- git: https://github.com/jgm/texmath
+  commit: 1e7d46f62f6107e86ae34baddc1e5a8a5cd92fc2
 
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
