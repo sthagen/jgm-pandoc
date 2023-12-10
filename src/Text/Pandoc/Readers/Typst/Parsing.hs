@@ -5,6 +5,8 @@
 
 module Text.Pandoc.Readers.Typst.Parsing
   ( P,
+    PState(..),
+    defaultPState,
     pTok,
     pWithContents,
     ignored,
@@ -26,7 +28,16 @@ import Typst.Types
 import Text.Pandoc.Class.PandocMonad ( PandocMonad, report )
 import Text.Pandoc.Logging (LogMessage(..))
 
-type P m a = ParsecT [Content] [Text] m a
+newtype PState = PState
+        { sLabels :: [Text]}
+        deriving (Show)
+
+defaultPState :: PState
+defaultPState =
+  PState
+  { sLabels = [] }
+
+type P m a = ParsecT [Content] PState m a
 -- state tracks a list of labels in the document
 
 pTok :: PandocMonad m => (Content -> Bool) -> P m Content
