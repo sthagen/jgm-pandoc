@@ -12,7 +12,7 @@ stability:       alpha
 homepage:        https://pandoc.org
 category:        Text
 tested-with:     GHC == 8.10.7, GHC == 9.0.2,
-                 GHC == 9.2.5, GHC == 9.4.4, GHC == 9.6.1
+                 GHC == 9.2.5, GHC == 9.4.4, GHC == 9.6.3
 synopsis:        Conversion between markup formats
 description:     Pandoc is a Haskell library for converting from one markup
                  format to another.  The formats it can handle include
@@ -43,9 +43,12 @@ description:     Pandoc is a Haskell library for converting from one markup
                  Pandoc can convert mathematical content in documents
                  between TeX, MathML, Word equations, roff eqn, typst,
                  and plain text. It includes a powerful system for automatic
-                 citations and bibliographies, and it can be customized extensively
-                 using templates, filters, and custom readers and writers
-                 written in Lua.
+                 citations and bibliographies, and it can be customized
+                 extensively using templates, filters, and custom readers
+                 and writers written in Lua.
+                 .
+                 For the pandoc command-line program, see the
+                 @pandoc-cli@ package.
 data-files:
                  -- templates
                  data/templates/styles.html
@@ -196,11 +199,6 @@ extra-source-files:
                  -- documentation
                  INSTALL.md, AUTHORS.md, README.md,
                  CONTRIBUTING.md, BUGS, changelog.md,
-                 man/pandoc.1
-                 -- files needed to build man page
-                 man/manfilter.lua
-                 man/pandoc.1.before
-                 man/pandoc.1.after
                  -- tests
                  test/bodybg.gif
                  test/*.native

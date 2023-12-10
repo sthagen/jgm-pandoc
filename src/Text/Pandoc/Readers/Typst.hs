@@ -68,10 +68,13 @@ readTypst _opts inp = do
                   currentUTCTime = getCurrentTime,
                   lookupEnvVar = fmap (fmap T.unpack) . lookupEnv . T.pack,
                   checkExistence = fileExists }
-      evaluateTypst ops inputName parsed >>=
-                  either (throwError . PandocParseError . T.pack . show) pure >>=
-                  runParserT pPandoc () inputName . F.toList >>=
-                  either (throwError . PandocParseError . T.pack . show) pure
+      res <- evaluateTypst ops inputName parsed
+      case res of
+        Left e -> throwError $ PandocParseError $ tshow e
+        Right cs -> do
+          let labs = findLabels cs
+          runParserT pPandoc labs inputName (F.toList cs) >>=
+            either (throwError . PandocParseError . T.pack . show) pure
 
 pBlockElt :: PandocMonad m => P m B.Blocks
 pBlockElt = try $ do
@@ -98,13 +101,29 @@ pInline = try $ do
       | "math." `T.isPrefixOf` tname
       , tname /= "math.equation" ->
           B.math . writeTeX <$> pMathMany (Seq.singleton res)
-    Elt name@(Identifier tname) pos fields ->
-      case M.lookup name inlineHandlers of
-        Nothing -> do
-          ignored ("unknown inline element " <> tname <>
-                   " at " <> tshow pos)
-          pure mempty
-        Just handler -> handler Nothing fields
+    Elt name@(Identifier tname) pos fields -> do
+      labs <- getState
+      labelTarget <- (do VLabel t <- getField "target" fields
+                         True <$ guard (t `elem` labs))
+                  <|> pure False
+      if tname == "ref" && not labelTarget
+         then do
+           -- @foo is a citation unless it links to a lab in the doc:
+           let targetToKey (Identifier "target") = Identifier "key"
+               targetToKey k = k
+           case M.lookup "cite" inlineHandlers of
+             Nothing -> do
+               ignored ("unknown inline element " <> tname <>
+                        " at " <> tshow pos)
+               pure mempty
+             Just handler -> handler Nothing (M.mapKeys targetToKey fields)
+         else do
+          case M.lookup name inlineHandlers of
+            Nothing -> do
+              ignored ("unknown inline element " <> tname <>
+                       " at " <> tshow pos)
+              pure mempty
+            Just handler -> handler Nothing fields
 
 pPandoc :: PandocMonad m => P m B.Pandoc
 pPandoc = B.doc <$> pBlocks
@@ -400,7 +419,7 @@ inlineHandlers = M.fromList
   ,("footnote", \_ fields ->
       B.note <$> (getField "body" fields >>= pWithContents pBlocks))
   ,("cite", \_ fields -> do
-      key <- getField "key" fields
+      VLabel key <- getField "key" fields
       (form :: Text) <- getField "form" fields <|> pure "normal"
       let citation =
             B.Citation
@@ -510,7 +529,8 @@ inlineHandlers = M.fromList
 
 pPara :: PandocMonad m => P m B.Blocks
 pPara =
-  B.para . B.trimInlines . mconcat <$> (many1 pInline <* optional pParBreak)
+  B.para . B.trimInlines . collapseAdjacentCites . mconcat
+    <$> (many1 pInline <* optional pParBreak)
 
 pParBreak :: PandocMonad m => P m ()
 pParBreak =
@@ -531,8 +551,27 @@ pWithContents pa cs = try $ do
   pure res
 
 pInlines :: PandocMonad m => P m B.Inlines
-pInlines = mconcat <$> many pInline
+pInlines =
+  collapseAdjacentCites . mconcat <$> many pInline
+
+collapseAdjacentCites :: B.Inlines -> B.Inlines
+collapseAdjacentCites = B.fromList . foldr go [] . B.toList
+ where
+   go (Cite cs1 ils1) (Cite cs2 ils2 : xs) =
+     Cite (cs1 ++ cs2) (ils1 <> ils2) : xs
+   go (Cite cs1 ils1) (Space : Cite cs2 ils2 : xs) =
+     Cite (cs1 ++ cs2) (ils1 <> ils2) : xs
+   go x xs = x:xs
 
 modString :: (Text -> Text) -> B.Inline -> B.Inline
 modString f (B.Str t) = B.Str (f t)
 modString _ x = x
+
+findLabels :: Seq.Seq Content -> [Text]
+findLabels = foldr go []
+ where
+   go (Txt{}) = id
+   go (Lab t) = (t :)
+   go (Elt{ eltFields = fs }) = \ts -> foldr go' ts fs
+   go' (VContent cs) = (findLabels cs ++)
+   go' _ = id
