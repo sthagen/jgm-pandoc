@@ -52,7 +52,6 @@ Date
     </w:p>
     <w:p>
       <w:pPr>
-        <w:pStyle w:val="Compact" />
         <w:pStyle w:val="Abstract" />
       </w:pPr>
       <w:r>
@@ -266,14 +265,13 @@ Table caption.
     <w:tbl>
       <w:tblPr>
         <w:tblStyle w:val="Table" />
-        <w:tblW w:type="pct" w:w="0.0" />
         <w:tblLook w:firstRow="1" />
         <w:tblCaption w:val="Table caption." />
       </w:tblPr>
       <w:tblGrid />
       <w:tr>
         <w:trPr>
-          <w:cnfStyle w:firstRow="1" />
+          <w:cnfStyle w:firstRow="1" w:val="100000000000" />
         </w:trPr>
         <w:tc>
           <w:tcPr>

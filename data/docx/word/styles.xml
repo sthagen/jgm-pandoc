@@ -24,10 +24,10 @@
     <w:name w:val="Body Text" />
     <w:basedOn w:val="Normal" />
     <w:link w:val="BodyTextChar" />
+    <w:qFormat />
     <w:pPr>
       <w:spacing w:before="180" w:after="180" />
     </w:pPr>
-    <w:qFormat />
   </w:style>
   <w:style w:type="paragraph" w:customStyle="1" w:styleId="FirstParagraph">
     <w:name w:val="First Paragraph" />
@@ -107,14 +107,14 @@
     <w:pPr>
       <w:keepNext />
       <w:keepLines />
-      <w:jc w:val="center" />
       <w:spacing w:before="300" w:after="0" />
+      <w:jc w:val="center" />
     </w:pPr>
     <w:rPr>
+      <w:b />
+      <w:color w:val="345A8A" />
       <w:sz w:val="20" />
       <w:szCs w:val="20" />
-      <w:b />
-      <w:color w:val="345A8A" />>
     </w:rPr>
   </w:style>
   <w:style w:type="paragraph" w:customStyle="1" w:styleId="Abstract">
@@ -220,8 +220,8 @@
     </w:pPr>
     <w:rPr>
       <w:rFonts w:asciiTheme="majorHAnsi" w:eastAsiaTheme="majorEastAsia" w:hAnsiTheme="majorHAnsi" w:cstheme="majorBidi" />
-      <w:i />
       <w:bCs />
+      <w:i />
       <w:color w:val="4F81BD" w:themeColor="accent1" />
       <w:sz w:val="24" />
       <w:szCs w:val="24" />
@@ -389,10 +389,10 @@
         <w:jc w:val="left"/>
       </w:trPr>
       <w:tcPr>
-        <w:vAlign w:val="bottom"/>
         <w:tcBorders>
           <w:bottom w:val="single"/>
         </w:tcBorders>
+        <w:vAlign w:val="bottom"/>
       </w:tcPr>
     </w:tblStylePr>
   </w:style>
