@@ -590,7 +590,6 @@ writeDocx opts doc = do
                      , "updateFields"
                      , "hdrShapeDefaults"
                      , "footnotePr"
-                     , "endnotePr"
                      , "compat"
                      , "docVars"
                      , "rsids"
@@ -679,14 +678,14 @@ styleToOpenXml sm style =
                              [ mknode "w:name" [("w:val", tshow toktype)] ()
                              , mknode "w:basedOn" [("w:val","VerbatimChar")] ()
                              , mknode "w:rPr" [] $
-                               [ mknode "w:color" [("w:val", tokCol toktype)] ()
-                                 | tokCol toktype /= "auto" ] ++
-                               [ mknode "w:shd" [("w:val","clear")
-                                                ,("w:fill",tokBg toktype)] ()
-                                 | tokBg toktype /= "auto" ] ++
                                [ mknode "w:b" [] () | tokFeature tokenBold toktype ] ++
                                [ mknode "w:i" [] () | tokFeature tokenItalic toktype ] ++
-                               [ mknode "w:u" [] () | tokFeature tokenUnderline toktype ]
+                               [ mknode "w:color" [("w:val", tokCol toktype)] ()
+                                 | tokCol toktype /= "auto" ] ++
+                               [ mknode "w:u" [] () | tokFeature tokenUnderline toktype ] ++
+                               [ mknode "w:shd" [("w:val","clear")
+                                                ,("w:fill",tokBg toktype)] ()
+                                 | tokBg toktype /= "auto" ]
                              ]
         tokStyles = tokenStyles style
         tokFeature f toktype = maybe False f $ M.lookup toktype tokStyles
@@ -753,7 +752,7 @@ mkNum marker numid =
 mkAbstractNum :: ListMarker -> Element
 mkAbstractNum marker =
   mknode "w:abstractNum" [("w:abstractNumId",listMarkerToId marker)]
-    $ mknode "w:nsid" [("w:val", "A" <> listMarkerToId marker)] ()
+    $ mknode "w:nsid" [("w:val", T.justifyRight 8 '0' ("A" <> listMarkerToId marker))] ()
     : mknode "w:multiLevelType" [("w:val","multilevel")] ()
     : map (mkLvl marker)
       [0..maxListLevel]
@@ -885,8 +884,8 @@ writeOpenXML opts (Pandoc meta blocks) = do
               , mknode "w:r" []
                 [ mknode "w:rPr" []
                   [ mknode "w:rStyle" [("w:val", "CommentReference")] ()
-                  , mknode "w:annotationRef" [] ()
                   ]
+                  , mknode "w:annotationRef" [] ()
                 ]
               ] ++ annotation
             ]
@@ -1138,18 +1137,17 @@ toFigureTable opts blks = do
              map blockToCell blks
   let tbl = mknode "w:tbl" []
         ( mknode "w:tblPr" []
-          ( mknode "w:tblStyle" [("w:val","FigureTable")] () :
-            mknode "w:tblW" [ ("w:type", "auto"), ("w:w", "0") ] () :
+          [ mknode "w:tblStyle" [("w:val","FigureTable")] (),
+            mknode "w:tblW" [ ("w:type", "auto"), ("w:w", "0") ] (),
+            mknode "w:jc" [("w:val","center")] (),
             mknode "w:tblLook" [ ("w:firstRow", "0")
                                , ("w:lastRow", "0")
                                , ("w:firstColumn", "0")
                                , ("w:lastColumn", "0")
-                               ] () :
-            mknode "w:jc" [("w:val","center")] () :
-            []
-          )
+                               ] ()
+          ]
           : mknode "w:tblGrid" [] gridCols
-          : (maybeToList tblBody)
+          : maybeToList tblBody
         )
   modify $ \s -> s { stInTable = False }
   return $ Elem tbl
@@ -1246,7 +1244,7 @@ getParaProps displayMathPara = do
   let listPr = [mknode "w:numPr" []
                 [ mknode "w:ilvl" [("w:val",tshow listLevel)] ()
                 , mknode "w:numId" [("w:val",tshow numid')] () ] | listLevel >= 0 && not displayMathPara]
-  return $ case listPr ++ squashProps props of
+  return $ case squashProps (EnvProps Nothing listPr <> props) of
                 [] -> []
                 ps -> [mknode "w:pPr" [] ps]
 
@@ -1365,12 +1363,12 @@ inlineToOpenXML' opts (Span (ident,classes,kvs) ils) = do
               langmod $ inlinesToOpenXML opts ils
   wrapBookmark ident contents
 inlineToOpenXML' opts (Strong lst) =
-  withTextProp (mknode "w:b" [] ()) $
   withTextProp (mknode "w:bCs" [] ()) $ -- needed for LTR, #6911
+  withTextProp (mknode "w:b" [] ()) $
   inlinesToOpenXML opts lst
 inlineToOpenXML' opts (Emph lst) =
-  withTextProp (mknode "w:i" [] ()) $
   withTextProp (mknode "w:iCs" [] ()) $  -- needed for LTR, #6911
+  withTextProp (mknode "w:i" [] ()) $
   inlinesToOpenXML opts lst
 inlineToOpenXML' opts (Underline lst) =
   withTextProp (mknode "w:u" [("w:val","single")] ()) $
