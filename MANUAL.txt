@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: December 15, 2023
+date: January 5, 2024
 ---
 
 # Synopsis
@@ -5115,7 +5115,7 @@ into
 whereas `Markdown.pl` will preserve it as is.
 
 There is one exception to this rule:  text between `<script>`,
-`<style>`, and `<textarea>` tags is not interpreted as Markdown.
+`<style>`, `<pre>`, and `<textarea>` tags is not interpreted as Markdown.
 
 This departure from original Markdown should make it easier to mix
 Markdown with HTML block elements.  For example, one can surround
