@@ -413,9 +413,8 @@ metadataFromMeta opts meta = EPUBMetadata{
         accessibilityFeatures =
                       case lookupMeta "accessibilityFeatures" meta of
                          Just (MetaList xs) -> map metaValueToString xs
-                         _ -> ["alternativeText","ARIA","MathML",
-                               "readingOrder", "structuralNavigation",
-                               "tableOfContents"]
+                         _ -> ["alternativeText", "readingOrder",
+                               "structuralNavigation", "tableOfContents"]
         accessibilityHazards =
                        case lookupMeta "accessibilityHazards" meta of
                          Just (MetaList xs) -> map metaValueToString xs
@@ -949,6 +948,7 @@ createNavEntry opts meta metadata
   let navBlocks = [RawBlock (Format "html")
                   $ showElement $ -- prettyprinting introduces bad spaces
                    unode navtag ! ([("epub:type","toc") | version == EPUB3] ++
+                                   [("role","doc-toc") | version == EPUB3] ++
                                    [("id","toc")]) $
                     [ unode "h1" ! [("id","toc-title")] $ tocTitle
                     , unode "ol" ! [("class","toc")] $ tocBlocks ]]
