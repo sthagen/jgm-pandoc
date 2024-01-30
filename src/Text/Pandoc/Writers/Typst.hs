@@ -22,6 +22,7 @@ import Text.Pandoc.ImageSize (imageSize, sizeInPoints)
 import Text.Pandoc.Options ( WriterOptions(..), WrapOption(..), isEnabled )
 import Data.Text (Text)
 import Data.List (intercalate)
+import Network.URI (unEscapeString)
 import qualified Data.Text as T
 import Control.Monad.State ( StateT, evalStateT, gets, modify )
 import Text.Pandoc.Writers.Shared ( metaToContext, defField, resetField,
@@ -34,6 +35,7 @@ import Text.DocTemplates (renderTemplate)
 import Control.Monad.Except (catchError)
 import Text.Pandoc.Extensions (Extension(..))
 import Text.Collate.Lang (Lang(..), parseLang)
+import Data.Char (isAlphaNum)
 
 -- | Convert Pandoc to Typst.
 writeTypst :: PandocMonad m => WriterOptions -> Pandoc -> m Text
@@ -96,7 +98,7 @@ blockToTypst block =
     Para inlines -> ($$ blankline) <$> inlinesToTypst inlines
     Header level (ident,cls,_) inlines -> do
       contents <- inlinesToTypst inlines
-      let lab = toLabel ident
+      let lab = toLabel FreestandingLabel ident
       return $
         if "unlisted" `elem` cls
            then literal "#heading(outlined: false)" <> brackets contents <>
@@ -167,7 +169,7 @@ blockToTypst block =
                   else do
                     captcontents <- inlinesToTypst caption
                     return $ ", caption: " <> brackets captcontents
-      let lab = toLabel ident
+      let lab = toLabel FreestandingLabel ident
       let formatalign AlignLeft = "left,"
           formatalign AlignRight = "right,"
           formatalign AlignCenter = "center,"
@@ -190,14 +192,14 @@ blockToTypst block =
     Figure (ident,_,_) (Caption _mbshort capt) blocks -> do
       caption <- blocksToTypst capt
       contents <- blocksToTypst blocks
-      let lab = toLabel ident
+      let lab = toLabel FreestandingLabel ident
       return $ "#figure(" <> nest 2 (brackets contents <> "," <> cr <>
                                      ("caption: [" $$ nest 2 caption $$ "]"))
                           $$ ")" $$ lab $$ blankline
     Div (ident,_,_) (Header lev ("",cls,kvs) ils:rest) ->
       blocksToTypst (Header lev (ident,cls,kvs) ils:rest)
     Div (ident,_,_) blocks -> do
-      let lab = toLabel ident
+      let lab = toLabel FreestandingLabel ident
       contents <- blocksToTypst blocks
       return $ "#block[" $$ contents $$ ("]" <+> lab)
 
@@ -223,7 +225,7 @@ inlineToTypst inline =
   case inline of
     Str txt -> do
       context <- gets stEscapeContext
-      return $ literal $ escapeTypst context txt
+      return $ escapeTypst context txt
     Space -> return space
     SoftBreak -> do
       wrapText <- gets $ writerWrapText . stOptions
@@ -259,7 +261,7 @@ inlineToTypst inline =
     Subscript inlines -> textstyle "#sub" inlines
     SmallCaps inlines -> textstyle "#smallcaps" inlines
     Span (ident,_,_) inlines -> do
-      let lab = toLabel ident
+      let lab = toLabel FreestandingLabel ident
       (lab $$) <$> inlinesToTypst inlines
     Quoted quoteType inlines -> do
       let q = case quoteType of
@@ -273,8 +275,7 @@ inlineToTypst inline =
             suppl <- case citationSuffix cite of
                        [] -> pure mempty
                        suff -> brackets <$> inlinesToTypst suff
-            pure $ literal ("@" <> citationId cite) <> suppl
-                      <> endCode
+            pure $ toLabel CiteLabel (citationId cite) <> suppl <> endCode
       if isEnabled Ext_citations opts
          -- Note: this loses prefix
          then mconcat <$> mapM toCite citations
@@ -282,7 +283,7 @@ inlineToTypst inline =
     Link _attrs inlines (src,_tit) -> do
       contents <- inlinesToTypst inlines
       let dest = case T.uncons src of
-                   Just ('#', ident) -> "<" <> literal ident <> ">"
+                   Just ('#', ident) -> toLabel ArgumentLabel ident
                    _ -> doubleQuoted src
       return $ "#link" <> parens dest <>
                 (if inlines == [Str src]
@@ -322,12 +323,17 @@ textstyle :: PandocMonad m => Doc Text -> [Inline] -> TW m (Doc Text)
 textstyle s inlines =
   (<> endCode) . (s <>) . brackets <$> inlinesToTypst inlines
 
-escapeTypst :: EscapeContext -> Text -> Text
+escapeTypst :: EscapeContext -> Text -> Doc Text
 escapeTypst context t =
-  T.replace "//" "\\/\\/" $
-  if T.any needsEscape t
-     then T.concatMap escapeChar t
-     else t
+  (case T.uncons t of
+    Just (c, _)
+      | needsEscapeAtLineStart c
+        -> afterBreak "\\"
+    _ -> mempty) <>
+  (literal (T.replace "//" "\\/\\/"
+    (if T.any needsEscape t
+        then T.concatMap escapeChar t
+        else t)))
   where
     escapeChar c
       | c == '\160' = "~"
@@ -336,7 +342,6 @@ escapeTypst context t =
     needsEscape '\160' = True
     needsEscape '[' = True
     needsEscape ']' = True
-    needsEscape '(' = True -- see #9137
     needsEscape '#' = True
     needsEscape '<' = True
     needsEscape '>' = True
@@ -346,18 +351,37 @@ escapeTypst context t =
     needsEscape '\'' = True
     needsEscape '"' = True
     needsEscape '`' = True
-    needsEscape '=' = True
     needsEscape '_' = True
     needsEscape '*' = True
     needsEscape '~' = True
     needsEscape ':' = context == TermContext
     needsEscape _ = False
+    needsEscapeAtLineStart '/' = True
+    needsEscapeAtLineStart '+' = True
+    needsEscapeAtLineStart '-' = True
+    needsEscapeAtLineStart '=' = True
+    needsEscapeAtLineStart _ = False
 
-toLabel :: Text -> Doc Text
-toLabel ident =
-  if T.null ident
-     then mempty
-     else "<" <> literal ident <> ">"
+data LabelType =
+  FreestandingLabel | ArgumentLabel | CiteLabel
+  deriving (Show, Eq)
+
+toLabel :: LabelType -> Text -> Doc Text
+toLabel labelType ident
+  | T.null ident = mempty
+  | T.all isIdentChar ident'
+    = case labelType of
+        CiteLabel -> "@" <> literal ident'
+        _ -> "<" <> literal ident' <> ">"
+  | otherwise
+     = case labelType of
+          CiteLabel -> "#cite" <>
+             parens ("label" <> parens (doubleQuoted ident'))
+          FreestandingLabel -> "#label" <> parens (doubleQuoted ident')
+          ArgumentLabel -> "label" <> parens (doubleQuoted ident')
+ where
+   ident' = T.pack $ unEscapeString $ T.unpack ident
+   isIdentChar c = isAlphaNum c || c == '_' || c == '-' || c == '.' || c == ':'
 
 doubleQuoted :: Text -> Doc Text
 doubleQuoted = doubleQuotes . literal . escape
