@@ -160,9 +160,7 @@ convertTags (t@(TagOpen tagname as):ts)
              case M.lookup hash svgmap of
                Just (svgid, svgattrs) -> do
                  let attrs' = [(k,v) | (k,v) <- combineSvgAttrs svgattrs attrs
-                                     , k /= "id"
-                                     , k /= "width"
-                                     , k /= "height"]
+                                     , k /= "id"]
                  return $ TagOpen "svg" attrs' :
                           TagOpen "use" [("href", "#" <> svgid),
                                          ("width", "100%"),
@@ -187,6 +185,10 @@ convertTags (t@(TagOpen tagname as):ts)
                             case T.uncons x of
                               Just ('#', x') -> (k, "#" <> svgid <> "_" <> x')
                               _ -> (k, x)
+                          addIdPrefix ("clip-path", x) = ("clip-path",
+                            case T.stripPrefix "url(#" x of
+                              Just x' -> "url(#" <> svgid <> "_" <> x'
+                              Nothing -> x)
                           addIdPrefix kv = kv
                       let ensureUniqueId (TagOpen tname ats) =
                             TagOpen tname (map addIdPrefix ats)
