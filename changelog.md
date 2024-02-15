@@ -10,6 +10,12 @@
     + New module Text.Pandoc.Writers.Djot [API change]. The function
       `writeDjot` is also exported by Text.Pandoc.Writers.
 
+  * `--number-sections` now uses the first digit for the number of
+    the top-level section, no matter what its level. So if the top-level
+    section is level-2, numbers will be `1`, `2`, etc. rather than
+    `0.1`, `0.2`, as in the past (#5071). For some backwards compatibility,
+    we revert to the old behavior when the `--number-offset` option is used.
+
   * DocBook reader:
 
     + Better handling of `<procedure>` and `<substeps>` (#9341):
@@ -27,11 +33,11 @@
 
   * BibTeX reader:
 
-    + Support "pagetotal" in converting BibLaTeX.
+    + Support `pagetotal` in converting BibLaTeX.
 
   * Markdown reader:
 
-    + Fix wikilinks extension to allow newlines in titles (#9454).
+    + Fix wikilinks extensions to allow newlines in titles (#9454).
 
   * EPUB reader:
 
@@ -64,8 +70,8 @@
       Strip initial comma from suffix, since typst will add an extra one.
     + Unescape URI escapes in image paths (#9389).
     + Handle labels and citaiton ids with spaces and other special
-      characters (#9387). In these cases, we produce an
-      explicit `label()` rather than using `<>` or `@`.
+      characters (#9387). In these cases, we produce an explicit `label()`
+      rather than using `<>` or `@`.
     + Avoid producing illegal labels (#9387).
     + Avoid unnecessary escapes (#9386).
 
@@ -88,15 +94,13 @@
     + Add ARA roles for accessibility (#9378, Iacobus1983).
       Footnote references are given role "doc-noteref", footnote text
       gets "doc-footnote", and nav gets "doc-toc".
-    + Ensure that an alt attribute is always added (#9354).
-      This seems to be required by iBooks; even an empty alt attribute
-      will satisfy it.
+    + Ensure that an alt attribute is always added (#9354). This seems to
+      be required by iBooks; even an empty alt attribute will satisfy it.
     + Add `xml:lang` to package element (#9372).
     + Add accessibility metadata to EPUB metadata (#9372, #9400,
       Iacobus1983 and John MacFarlane). Reasonable default values are
-      used to ensure that pandoc's EPUBs conform to the EU
-      Accessibilty Act requirements, but values can be overridden
-      using metadata.
+      used to ensure that pandoc's EPUBs conform to the EU Accessibilty Act
+      requirements, but values can be overridden using metadata.
 
   * Docx writer:
 
@@ -111,9 +115,8 @@
     + Fix bug with long URLs (#9458). URLs with more than 68 characters didn't
       display properly because of wrapping.
     + Support (limited) syntax highlighting in code blocks (#9446).
-      Currently only boldface and italics are supported. The
-      `monochrome` style might be of use for those generating man
-      pages.
+      Currently only boldface and italics are supported. The `monochrome`
+      style might be of use for those generating man pages.
 
   * Org writer:
 
@@ -173,16 +176,9 @@
         they can do that. In general, the heading levels specified
         in the source document are preserved; `makeSections` only
         puts them into a hierarchical structure.
-      - Section numbers are now assigned so that the top level
-        gets `1`, no matter what heading level is used (#5071). So, even
-        if the top heading level is 2, numbers will be `1`, `2`, etc.
-        rather than `0.1`, `0.2`, as in the past.
-      - We revert to the old behavior when the `--number-offset` option
-        is used. So, for example, if a document begins with a level-3
-        heading, and `--number-offset=1,2` is used, the top-level section
-        numbers will be `1.2.1`, `1.2.2`, etc. This is mainly for
-        backwards-compatibility.
-    + `makeSections`: more elegant code for section number calculation.
+      - Section numbers are now assigned differently, as described above
+        under `--number-sections` changes (#5071).
+    + Improve `makeSections` code for section number calculation.
 
   * Text.Pandoc.Chunks:
 
@@ -200,20 +196,18 @@
   * LaTeX template: support font fallback (lawcho).  This support is
     LuaLaTeX-specific.  See MANUAL.txt for documentation.
 
-  * Text.Pandoc.Readers: Add `readMan` to exports (George Stagg).
+  * Text.Pandoc.Readers: Add `readMan` to exports [API change] (George Stagg).
 
   * Text.Pandoc.PDF:
 
     + Reliably detect when TOC has changed (#9295). Sometimes the TOC
       changes but there are no warnings: this happens when no labels
-      are present. In this case we must rerun LaTeX. So we now take
-      the SHA1 hash of the TOC file and rerun LaTeX if it changes
-      between runs.
+      are present. In this case we must rerun LaTeX. So we now take the
+      SHA1 hash of the TOC file and rerun LaTeX if it changes between runs.
     + Increase maximum number of LaTeX runs to 4 (#9299). On some documents,
       4 runs are needed (e.g. when a LastPage reference is used).
-    + Avoid `readFileLazy`, on theory that lazy IO is
-      responsible for the improperly cleaned-up temp directories
-      on Windows (#9460).
+    + Avoid `readFileLazy`, which caused improperly cleaned-up
+      temp directories on Windows (#9460).
 
   * MANUAL.txt:
 
