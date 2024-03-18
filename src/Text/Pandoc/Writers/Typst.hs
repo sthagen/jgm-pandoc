@@ -17,8 +17,7 @@ module Text.Pandoc.Writers.Typst (
     writeTypst
   ) where
 import Text.Pandoc.Definition
-import Text.Pandoc.Class ( PandocMonad, fetchItem )
-import Text.Pandoc.ImageSize (imageSize, sizeInPoints)
+import Text.Pandoc.Class ( PandocMonad)
 import Text.Pandoc.Options ( WriterOptions(..), WrapOption(..), isEnabled )
 import Data.Text (Text)
 import Data.List (intercalate)
@@ -32,7 +31,6 @@ import Text.Pandoc.Writers.Math (convertMath)
 import qualified Text.TeXMath as TM
 import Text.DocLayout
 import Text.DocTemplates (renderTemplate)
-import Control.Monad.Except (catchError)
 import Text.Pandoc.Extensions (Extension(..))
 import Text.Collate.Lang (Lang(..), parseLang)
 import Data.Char (isAlphaNum)
@@ -194,17 +192,17 @@ blockToTypst block =
         $$ blankline
     Figure (ident,_,_) (Caption _mbshort capt) blocks -> do
       caption <- blocksToTypst capt
-      contents <- blocksToTypst blocks
+      contents <- case blocks of
+                     -- don't need #box around block-level image
+                     [Para [Image (_,_,kvs) _ (src, _)]]
+                       -> pure $ mkImage False src kvs
+                     [Plain [Image (_,_,kvs) _ (src, _)]]
+                       -> pure $ mkImage False src kvs
+                     _ -> brackets <$> blocksToTypst blocks
       let lab = toLabel FreestandingLabel ident
-      let kind = case blocks of
-                   Table{}:_ -> "table"
-                   CodeBlock{}:_ -> "code"
-                   _ -> "auto"
-      return $ "#figure(" <> nest 2 ((brackets contents <> ",")
+      return $ "#figure(" <> nest 2 ((contents <> ",")
                                      $$
-                                     ("caption: [" $$ nest 2 caption $$ "],")
-                                     $$
-                                     "kind: " <> literal kind
+                                     ("caption: [" $$ nest 2 caption $$ "]")
                                     )
                           $$ ")" $$ lab $$ blankline
     Div (ident,_,_) (Header lev ("",cls,kvs) ils:rest) ->
@@ -306,36 +304,24 @@ inlineToTypst inline =
                     (if inlines == [Str src]
                           then mempty
                           else nowrap $ brackets contents) <> endCode
-    Image (_,_,kvs) _inlines (src,_tit) -> do
-      opts <- gets stOptions
-      let mbHeight = lookup "height" kvs
-      let mdWidth = lookup "width" kvs
-      let src' = T.pack $ unEscapeString $ T.unpack src -- #9389
-      let coreImage = "image" <> parens (doubleQuoted src')
-      -- see #9104; we need a box or the image is treated as block-level:
-      case (mdWidth, mbHeight) of
-        (Nothing, Nothing) -> do
-          realWidth <- catchError
-                  (do (bs, _mt) <- fetchItem src
-                      case imageSize opts bs of
-                        Right x -> pure $ Just $ T.pack $
-                                      show (fst (sizeInPoints x)) <> "pt"
-                        Left _ -> pure Nothing)
-                    (\_ -> pure Nothing)
-          case realWidth of
-            Just w -> return $ "#box" <>
-                        parens ("width: " <> literal w <> ", " <> coreImage)
-                        <> endCode
-            Nothing -> return $ "#" <> coreImage <> endCode
-        (Just w, _) -> return $ "#box" <>
-                        parens ("width: " <> literal w <> ", " <> coreImage)
-                        <> endCode
-        (_, Just h) -> return $ "#box" <>
-                        parens ("height: " <> literal h <> ", " <> coreImage)
-                        <> endCode
+    Image (_,_,kvs) _inlines (src,_tit) -> pure $ mkImage True src kvs
     Note blocks -> do
       contents <- blocksToTypst blocks
       return $ "#footnote" <> brackets (chomp contents) <> endCode
+
+-- see #9104; need box or image is treated as block-level
+mkImage :: Bool -> Text -> [(Text, Text)] -> Doc Text
+mkImage useBox src kvs
+  | useBox = "#box" <> parens coreImage
+  | otherwise = coreImage
+ where
+  src' = T.pack $ unEscapeString $ T.unpack src -- #9389
+  toDimAttr k =
+     case lookup k kvs of
+       Just v -> ", " <> literal k <> ": " <> literal v
+       Nothing -> mempty
+  dimAttrs = mconcat $ map toDimAttr ["height", "width"]
+  coreImage = "image" <> parens (doubleQuoted src' <> dimAttrs)
 
 textstyle :: PandocMonad m => Doc Text -> [Inline] -> TW m (Doc Text)
 textstyle s inlines =
