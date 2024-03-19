@@ -25,7 +25,8 @@ import Network.URI (unEscapeString)
 import qualified Data.Text as T
 import Control.Monad.State ( StateT, evalStateT, gets, modify )
 import Text.Pandoc.Writers.Shared ( metaToContext, defField, resetField,
-                                    toLegacyTable, lookupMetaString )
+                                    toLegacyTable, lookupMetaString,
+                                    isOrderedListMarker )
 import Text.Pandoc.Shared (isTightList, orderedListMarkers, tshow)
 import Text.Pandoc.Writers.Math (convertMath)
 import qualified Text.TeXMath as TM
@@ -97,13 +98,18 @@ blockToTypst block =
     Header level (ident,cls,_) inlines -> do
       contents <- inlinesToTypst inlines
       let lab = toLabel FreestandingLabel ident
+      let headingAttrs =
+            ["outlined: false" | "unlisted" `elem` cls] ++
+            ["numbering: none" | "unnumbered" `elem` cls]
       return $
-        if "unlisted" `elem` cls
-           then literal "#heading(outlined: false)" <> brackets contents <>
-                 cr <> lab
-           else nowrap
+        if null headingAttrs
+           then nowrap
                  (literal (T.replicate level "=") <> space <> contents) <>
                  cr <> lab
+           else literal "#heading" <>
+                  parens (literal (T.intercalate ", "
+                              ("level: " <> tshow level : headingAttrs))) <>
+                  brackets contents <> cr <> lab
     RawBlock fmt str ->
       case fmt of
         Format "typst" -> return $ literal str
@@ -227,9 +233,6 @@ listItemToTypst ind marker blocks = do
   return $ hang ind (marker <> space) contents
 
 inlinesToTypst :: PandocMonad m => [Inline] -> TW m (Doc Text)
-inlinesToTypst ils@(Str t : _) -- need to escape - in '[-]' #9478
-  | Just (c, _) <- T.uncons t
-  , needsEscapeAtLineStart c = ("\\" <>) . hcat <$> mapM inlineToTypst ils
 inlinesToTypst ils = hcat <$> mapM inlineToTypst ils
 
 inlineToTypst :: PandocMonad m => Inline -> TW m (Doc Text)
@@ -325,7 +328,15 @@ mkImage useBox src kvs
 
 textstyle :: PandocMonad m => Doc Text -> [Inline] -> TW m (Doc Text)
 textstyle s inlines =
-  (<> endCode) . (s <>) . brackets <$> inlinesToTypst inlines
+  (<> endCode) . (s <>) . brackets . addEscape <$> inlinesToTypst inlines
+ where
+   addEscape =
+     case inlines of
+       (Str t : _)
+         | isOrderedListMarker t -> ("\\" <>)
+         | Just (c, _) <- T.uncons t
+         , needsEscapeAtLineStart c -> ("\\" <>)
+       _ -> id
 
 escapeTypst :: EscapeContext -> Text -> Doc Text
 escapeTypst context t =
