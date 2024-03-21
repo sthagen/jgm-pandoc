@@ -30,7 +30,7 @@ import Typst ( parseTypst, evaluateTypst )
 import Text.Pandoc.Error (PandocError(..))
 import Text.Pandoc.Shared (tshow, blocksToInlines)
 import Control.Monad.Except (throwError)
-import Control.Monad (MonadPlus (mplus), void, mzero, guard)
+import Control.Monad (MonadPlus (mplus), void, guard, foldM)
 import qualified Data.Foldable as F
 import qualified Data.Map as M
 import Data.Maybe (catMaybes, fromMaybe)
@@ -39,7 +39,6 @@ import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Vector as V
 import qualified Text.Pandoc.Builder as B
 import Text.Pandoc.Walk
 import Text.Parsec
@@ -50,6 +49,7 @@ import Text.Pandoc.Readers.Typst.Parsing (pTok, ignored, chunks, getField, P,
                                           PState(..), defaultPState)
 import Typst.Methods (formatNumber, applyPureFunction)
 import Typst.Types
+import qualified Data.Vector as V
 
 -- import Debug.Trace
 
@@ -330,78 +330,8 @@ blockHandlers = M.fromList
         B.divWith ("", [], [("stack", repr (VDirection dir))]) $
           mconcat $
             map (B.divWith ("", [], [])) children)
-  ,("grid", \mbident fields -> do
-      children <- getField "children" fields >>= mapM (pWithContents pBlocks) . V.toList
-      (columns :: Val) <- getField "columns" fields
-      let toWidth (VFraction f) = Just (floor $ 1000 * f)
-          toWidth _ = Nothing
-      let normalizeWidths xs =
-            let givenwidths = catMaybes xs
-                (totgivenwidth :: Int) = sum givenwidths
-                avgwidth = totgivenwidth `div` length givenwidths
-                totwidth = avgwidth * length xs
-             in if null givenwidths
-                  then replicate (length xs) B.ColWidthDefault
-                  else
-                    map
-                      ( \case
-                          Just x -> B.ColWidth (fromIntegral x / fromIntegral totwidth)
-                          Nothing ->
-                            B.ColWidth (fromIntegral avgwidth / fromIntegral totwidth)
-                      )
-                      xs
-      widths <- case columns of
-        VInteger x -> pure $ replicate (fromIntegral x) B.ColWidthDefault
-        VArray x -> pure $ normalizeWidths $ map toWidth (V.toList x)
-        VNone -> pure [B.ColWidthDefault]
-        _ -> fail $ "Could not determine number of columns: " <> show columns
-      let numcols = length widths
-      align <- getField "align" fields
-      let toAlign (VAlignment (Just horiz) _) =
-            case horiz of
-              HorizStart -> B.AlignLeft
-              HorizLeft -> B.AlignLeft
-              HorizEnd -> B.AlignRight
-              HorizRight -> B.AlignRight
-              HorizCenter -> B.AlignCenter
-          toAlign _ = B.AlignDefault
-      aligns <-
-        case align of
-          VAlignment {} -> pure $ replicate numcols (toAlign align)
-          VArray v -> pure $ map toAlign (V.toList v)
-          VFunction _ _ f -> do
-            mapM
-              ( \colnum -> case applyPureFunction
-                  f
-                  [VInteger colnum, VInteger 0] of
-                  Success x -> pure $ toAlign x
-                  Failure e -> fail e
-              )
-              [0 .. (fromIntegral numcols - 1)]
-          _ -> pure $ replicate numcols B.AlignDefault
-      let colspecs = zip (aligns ++ repeat B.AlignDefault) widths
-      let rows =
-            map (B.Row B.nullAttr) $
-              chunks numcols $
-                map
-                  ( B.Cell
-                      B.nullAttr
-                      B.AlignDefault
-                      (B.RowSpan 1)
-                      (B.ColSpan 1)
-                      . B.toList
-                  )
-                  children
-      pure $
-        B.tableWith
-          (fromMaybe "" mbident, [], [])
-          (B.Caption mempty mempty)
-          colspecs
-          (B.TableHead B.nullAttr [])
-          [B.TableBody B.nullAttr 0 [] rows]
-          (B.TableFoot B.nullAttr []))
-  ,("table", \mbident fields ->
-       maybe mzero (\f -> f mbident fields) $ M.lookup "grid" blockHandlers)
+  ,("grid", \mbident fields -> parseTable mbident fields)
+  ,("table", \mbident fields -> parseTable mbident fields)
   ,("figure", \mbident fields -> do
       body <- getField "body" fields >>= pWithContents pBlocks
       (mbCaption :: Maybe (Seq Content)) <- getField "caption" fields
@@ -630,3 +560,95 @@ findLabels = foldr go []
    go (Elt{ eltFields = fs }) = \ts -> foldr go' ts fs
    go' (VContent cs) = (findLabels cs ++)
    go' _ = id
+
+parseTable :: PandocMonad m
+           => Maybe Text -> M.Map Identifier Val -> P m B.Blocks
+parseTable mbident fields = do
+  children <- V.toList <$> getField "children" fields
+  (columns :: Val) <- getField "columns" fields
+  let toWidth (VFraction f) = Just (floor $ 1000 * f)
+      toWidth _ = Nothing
+  let normalizeWidths xs =
+        let givenwidths = catMaybes xs
+            (totgivenwidth :: Int) = sum givenwidths
+            avgwidth = totgivenwidth `div` length givenwidths
+            totwidth = avgwidth * length xs
+         in if null givenwidths
+              then replicate (length xs) B.ColWidthDefault
+              else
+                map
+                  ( \case
+                      Just x -> B.ColWidth (fromIntegral x / fromIntegral totwidth)
+                      Nothing ->
+                        B.ColWidth (fromIntegral avgwidth / fromIntegral totwidth)
+                  )
+                  xs
+  widths <- case columns of
+    VInteger x -> pure $ replicate (fromIntegral x) B.ColWidthDefault
+    VArray x -> pure $ normalizeWidths $ map toWidth (V.toList x)
+    VNone -> pure [B.ColWidthDefault]
+    _ -> fail $ "Could not determine number of columns: " <> show columns
+  let numcols = length widths
+  align <- getField "align" fields
+  let toAlign (VAlignment (Just horiz) _) =
+        case horiz of
+          HorizStart -> B.AlignLeft
+          HorizLeft -> B.AlignLeft
+          HorizEnd -> B.AlignRight
+          HorizRight -> B.AlignRight
+          HorizCenter -> B.AlignCenter
+      toAlign _ = B.AlignDefault
+  aligns <-
+    case align of
+      VAlignment {} -> pure $ replicate numcols (toAlign align)
+      VArray v -> pure $ map toAlign (V.toList v)
+      VFunction _ _ f -> do
+        mapM
+          ( \colnum -> case applyPureFunction
+              f
+              [VInteger colnum, VInteger 0] of
+              Success x -> pure $ toAlign x
+              Failure e -> fail e
+          )
+          [0 .. (fromIntegral numcols - 1)]
+      _ -> pure $ replicate numcols B.AlignDefault
+  let colspecs = zip (aligns ++ repeat B.AlignDefault) widths
+  let breakIntoRows = chunks numcols -- TODO
+  let toCell cells contents = do
+        case contents of
+          [Elt (Identifier "grid.cell") _pos fs] -> do
+            bs <- B.toList <$> (getField "body" fs >>= pWithContents pBlocks)
+            rowspan <- getField "rowspan" fs <|> pure 1
+            colspan <- getField "colspan" fs <|> pure 1
+            align' <- (toAlign <$> getField "align" fs) <|> pure B.AlignDefault
+            pure $
+              B.Cell B.nullAttr align' (B.RowSpan rowspan) (B.ColSpan colspan) bs
+              : cells
+          [Elt (Identifier "table.cell") pos fs] ->
+            toCell cells [Elt (Identifier "grid.cell") pos fs]
+          [Elt (Identifier "table.vline") _pos _fs] -> pure cells
+          [Elt (Identifier "table.hline") _pos _fs] -> pure cells
+          [Elt (Identifier "grid.vline") _pos _fs] -> pure cells
+          [Elt (Identifier "grid.hline") _pos _fs] -> pure cells
+          [Elt (Identifier "table.header") _pos fs] ->
+            -- TODO make this a header
+            getField "children" fs >>= foldM toCell cells . V.toList
+          [Elt (Identifier "table.footer") _pos fs] ->
+            -- TODO make this a footer
+            getField "children" fs >>= foldM toCell cells . V.toList
+          _ -> do
+            bs <- B.toList <$> pWithContents pBlocks contents
+            pure $
+              B.Cell B.nullAttr B.AlignDefault (B.RowSpan 1) (B.ColSpan 1) bs
+              : cells
+  rows <- map (B.Row B.nullAttr) . breakIntoRows . reverse
+              <$> foldM toCell [] children
+  pure $
+    B.tableWith
+      (fromMaybe "" mbident, [], [])
+      (B.Caption mempty mempty)
+      colspecs
+      (B.TableHead B.nullAttr [])
+      [B.TableBody B.nullAttr 0 [] rows]
+      (B.TableFoot B.nullAttr [])
+
