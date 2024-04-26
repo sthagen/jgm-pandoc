@@ -8,7 +8,7 @@
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.HTML
-   Copyright   : Copyright (C) 2006-2023 John MacFarlane
+   Copyright   : Copyright (C) 2006-2024 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -889,7 +889,7 @@ blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
                  | "nonincremental" `elem` classes -> opts{ writerIncremental = False }
                  | otherwise -> opts
       -- we remove "incremental" and "nonincremental" if we're in a
-      -- slide presentaiton format.
+      -- slide presentation format.
       classes' = case slideVariant of
         NoSlides -> classes
         _ -> filter (\k -> k /= "incremental" && k /= "nonincremental") classes
