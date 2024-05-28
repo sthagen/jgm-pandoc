@@ -105,8 +105,10 @@ pInline = try $ do
           B.math . writeTeX <$> pMathMany (Seq.singleton res)
     Elt name@(Identifier tname) pos fields -> do
       labs <- sLabels <$> getState
-      labelTarget <- (do VLabel t <- getField "target" fields
-                         True <$ guard (t `elem` labs))
+      labelTarget <- (do result <- getField "target" fields
+                         case result of
+                           VLabel t | t `elem` labs -> pure True
+                           _ -> pure False)
                   <|> pure False
       if tname == "ref" && not labelTarget
          then do
@@ -537,7 +539,8 @@ pWithContents pa cs = try $ do
 
 pInlines :: PandocMonad m => P m B.Inlines
 pInlines =
-  collapseAdjacentCites . mconcat <$> many pInline
+  mappend <$> (collapseAdjacentCites . mconcat <$> many pInline)
+          <*> ((B.softbreak <$ pParBreak) <|> pure mempty)
 
 collapseAdjacentCites :: B.Inlines -> B.Inlines
 collapseAdjacentCites = B.fromList . foldr go [] . B.toList

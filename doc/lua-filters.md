@@ -3910,6 +3910,28 @@ Returns:
 
 *Since: 2.17*
 
+### run_lua_filter {#pandoc.utils.run_lua_filter}
+
+`run_lua_filter (doc, filter)`
+
+Filter the given doc by passing it through a Lua filter.
+
+The filter will be run in the current Lua process.
+
+Parameters:
+
+`doc`
+:   the Pandoc document to filter ([Pandoc])
+
+`filter`
+:   filepath of the filter to run (string)
+
+Returns:
+
+-   filtered document ([Pandoc])
+
+*Since: 3.2.1*
+
 ### run_json_filter {#pandoc.utils.run_json_filter}
 
 `run_json_filter (doc, filter[, args])`
