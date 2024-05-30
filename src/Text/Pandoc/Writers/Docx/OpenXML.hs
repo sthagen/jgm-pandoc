@@ -24,6 +24,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.Except (catchError)
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (isLetter)
+import Text.Pandoc.Char (isCJK)
 import Data.Ord (comparing)
 import Data.String (fromString)
 import qualified Data.Map as M
@@ -437,7 +438,7 @@ blockToOpenXML' opts (Figure (ident, _, _) (Caption _ longcapt) body) = do
     (Para xs  : bs) -> imageCaption (fstCaptionPara xs : bs)
     (Plain xs : bs) -> imageCaption (fstCaptionPara xs : bs)
     _               -> imageCaption longcapt
-  return $ contentsNode : captionNode
+  wrapBookmark ident $ contentsNode : captionNode
 
 toFigureTable :: PandocMonad m
               => WriterOptions -> [Block] -> WS m Content
@@ -593,8 +594,13 @@ formattedString str =
 formattedString' :: PandocMonad m => Text -> WS m [Element]
 formattedString' str = do
   inDel <- asks envInDel
-  formattedRun [ mktnode (if inDel then "w:delText" else "w:t")
-                 [("xml:space","preserve")] (stripInvalidChars str) ]
+  let addFontProp
+       | T.any isCJK str
+          = withTextProp (mknode "w:rFonts" [("w:hint","eastAsia")] ())
+       | otherwise = id
+  addFontProp $
+    formattedRun [ mktnode (if inDel then "w:delText" else "w:t")
+                   [("xml:space","preserve")] (stripInvalidChars str) ]
 
 formattedRun :: PandocMonad m => [Element] -> WS m [Element]
 formattedRun els = do
