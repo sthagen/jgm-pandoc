@@ -1,6 +1,7 @@
 {-# LANGUAGE PatternGuards       #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE ViewPatterns        #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE LambdaCase          #-}
@@ -24,6 +25,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.Except (catchError)
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (isLetter)
+import Data.Bifunctor (first)
 import Text.Pandoc.Char (isCJK)
 import Data.Ord (comparing)
 import Data.String (fromString)
@@ -45,7 +47,6 @@ import qualified Text.Pandoc.Translations as Term
 import qualified Text.Pandoc.Class.PandocMonad as P
 import Text.Pandoc.UTF8 (fromTextLazy)
 import Text.Pandoc.Definition
-import Text.Pandoc.Generic
 import Text.Pandoc.Highlighting (highlight)
 import Text.Pandoc.Templates (compileDefaultTemplate, renderTemplate)
 import Text.Pandoc.ImageSize
@@ -200,11 +201,7 @@ writeOpenXML opts (Pandoc meta blocks) = do
              (fmap (hcat . map (literal . showContent)) . inlinesToOpenXML opts)
              (docAuthors meta)
 
-  let convertSpace (Str x : Space : Str y : xs) = Str (x <> " " <> y) : xs
-      convertSpace (Str x : Str y : xs)         = Str (x <> y) : xs
-      convertSpace xs                           = xs
-  let blocks' = bottomUp convertSpace blocks
-  doc' <- setFirstPara >> blocksToOpenXML opts blocks'
+  doc' <- setFirstPara >> blocksToOpenXML opts blocks
   let body = vcat $ map (literal . showContent) doc'
   notes' <- gets (reverse . stFootnotes)
   comments <- gets (reverse . stComments)
@@ -393,17 +390,27 @@ blockToOpenXML' opts (Table attr caption colspecs thead tbodies tfoot) = do
   let (tableId, _, _) = attr
   wrapBookmark tableId content
 blockToOpenXML' opts el
-  | BulletList lst <- el = addOpenXMLList BulletMarker lst
+  | BulletList lst <- el
+  = case mapM toTaskListItem lst of
+      Just items -> addOpenXMLList (map (first (Just . CheckboxMarker)) items)
+      Nothing -> addOpenXMLList $ zip (Just BulletMarker : repeat Nothing) lst
   | OrderedList (start, numstyle, numdelim) lst <- el
-  = addOpenXMLList (NumberMarker numstyle numdelim start) lst
+  = addOpenXMLList $
+    zip (Just (NumberMarker numstyle numdelim start) : repeat Nothing) lst
   where
-    addOpenXMLList marker lst = do
-      addList marker
-      numid  <- getNumId
-      exampleid <- case marker of
-                        NumberMarker Example _ _ -> gets stExampleId
+    addOpenXMLList items = do
+      exampleid <- case items of
+                        (Just (NumberMarker Example _ _),_) : _ -> gets stExampleId
                         _ -> return Nothing
-      l <- asList $ concat `fmap` mapM (listItemToOpenXML opts $ fromMaybe numid exampleid) lst
+      l <- asList $ mconcat <$>
+              mapM (\(mbmarker, bs) -> do
+                      numid <- case mbmarker of
+                        Nothing -> getNumId
+                        Just marker -> do
+                          addList marker
+                          getNumId
+                      listItemToOpenXML opts (fromMaybe numid exampleid) bs)
+              items
       setFirstPara
       return l
 blockToOpenXML' opts (DefinitionList items) = do
@@ -542,9 +549,9 @@ listItemToOpenXML opts numid bs = do
   -- list. Otherwise the outer bullet will disappear.
   let bs' = case bs of
                  [] -> []
-                 first:rest -> if isListBlock first
-                               then Plain [Str ""]:first:rest
-                               else first:rest
+                 x:xs -> if isListBlock x
+                               then Plain [Str ""]:x:xs
+                               else x:xs
   modify $ \st -> st{ stNumIdUsed = False }
   contents <- withNumId numid $ blocksToOpenXML opts bs'
   modify $ \st -> st{ stInList = oldInList }
@@ -552,7 +559,7 @@ listItemToOpenXML opts numid bs = do
 
 -- | Convert a list of inline elements to OpenXML.
 inlinesToOpenXML :: PandocMonad m => WriterOptions -> [Inline] -> WS m [Content]
-inlinesToOpenXML opts lst = concat `fmap` mapM (inlineToOpenXML opts) lst
+inlinesToOpenXML opts lst = concat `fmap` mapM (inlineToOpenXML opts) (convertSpace lst)
 
 withNumId :: (PandocMonad m) => Int -> WS m a -> WS m a
 withNumId numid = local $ \env -> env{ envListNumId = numid }
@@ -1006,3 +1013,8 @@ toBookmarkName s
 maxListLevel :: Int
 maxListLevel = 8
 
+convertSpace :: [Inline] -> [Inline]
+convertSpace (Str x : Space : Str y : xs) = convertSpace (Str (x <> " " <> y) : xs)
+convertSpace (Str x : Str y : xs)         = convertSpace (Str (x <> y) : xs)
+convertSpace (x:xs)                       = x : convertSpace xs
+convertSpace []                           = []
