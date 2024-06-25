@@ -10,18 +10,17 @@ packages:
 - 'pandoc-server'
 extra-deps:
 - lpeg-1.1.0
-- tls-2.0.5
-- toml-parser-2.0.0.0
+- tls-2.0.6
+- toml-parser-2.0.1.0
 - typst-symbols-0.1.6
 - texmath-0.12.8.9
 - emojis-0.1.4.1
 - commonmark-extensions-0.2.5.5
-- git: https://github.com/jgm/typst-hs
-  commit: dfe0367b248419c3555044705fa79a52b9c20089
-- git: https://github.com/jgm/djoths
-  commit: 7f912e3ee593a86e3d179e8f3e1898a93171fb99
-- git: https://github.com/jgm/citeproc
-  commit: c7d81a376f434e90e1ef5724316042dfa4e21ef0
+- skylighting-core-0.14.2
+- skylighting-0.14.2
+- citeproc-0.8.1.1
+- djot-0.1.2.1
+- typst-0.5.0.4
 
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
