@@ -224,8 +224,8 @@ optToOutputSettings scriptingEngine opts = do
                       setVariableM "dzslides-core" dzcore vars
                   else return vars)
 
-  let writerOpts = def {
-          writerTemplate         = mtemplate
+  let writerOpts = WriterOptions
+        { writerTemplate         = mtemplate
         , writerVariables        = variables
         , writerTabStop          = optTabStop opts
         , writerTableOfContents  = optTableOfContents opts
@@ -238,6 +238,8 @@ optToOutputSettings scriptingEngine opts = do
         , writerExtensions       = writerExts
         , writerReferenceLinks   = optReferenceLinks opts
         , writerReferenceLocation = optReferenceLocation opts
+        , writerFigureCaptionPosition = optFigureCaptionPosition opts
+        , writerTableCaptionPosition = optTableCaptionPosition opts
         , writerDpi              = optDpi opts
         , writerWrapText         = optWrap opts
         , writerColumns          = optColumns opts

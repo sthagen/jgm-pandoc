@@ -21,6 +21,7 @@ import Text.Pandoc
 import Text.Pandoc.Writers.Shared (lookupMetaString)
 import Text.Pandoc.Citeproc (processCitations)
 import Text.Pandoc.Highlighting (lookupHighlightingStyle)
+import Text.Pandoc.Chunks (PathTemplate(..))
 import qualified Text.Pandoc.UTF8 as UTF8
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -302,8 +303,8 @@ server = convertBytes
                         , readerStripComments = optStripComments opts
                         }
 
-    let writeropts =
-          def{ writerExtensions = writerExts
+    let writeropts = WriterOptions
+             { writerExtensions = writerExts
              , writerTabStop = optTabStop opts
              , writerWrapText = optWrap opts
              , writerColumns = optColumns opts
@@ -327,14 +328,22 @@ server = convertBytes
              , writerListings = optListings opts
              , writerHighlightStyle = hlStyle
              , writerSetextHeaders = optSetextHeaders opts
+             , writerListTables = optListTables opts
              , writerEpubSubdirectory = T.pack $ optEpubSubdirectory opts
              , writerEpubMetadata = T.pack <$> optEpubMetadata opts
              , writerEpubFonts = optEpubFonts opts
+             , writerEpubTitlePage    = optEpubTitlePage opts
              , writerSplitLevel = optSplitLevel opts
+             , writerChunkTemplate = maybe (PathTemplate "%s-%i.html")
+                                         PathTemplate
+                                         (optChunkTemplate opts)
              , writerTOCDepth = optTOCDepth opts
              , writerReferenceDoc = optReferenceDoc opts
              , writerReferenceLocation = optReferenceLocation opts
+             , writerFigureCaptionPosition = optFigureCaptionPosition opts
+             , writerTableCaptionPosition = optTableCaptionPosition opts
              , writerPreferAscii = optAscii opts
+             , writerLinkImages = optLinkImages opts
              }
 
     let reader = case readerSpec of

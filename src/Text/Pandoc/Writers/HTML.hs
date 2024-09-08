@@ -289,8 +289,8 @@ pandocToHtml opts (Pandoc meta blocks) = do
                           lookupMetaString "description" meta
   slideVariant <- gets stSlideVariant
   abstractTitle <- translateTerm Abstract
-  let sects = adjustNumbers opts $
-              makeSections (writerNumberSections opts) Nothing $
+  let sects = makeSectionsWithOffsets
+                (writerNumberOffset opts) (writerNumberSections opts) Nothing $
               if slideVariant == NoSlides
                  then blocks
                  else prepSlides slideLevel blocks
@@ -446,6 +446,8 @@ pandocToHtml opts (Pandoc meta blocks) = do
                   defField "slideous-url" ("slideous" :: Doc Text) .
                   defField "revealjs-url" ("https://unpkg.com/reveal.js@^4/" :: Doc Text) $
                   defField "s5-url" ("s5/default" :: Doc Text) .
+                  defField "table-caption-below"
+                     (writerTableCaptionPosition opts == CaptionBelow) .
                   defField "html5" (stHtml5 st) $
                   metadata
   return (thebody, context)
@@ -726,30 +728,6 @@ dimensionsToAttrList attr = go Width ++ go Height
                (Just (Pixel a)) -> [(tshow dir, tshow a)]
                (Just x)         -> [("style", tshow dir <> ":" <> tshow x)]
                Nothing          -> []
-
-adjustNumbers :: WriterOptions -> [Block] -> [Block]
-adjustNumbers opts doc =
-  if all (==0) (writerNumberOffset opts)
-     then doc
-     else walk go doc
-  where
-   go (Div (ident,"section":classes,kvs) lst@(Header level _ _ : _)) =
-     Div (ident,"section":classes,map (fixnum level) kvs) lst
-   go (Header level (ident,classes,kvs) lst) =
-     Header level (ident,classes,map (fixnum level) kvs) lst
-   go x = x
-   fixnum level ("number",num) = ("number",
-                               showSecNum $ zipWith (+)
-                               (writerNumberOffset opts ++ repeat 0)
-                               (padTo level $
-                                map (fromMaybe 0 . safeRead) $
-                                T.split (=='.') num))
-   fixnum _ x = x
-   padTo n xs =
-     case n - length xs of
-       x | x > 0 -> replicate x 0 ++ xs
-         | otherwise -> xs
-   showSecNum = T.intercalate "." . map tshow
 
 blockToHtmlInner :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
 blockToHtmlInner opts (Plain lst) = inlineListToHtml opts lst
@@ -1056,24 +1034,26 @@ blockToHtmlInner opts (Figure attrs (Caption _ captBody)  body) = do
 
   figAttrs <- attrsToHtml opts attrs
   contents <- blockListToHtml opts body
-  figCaption <- if null captBody
-                then return mempty
-                else do
-                  captCont <- blockListToHtml opts captBody
-                  return . mconcat $
+  captCont <- blockListToHtml opts captBody
+  let figCaption = mconcat $
                     if html5
                     then let fcattr = if captionIsAlt captBody body
                                       then H5.customAttribute
                                            (textTag "aria-hidden")
                                            (toValue @Text "true")
                                       else mempty
-                         in [ H5.figcaption ! fcattr $ captCont, nl ]
-                    else [ (H.div ! A.class_ "figcaption") captCont, nl ]
+                         in [ H5.figcaption ! fcattr $ captCont ]
+                    else [ (H.div ! A.class_ "figcaption") captCont ]
+  let innards = mconcat $
+                if null captBody
+                   then [nl, contents, nl]
+                   else case writerFigureCaptionPosition opts of
+                         CaptionAbove -> [nl, figCaption, nl, contents, nl]
+                         CaptionBelow -> [nl, contents, nl, figCaption, nl]
   return $
     if html5
-    then foldl (!) H5.figure figAttrs $ mconcat [nl, contents, nl, figCaption]
-    else foldl (!) H.div (A.class_ "float" : figAttrs) $ mconcat
-           [nl, contents, nl, figCaption]
+    then foldl (!) H5.figure figAttrs innards
+    else foldl (!) H.div (A.class_ "float" : figAttrs) innards
  where
   captionIsAlt capt [Plain [Image (_, _, kv) desc _]] =
     let alt = fromMaybe (stringify desc) $ lookup "alt" kv
