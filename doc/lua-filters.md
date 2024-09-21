@@ -4578,6 +4578,28 @@ Returns:
 
 ## Methods
 
+### `pandoc.List:at` {#pandoc.list:at}
+
+`:at (index[, default])`
+
+Returns the element at the given index, or `default` if the list
+contains no item at the given position.
+
+Negative integers count back from the last item in the list.
+
+Parameters:
+
+`index`
+:   element position (integer)
+
+`default`
+:   the default value that is returned if the index is out of
+    range (any)
+
+Returns:
+
+-   the list item at `index`, or `default`.
+
 ### `pandoc.List:clone ()` {#pandoc.list:clone}
 
 Returns a (shallow) copy of the list. (To get a deep copy
@@ -4682,6 +4704,9 @@ Parameters:
 
 Create a new List. If the optional argument `table` is given,
 set the metatable of that value to `pandoc.List`.
+
+The function also accepts an iterator, in which case it creates a
+new list from the return values of the iterator function.
 
 Parameters:
 
@@ -6022,7 +6047,7 @@ Returns:
 
 ### render {#pandoc.layout.render}
 
-`render (doc[, colwidth])`
+`render (doc[, colwidth[, style]])`
 
 Render a [Doc]. The text is reflowed on breakable spaces to match
 the given line length. Text is not reflowed if the line line
@@ -6034,8 +6059,14 @@ Parameters:
 :   document ([Doc])
 
 `colwidth`
-:   planned maximum line length
+:   Maximum number of characters per line. A value of `nil`, the
+    default, means that the text is not reflown.
     ([integer]{unknown-type="integer"})
+
+`style`
+:   Whether to generate plain text or ANSI terminal output. Must
+    be either `'plain'` or `'ansi'`. Defaults to `'plain'`.
+    (string)
 
 Returns:
 
@@ -6153,6 +6184,116 @@ Returns:
 -   column number ([integer]{unknown-type="integer"}\|string)
 
 *Since: 2.18*
+
+### bold {#pandoc.layout.bold}
+
+`bold (doc)`
+
+Puts a [Doc] in boldface.
+
+Parameters:
+
+`doc`
+:   document ([Doc])
+
+Returns:
+
+-   bolded Doc ([Doc])
+
+*Since: 3.4.1*
+
+### italic {#pandoc.layout.italic}
+
+`italic (doc)`
+
+Puts a [Doc] in italics.
+
+Parameters:
+
+`doc`
+:   document ([Doc])
+
+Returns:
+
+-   styled Doc ([Doc])
+
+*Since: 3.4.1*
+
+### underlined {#pandoc.layout.underlined}
+
+`underlined (doc)`
+
+Underlines a [Doc].
+
+Parameters:
+
+`doc`
+:   document ([Doc])
+
+Returns:
+
+-   styled Doc ([Doc])
+
+*Since: 3.4.1*
+
+### strikeout {#pandoc.layout.strikeout}
+
+`strikeout (doc)`
+
+Puts a line through the [Doc].
+
+Parameters:
+
+`doc`
+:   document ([Doc])
+
+Returns:
+
+-   styled Doc ([Doc])
+
+*Since: 3.4.1*
+
+### fg {#pandoc.layout.fg}
+
+`fg (doc, color)`
+
+Set the foreground color.
+
+Parameters:
+
+`doc`
+:   document ([Doc])
+
+`color`
+:   One of 'black', 'red', 'green', 'yellow', 'blue', 'magenta'
+    'cyan', or 'white'. (string)
+
+Returns:
+
+-   styled Doc ([Doc])
+
+*Since: 3.4.1*
+
+### bg {#pandoc.layout.bg}
+
+`bg (doc, color)`
+
+Set the background color.
+
+Parameters:
+
+`doc`
+:   document ([Doc])
+
+`color`
+:   One of 'black', 'red', 'green', 'yellow', 'blue', 'magenta'
+    'cyan', or 'white'. (string)
+
+Returns:
+
+-   styled Doc ([Doc])
+
+*Since: 3.4.1*
 
 ## Types {#pandoc.layout-types}
 
