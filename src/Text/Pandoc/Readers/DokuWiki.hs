@@ -29,7 +29,7 @@ import Text.Pandoc.Definition
 import Text.Pandoc.Options
 import Text.Pandoc.Parsing hiding (enclosed)
 import Text.Pandoc.Shared (trim, stringify, tshow)
-import Data.List (isPrefixOf, isSuffixOf)
+import Data.List (isPrefixOf, isSuffixOf, groupBy)
 import qualified Safe
 
 -- | Read DokuWiki from an input string and return a Pandoc document.
@@ -111,6 +111,7 @@ inline'' = br
       <|> autoEmail
       <|> notoc
       <|> nocache
+      <|> smartPunctuation inline
       <|> str
       <|> symbol
       <?> "inline"
@@ -443,7 +444,9 @@ parseList prefix marker =
   many1 ((<>) <$> item <*> fmap mconcat (many continuation))
   where
     continuation = try $ list ("  " <> prefix)
-    item = try $ textStr prefix *> char marker *> char ' ' *>
+    item = try $ textStr prefix *>
+                   optional (char ' ') *>  -- see #8863
+                   char marker *> char ' ' *>
                    (mconcat <$> many1 itemContents <* eol)
     itemContents = (B.plain . mconcat <$> many1 inline') <|>
                    blockCode
@@ -453,15 +456,37 @@ indentedCode = try $ B.codeBlock . T.unlines <$> many1 indentedLine
  where
    indentedLine = try $ string "  " *> manyTillChar anyChar eol
 
+-- Note that block quotes in dokuwiki parse as lists of hard-break
+-- separated lines; see #6461.
 quote :: PandocMonad m => DWParser m B.Blocks
-quote = try $ nestedQuote 0
-  where
-    prefix level = count level (char '>')
-    contents level = nestedQuote level <|> quoteLine
-    quoteLine = try $ B.plain . B.trimInlines . mconcat <$> many1Till inline' eol
-    quoteContents level = (<>) <$> contents level <*> quoteContinuation level
-    quoteContinuation level = mconcat <$> many (try $ prefix level *> contents level)
-    nestedQuote level = B.blockQuote <$ char '>' <*> quoteContents (level + 1 :: Int)
+quote = go <$> many1 blockQuoteLine
+ where
+   blockQuoteLine = try $ do
+     lev <- length <$> many1 (char '>')
+     skipMany spaceChar
+     contents <- (blockCode <* skipMany spaceChar <* optional eol) <|>
+       (B.plain . B.trimInlines . mconcat <$> many1Till inline' eol)
+     pure (lev, contents)
+   go [] = mempty
+   go xs = mconcat $ map go' (groupBy (\(x,_) (y,_) -> (x == 0 && y == 0) ||
+                                                        (x > 0 && y > 0)) xs)
+   go' [] = mempty
+   go' xs@((0,_):_) =
+        let (lns, bls) = F.foldl' consolidatePlains (mempty,mempty) (map snd xs)
+         in bls <> if lns == mempty
+                      then mempty
+                      else B.plain lns
+   go' xs = B.blockQuote (go $ map (\(x,y) -> (x - 1, y)) xs)
+   consolidatePlains (lns, bls) b =
+     case B.toList b of
+       [Plain ils] -> ((if lns == mempty
+                           then B.fromList ils
+                           else lns <> B.linebreak <> B.fromList ils), bls)
+       _ -> (mempty, bls <>
+                     (if lns == lns
+                         then mempty
+                         else B.plain lns)
+                      <> b)
 
 blockRaw :: PandocMonad m => DWParser m B.Blocks
 blockRaw = try $ do
