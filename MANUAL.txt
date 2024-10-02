@@ -2898,14 +2898,18 @@ These variables change the appearance of PDF slides using [`beamer`].
 `theme`, `colortheme`, `fonttheme`, `innertheme`, `outertheme`
 :   beamer themes
 
-`themeoptions`
-:   options for LaTeX beamer themes (a list).
+`themeoptions`, `colorthemeoptions`, `fontthemeoptions`, `innerthemeoptions`, `outerthemeoptions`
+:   options for LaTeX beamer themes (lists)
 
 `titlegraphic`
-:   image for title slide
+:   image for title slide: can be a list
 
 `titlegraphicoptions`
 :   options for title slide image
+
+`shorttitle`, `shortsubtitle`, `shortauthor`, `shortinstitute`, `shortdate`
+:   some beamer themes use short versions of the title, subtitle, author,
+    institute, date
 
 ### Variables for PowerPoint
 
@@ -3006,7 +3010,10 @@ Pandoc uses these variables when [creating a PDF] with a LaTeX engine.
     or `numbersections` variable)
 
 `beamerarticle`
-:   produce an article from Beamer slides
+:   produce an article from Beamer slides.  Note: if you set
+    this variable, you must specify the beamer writer but use the
+    default *LaTeX* template: for example,
+    `pandoc -Vbeamerarticle -t beamer --template default.latex`.
 
 `handout`
 :   produce a handout version of Beamer slides (with overlays condensed
