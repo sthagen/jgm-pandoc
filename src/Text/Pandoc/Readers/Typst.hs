@@ -235,10 +235,11 @@ blockHandlers = M.fromList
   ,("quote", \_ fields -> do
       getField "block" fields >>= guard
       body <- getField "body" fields >>= pWithContents pBlocks
-      attribution <-
-        ((\x -> B.para ("\x2104\xa0" <> x)) <$>
-          (getField "attribution" fields >>= pWithContents pInlines))
-        <|> pure mempty
+      attribution' <- getField "attribution" fields
+      attribution <- if attribution' == mempty
+                        then pure mempty
+                        else (\x -> B.para ("\x2014\xa0" <> x)) <$>
+                              (pWithContents pInlines attribution')
       pure $ B.blockQuote $ body <> attribution)
   ,("list", \_ fields -> do
       children <- V.toList <$> getField "children" fields
@@ -522,9 +523,12 @@ parbreaksToLinebreaks =
    isParbreak _ = False
 
 pPara :: PandocMonad m => P m B.Blocks
-pPara =
-  B.para . B.trimInlines . collapseAdjacentCites . mconcat
-    <$> (many1 pInline <* optional pParBreak)
+pPara = do
+  ils <- B.trimInlines . collapseAdjacentCites . mconcat <$> many1 pInline
+  optional pParBreak
+  pure $ if ils == mempty
+         then mempty
+         else B.para ils
 
 pParBreak :: PandocMonad m => P m ()
 pParBreak =
