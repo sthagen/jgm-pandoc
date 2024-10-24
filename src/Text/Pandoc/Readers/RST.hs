@@ -30,7 +30,7 @@ import qualified Data.Text as T
 import Text.Printf (printf)
 import Text.Pandoc.Builder (Blocks, Inlines, fromList, setMeta, trimInlines)
 import qualified Text.Pandoc.Builder as B
-import Text.Pandoc.Class (PandocMonad, fetchItem, getTimestamp)
+import Text.Pandoc.Class (PandocMonad, readFileFromDirs, fetchItem, getTimestamp)
 import Text.Pandoc.CSV (CSVOptions (..), defaultCSVOptions, parseCSV)
 import Text.Pandoc.Definition
 import Text.Pandoc.Error
@@ -261,6 +261,7 @@ block :: PandocMonad m => RSTParser m Blocks
 block = choice [ codeBlock
                , blockQuote
                , fieldList
+               , optionList
                , referenceKey
                , noteBlock
                , citationBlock
@@ -313,6 +314,51 @@ fieldList = try $ do
   case items of
      []     -> return mempty
      items' -> return $ B.definitionList items'
+
+optionList :: PandocMonad m => RSTParser m Blocks
+optionList = B.definitionList <$> many1 optionListItem
+
+optionListItem :: PandocMonad m => RSTParser m (Inlines, [Blocks])
+optionListItem = try $ do
+  opts <- snd <$> withRaw (do
+     let anyOpt = shortOpt <|> longOpt <|> dosOpt
+     anyOpt
+     many $ try (char ',' <* many spaceChar *> anyOpt))
+  -- at least two spaces
+  rawfirst <- try (char ' ' *> many1 (char ' ') *> anyLineNewline)
+                    <|> try (mempty <$ skipMany spaceChar <* newline)
+  bodyElements <- do
+    raw <- option "" indentedBlock
+    parseFromString' parseBlocks $ (rawfirst <> raw) <> "\n\n"
+  optional blanklines
+  pure (B.code opts, [bodyElements])
+
+shortOpt :: PandocMonad m => RSTParser m ()
+shortOpt = try $ do
+  char '-'
+  alphaNum
+  optional $ try (optional (char ' ') *> optArg)
+
+optArg :: PandocMonad m => RSTParser m ()
+optArg = do
+  c <- letter <|> char '<'
+  if c == '<'
+     then () <$ manyTill (noneOf "<>") (char '>')
+     else skipMany (alphaNum <|> char '_' <|> char '-')
+
+longOpt :: PandocMonad m => RSTParser m ()
+longOpt = try $ do
+  char '-'
+  char '-'
+  alphaNum
+  skipMany1 (alphaNum <|> char '-' <|> char '_')
+  optional $ try (oneOf " =" *> optArg)
+
+dosOpt :: PandocMonad m => RSTParser m ()
+dosOpt = try $ do
+  char '/'
+  alphaNum <|> char '?'
+  optional $ try (char ' ' *> optArg)
 
 --
 -- line block
@@ -696,7 +742,12 @@ directive' = do
     if fieldIndent == 0
        then return []
        else many $ rawFieldListItem fieldIndent
-  body <- option "" $ try $ blanklines >> indentedBlock
+  let mbfile = trim <$> lookup "file" fields
+  body <- case mbfile of
+            Just f | label == "raw" -> do
+               currentDir <- takeDirectory . sourceName <$> getPosition
+               fromMaybe mempty <$> readFileFromDirs [currentDir] (T.unpack f)
+            _ -> option "" $ try $ blanklines >> indentedBlock
   optional blanklines
   let body' = body <> "\n\n"
       name = trim $ fromMaybe "" (lookup "name" fields)
