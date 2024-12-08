@@ -56,7 +56,8 @@ import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), defaultOpts,
 import Text.Pandoc.App.CommandLineOptions (parseOptions, parseOptionsFromArgs,
                                            options, handleOptInfo)
 import Text.Pandoc.App.Input (InputParameters (..), readInput)
-import Text.Pandoc.App.OutputSettings (OutputSettings (..), optToOutputSettings)
+import Text.Pandoc.App.OutputSettings (OutputSettings (..), optToOutputSettings,
+                                       sandbox')
 import Text.Pandoc.Transforms (applyTransforms, filterIpynbOutput,
                                headerShift, eastAsianLineBreakFilter)
 import Text.Collate.Lang (Lang (..), parseLang)
@@ -155,17 +156,11 @@ convertWithOpts' scriptingEngine istty datadir opts = do
                     return $ defFlavor "markdown"
 
   let makeSandboxed pureReader =
-        let files = maybe id (:) (optReferenceDoc opts) .
-                    maybe id (:) (optEpubMetadata opts) .
-                    maybe id (:) (optEpubCoverImage opts) .
-                    maybe id (:) (optCSL opts) .
-                    maybe id (:) (optCitationAbbreviations opts) $
-                    optEpubFonts opts ++
-                    optBibliography opts
-         in  case pureReader of
-               TextReader r -> TextReader $ \o t -> sandbox files (r o t)
-               ByteStringReader r
-                          -> ByteStringReader $ \o t -> sandbox files (r o t)
+       case pureReader of
+            TextReader r
+              -> TextReader $ \o t -> sandbox' opts (r o t)
+            ByteStringReader r
+              -> ByteStringReader $ \o t -> sandbox' opts (r o t)
 
   (reader, readerExts) <-
     if ".lua" `T.isSuffixOf` readerNameBase
@@ -328,8 +323,12 @@ convertWithOpts' scriptingEngine istty datadir opts = do
                     | T.null t || T.last t /= '\n' = t <> T.singleton '\n'
                     | otherwise = t
               textOutput <- ensureNl <$> f writerOptions doc
-              if (optSelfContained opts || optEmbedResources opts) && htmlFormat format
-                 then TextOutput <$> makeSelfContained textOutput
+              if htmlFormat format &&
+                  (optSelfContained opts || optEmbedResources opts)
+                 then if optSandbox opts
+                         then sandbox' opts $
+                              TextOutput <$> makeSelfContained textOutput
+                         else TextOutput <$> makeSelfContained textOutput
                  else return $ TextOutput textOutput
   reports <- getLog
   return (output, reports)

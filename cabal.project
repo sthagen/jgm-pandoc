@@ -4,46 +4,8 @@ packages: .
           pandoc-cli
 tests: True
 flags: +embed_data_files
-constraints: skylighting-format-blaze-html >= 0.1.1.2,
+constraints: skylighting-format-blaze-html >= 0.1.1.3,
              skylighting-format-context >= 0.1.0.2,
              -- for now (commercialhaskell/stackage#7545):
              data-default-class <= 0.2, data-default <= 0.8
 
-source-repository-package
-  type: git
-  location: https://github.com/jgm/typst-hs.git
-  tag: 5a50154c958d09c06fd884dcc4519403f7904bc1
-
-source-repository-package
-  type: git
-  location: https://github.com/jgm/texmath.git
-  tag: 721bb5c85cae0bd0f1584dfc7a62c60cbf0427e0
-
-source-repository-package
-  type: git
-  location: https://github.com/pandoc/pandoc-lua-marshal.git
-  tag: 2dc58d431bb3e4d55999db03c470fbf32970b3d5
-
-source-repository-package
-  type: git
-  location: https://github.com/jgm/commonmark-hs.git
-  tag: 1fddc913b31487571b12fd0ac99d4a0ab00acd34
-  subdir: commonmark-extensions
-
-source-repository-package
-  type: git
-  location: https://github.com/jgm/commonmark-hs.git
-  tag: 1fddc913b31487571b12fd0ac99d4a0ab00acd34
-  subdir: commonmark-pandoc
-
-source-repository-package
-  type: git
-  location: https://github.com/jgm/skylighting.git
-  tag: 2b6876018a903207c7a9093c5c63b00a4d0980be
-  subdir: skylighting-core
-
-source-repository-package
-  type: git
-  location: https://github.com/jgm/skylighting.git
-  tag: 260a53dfc32b68c1c9c47629f42a9cebd1f12b87
-  subdir: skylighting-format-blaze-html
