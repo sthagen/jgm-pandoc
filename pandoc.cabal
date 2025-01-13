@@ -1,6 +1,6 @@
 cabal-version:   2.4
 name:            pandoc
-version:         3.6.1
+version:         3.6.2
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -527,13 +527,13 @@ library
                  random                >= 1        && < 1.4,
                  safe                  >= 0.3.18   && < 0.4,
                  scientific            >= 0.3      && < 0.4,
-                 skylighting           >= 0.14.6   && < 0.15,
-                 skylighting-core      >= 0.14.6   && < 0.15,
+                 skylighting           >= 0.14.5   && < 0.15,
+                 skylighting-core      >= 0.14.5   && < 0.15,
                  split                 >= 0.2      && < 0.3,
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
                  temporary             >= 1.1      && < 1.4,
-                 texmath               >= 0.12.8.12 && < 0.13,
+                 texmath               >= 0.12.8.13 && < 0.13,
                  text                  >= 1.1.1.0  && < 2.2,
                  text-conversions      >= 0.3      && < 0.4,
                  time                  >= 1.5      && < 1.15,
