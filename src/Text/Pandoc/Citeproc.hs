@@ -382,12 +382,21 @@ getBibliographyFormat fp mbmime = do
             _ -> Nothing
 
 isNote :: Inline -> Bool
-isNote (Cite _ [Note _]) = True
- -- the following allows citation styles that are "in-text" but use superscript
- -- references to be treated as if they are "notes" for the purposes of moving
- -- the citations after trailing punctuation (see <https://github.com/jgm/pandoc-citeproc/issues/382>):
-isNote (Cite _ [Superscript _]) = True
-isNote _                 = False
+isNote (Cite cs xs) = length xs == 1 && endsWithNote (Cite cs xs)
+isNote _ = False
+
+endsWithNote :: Inline -> Bool
+endsWithNote (Cite _ xs) =
+  -- this formulation captures both Cite [Note _] and cite [..., Note _];
+  -- the latter occurs with author-in-text citations.
+  case lastMay xs of
+    Just (Note _) -> True
+    -- the following allows citation styles that are "in-text" but use superscript
+    -- references to be treated as if they are "notes" for the purposes of moving
+    -- the citations after trailing punctuation (see <https://github.com/jgm/pandoc-citeproc/issues/382>):
+    Just (Superscript _) -> True
+    _ -> False
+endsWithNote _ = False
 
 isSpacy :: Inline -> Bool
 isSpacy Space     = True
@@ -420,7 +429,7 @@ mvPunct moveNotes locale (q : s : x : ys)
 -- 'x[^1],' -> 'x,[^1]'
 mvPunct moveNotes locale (Cite cs ils : ys)
    | not (null ils)
-   , isNote (last ils)
+   , endsWithNote (last ils)
    , startWithPunct ys
    , moveNotes
    = let s = stringify ys
@@ -431,8 +440,9 @@ mvPunct moveNotes locale (Cite cs ils : ys)
                     ++ [last ils]) :
          mvPunct moveNotes locale
            (B.toList (dropTextWhile isPunctuation (B.fromList ys)))
-mvPunct moveNotes locale (s : x : ys) | isSpacy s, isNote x =
-  x : mvPunct moveNotes locale ys
+mvPunct moveNotes locale (s : x : ys)
+  | isSpacy s, isNote x
+  = x : mvPunct moveNotes locale ys
 mvPunct moveNotes locale (s : x@(Cite _ (Superscript _ : _)) : ys)
   | isSpacy s = x : mvPunct moveNotes locale ys
 mvPunct moveNotes locale (Cite cs ils : Str "." : ys)
