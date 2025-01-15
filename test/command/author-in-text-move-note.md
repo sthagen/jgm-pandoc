@@ -10,7 +10,7 @@ references:
 
 See @foo [p. 21], as well.
 ^D
-See John Doe[1], as well.
+See John Doe,[1] as well.
 
 John Doe. A Book, n.d.
 
