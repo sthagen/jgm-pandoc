@@ -1284,7 +1284,6 @@ header when requesting a document from a URL:
         Character styles:
 
         - Default Paragraph Font
-        - Body Text Char
         - Verbatim Char
         - Footnote Reference
         - Hyperlink
@@ -6067,6 +6066,9 @@ Supports [GitHub-style Markdown alerts], like
     > Helpful advice for doing things better or more easily.
 
   [GitHub-style Markdown alerts]: https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts
+
+Note: This extension currently only works with commonmark:
+`commonmark`, `gfm`, `commonmark_x`.
 
 ### Extension: `autolink_bare_uris` ###
 
