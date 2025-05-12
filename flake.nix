@@ -43,10 +43,21 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             haskellPackages.haskell-language-server # you must build it with your ghc to work
+            haskellPackages.hlint
+            haskellPackages.cabal-install
+            haskellPackages.cabal-plan
+            haskellPackages.weeder
+            haskellPackages.hpc
+            haskellPackages.ghcid
+            haskellPackages.stylish-haskell
             zlib
-            ghcid
-            cabal-install
             git
+            bashInteractive
+            epubcheck # for validate-epub
+            nodejs # for validate-epub
+            ripgrep
+            libxml2 # for xmllint
+            jq
           ];
           inputsFrom = map (__getAttr "env") (__attrValues self.packages.${system});
         };
