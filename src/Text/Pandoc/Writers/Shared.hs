@@ -51,7 +51,7 @@ module Text.Pandoc.Writers.Shared (
                      , delimited
                      )
 where
-import Safe (lastMay, maximumMay, atDef)
+import Safe (lastMay, maximumMay)
 import qualified Data.ByteString.Lazy as BL
 import Control.Monad (MonadPlus, mzero)
 import Data.Either (isRight)
@@ -297,14 +297,14 @@ gridTable opts blocksToDoc colspecs' thead' tbodies' tfoot' = do
   let Ann.Table _ _ colspecs thead tbodies tfoot =
         Ann.toTable mempty (Caption Nothing mempty)
                     colspecs' thead' tbodies' tfoot'
-  let widths = map (toCharWidth opts . getColWidth) colspecs
-  let renderRows = fmap (map (addDummies widths)) . mapM (gridRow opts blocksToDoc)
+  let renderRows = fmap addDummies . mapM (gridRow opts blocksToDoc)
   let getHeadCells (Ann.HeaderRow _ _ cells) = cells
   let getHeadRows (Ann.TableHead _ rs) = map getHeadCells rs
   headCells <- renderRows (getHeadRows thead)
   let getFootRows (Ann.TableFoot _ xs) = map getHeadCells xs
   footCells <- renderRows (getFootRows tfoot)
-  let getBodyCells (Ann.BodyRow _ _ _ cells) = cells
+  -- We don't distinguish between row head and regular cells here:
+  let getBodyCells (Ann.BodyRow _ _ rhcells cells) = rhcells ++ cells
   let getBody (Ann.TableBody _ _ hs xs) = map getHeadCells hs <> map getBodyCells xs
   bodyCells <- mapM (renderRows . getBody) tbodies
   let rows = setTopBorder SingleLine headCells ++
@@ -314,30 +314,46 @@ gridTable opts blocksToDoc colspecs' thead' tbodies' tfoot' = do
                  then mempty
                  else setTopBorder DoubleLine . setBottomBorder DoubleLine $
                        footCells)
-  let cellHasColSpan c = cellColSpan c > 1
-  let hasColSpans = any (any cellHasColSpan) rows
-  let isSimple = all ((== ColWidthDefault) . snd) colspecs && not hasColSpans
-  pure $ gridRows $
-    if not hasColSpans  -- TODO: figure out how to calculate widths with colspans
-       then redoWidths isSimple opts rows
-       else rows
+  pure $ gridRows $ redoWidths opts colspecs rows
 
-redoWidths :: Bool -> WriterOptions -> [[RenderedCell Text]] -> [[RenderedCell Text]]
-redoWidths _ _ [] = []
-redoWidths isSimple opts rows@(r:_) =
-  map (\cs -> zipWith resetWidth newwidths cs) rows
+-- Returns (current widths, full widths, min widths)
+extractColWidths :: WriterOptions -> [[RenderedCell Text]] -> ([Int], [Int], [Int])
+extractColWidths opts rows = (currentwidths, fullwidths, minwidths)
  where
-  actualWidths = map cellWidth r
-  fullwidths = calculateFullWidths rows
-  minwidths = case writerWrapText opts of
-                WrapNone -> fullwidths
-                _ -> calculateMinWidths rows
-  totwidth = writerColumns opts - (3 * length r) - 1
-  evenwidth = totwidth `div` length r
-  resetWidth w c = c{ cellWidth = w }
+   getWidths calcOffset =
+     map (fromMaybe 0 . maximumMay) (transpose (map (concatMap (getCellWidths calcOffset)) rows))
+   getCellWidths calcOffset c = replicate (cellColSpan c)
+                                 (calcOffset c `div` (cellColSpan c) +
+                                  calcOffset c `rem` (cellColSpan c))
+   fullwidths = getWidths (offset . cellContents)
+   currentwidths = getWidths cellWidth
+   minwidths =
+     case writerWrapText opts of
+       WrapNone -> fullwidths
+       _ -> getWidths (minOffset . cellContents)
+
+resetWidths :: [Int] -> [RenderedCell Text] -> [RenderedCell Text]
+resetWidths _ [] = []
+resetWidths [] cs = cs
+resetWidths (w:ws) (c:cs) =
+  case cellColSpan c of
+    1 -> c{ cellWidth = w } : resetWidths ws cs
+    n | n < 1 -> c : resetWidths ws cs
+      | otherwise -> c{ cellWidth = w + sum (take (n - 1) ws) + (3 * (n-1)) }
+                               : resetWidths (drop (n - 1) ws) cs
+
+redoWidths :: WriterOptions -> [ColSpec] -> [[RenderedCell Text]] -> [[RenderedCell Text]]
+redoWidths _ _ [] = []
+redoWidths opts colspecs rows = map (resetWidths newwidths) rows
+ where
+  numcols = length colspecs
+  isSimple = all ((== ColWidthDefault) . snd) colspecs
+  (actualwidths, fullwidths, minwidths) = extractColWidths opts rows
+  totwidth = writerColumns opts - (3 * numcols) - 1
+  evenwidth = totwidth `div` numcols + totwidth `rem` numcols
   keepwidths = filter (< evenwidth) fullwidths
   evenwidth' = (totwidth - sum keepwidths) `div`
-                (length r - length keepwidths)
+                (numcols - length keepwidths)
   ensureMinWidths = zipWith max minwidths
   newwidths = ensureMinWidths $
               case isSimple of
@@ -345,40 +361,51 @@ redoWidths isSimple opts rows@(r:_) =
                      | otherwise -> map (\w -> if w < evenwidth
                                                   then w
                                                   else evenwidth') fullwidths
-                False -> actualWidths
+                False -> actualwidths
 
--- Returns for each column a pair (full width, min width)
-calculateFullWidths :: [[RenderedCell Text]] -> [Int]
-calculateFullWidths rows =
-  map (fromMaybe 0 . maximumMay) (transpose (map (map (\c ->
-         offset (cellContents c))) rows))
+makeDummy :: RenderedCell Text -> RenderedCell Text
+makeDummy c =
+    RenderedCell{ cellColNum = cellColNum c,
+                  cellColSpan = cellColSpan c,
+                  cellAlign = AlignDefault,
+                  cellRowSpan = cellRowSpan c - 1,
+                  cellWidth = cellWidth c,
+                  cellContents = mempty,
+                  cellBottomBorder = NoLine,
+                  cellTopBorder = NoLine }
 
-calculateMinWidths :: [[RenderedCell Text]] -> [Int]
-calculateMinWidths rows =
-  map (fromMaybe 0 . maximumMay) (transpose (map (map (\c ->
-         minOffset (cellContents c))) rows))
-
-makeDummy :: [Int] -> Int -> Int -> RenderedCell Text
-makeDummy widths n len =
- let width = atDef 0 widths n
- in RenderedCell{ cellColNum = n,
-                cellColSpan = len,
-                cellAlign = AlignDefault,
-                cellRowSpan = 0, -- indicates dummy
-                cellWidth = width,
-                cellHeight = 0,
-                cellContents = mempty,
-                cellBottomBorder = NoLine,
-                cellTopBorder = NoLine }
-
-addDummies :: [Int] -> [RenderedCell Text] -> [RenderedCell Text]
-addDummies widths = reverse . snd . foldl' addDummy (0,[])
+addDummies :: [[RenderedCell Text]] -> [[RenderedCell Text]]
+addDummies = reverse . foldl' go []
  where
+   go [] cs = [cs]
+   go (prevRow:rs) cs = addDummiesToRow prevRow cs : prevRow : rs
+   addDummiesToRow [] cs = cs
+   addDummiesToRow ds [] = map makeDummy ds
+   addDummiesToRow (d:ds) (c:cs) =
+     if cellColNum d < cellColNum c
+        then makeDummy d : addDummiesToRow ds (c:cs)
+        else c : addDummiesToRow
+                   (dropWhile (\x ->
+                       cellColNum x < cellColNum c + cellColSpan c) (d:ds))
+                   cs
+
+{-
+  reverse $ (case numcols - i' of
+               0 -> id
+               -- TODO this is wrong; it assumes that the row span
+               -- above covers ALL the relevant columns. We need
+               -- to pay attention to the details of the row above
+               -- so we get the borders right.
+               -- TODO the 2 parameter is a placeholder
+               n -> (makeDummy widths i' n 2 :)) cs'
+ where
+   (i',cs') = foldl' addDummy (0,[]) cells
+   numcols = length widths
    addDummy (i,cs) c =
      case cellColNum c - i of
-       0 -> (i+1, c:cs)
-       len -> (cellColNum c + 1, c : makeDummy widths i len : cs)
-
+       0 -> (cellColNum c + cellColSpan c, c:cs)
+       len -> (cellColNum c + cellColSpan c, c : makeDummy widths i len 2 : cs)
+-}
 
 setTopBorder :: LineStyle -> [[RenderedCell Text]] -> [[RenderedCell Text]]
 setTopBorder _ [] = []
@@ -416,45 +443,46 @@ gridRows (x:xs) =
         border2 = render Nothing (formatBorder cellTopBorder False nextRow)
         go '+' _ = '+'
         go _ '+' = '+'
+        go '|' '-' = '+'
+        go '-' '|' = '+'
+        go '|' '=' = '+'
+        go '=' '|' = '+'
         go '=' _ = '='
         go _ '=' = '='
+        go ' ' d = d
         go c _   = c
         combinedBorder = if isLastRow
                             then literal border1
                             else literal $ T.zipWith go border1 border2
     in formatRow thisRow $$ combinedBorder
 
-
-formatBorder :: (RenderedCell Text -> LineStyle) -> Bool -> [RenderedCell Text]
+formatBorder :: (RenderedCell a -> LineStyle) -> Bool -> [RenderedCell a]
              -> Doc Text
-formatBorder _ _alignMarkers [] = mempty
-formatBorder borderStyle alignMarkers (c:cs)
-  | borderStyle c == NoLine
-    = openpipe <> text (replicate (cellWidth c + 2) ' ') <> closepipe <>
-      formatBorder borderStyle alignMarkers cs
-  | otherwise
-    = openplus <> leftalign <> underline <> rightalign <> closeplus <>
-      formatBorder borderStyle alignMarkers cs
-  where
-
-    openpipe = "|"
-    closepipe = if null cs then "|" else mempty
-    openplus = "+"
-    closeplus = if null cs
-                   then "+"
-                   else mempty
-    lineChar = case borderStyle c of
-                 NoLine -> ' '
-                 SingleLine -> '-'
-                 DoubleLine -> '='
-    (leftalign, rightalign) =
-       case cellAlign c of
-         _ | not alignMarkers -> (char lineChar,char lineChar)
-         AlignLeft -> (char ':',char lineChar)
-         AlignCenter -> (char ':',char ':')
-         AlignRight -> (char lineChar,char ':')
-         AlignDefault -> (char lineChar,char lineChar)
-    underline = text (replicate (cellWidth c) lineChar)
+formatBorder borderStyle alignMarkers cs =
+  borderParts <> if lastBorderStyle == NoLine
+                            then char '|'
+                            else char '+'
+ where
+   (lastBorderStyle, borderParts) = foldl' addBorder (NoLine, mempty) cs
+   addBorder (prevBorderStyle, accum) c =
+     (borderStyle c, accum <> char junctionChar <> toBorderSection c)
+      where junctionChar = case (borderStyle c, prevBorderStyle) of
+                               (NoLine, NoLine) -> '|'
+                               _ -> '+'
+   toBorderSection c =
+       text $ leftalign : replicate (cellWidth c) lineChar ++ [rightalign]
+     where
+       lineChar = case borderStyle c of
+                     NoLine -> ' '
+                     SingleLine -> '-'
+                     DoubleLine -> '='
+       (leftalign, rightalign) =
+           case cellAlign c of
+             _ | not alignMarkers -> (lineChar,lineChar)
+             AlignLeft -> (':',lineChar)
+             AlignCenter -> (':',':')
+             AlignRight -> (lineChar,':')
+             AlignDefault -> (lineChar,lineChar)
 
 data LineStyle = NoLine | SingleLine | DoubleLine
     deriving (Show, Ord, Eq)
@@ -465,7 +493,6 @@ data RenderedCell a =
               , cellAlign :: Alignment
               , cellRowSpan :: Int
               , cellWidth :: Int
-              , cellHeight :: Int
               , cellContents :: Doc a
               , cellBottomBorder :: LineStyle
               , cellTopBorder :: LineStyle
@@ -498,7 +525,6 @@ gridRow opts blocksToDoc = mapM renderCell
                          cellAlign = align,
                          cellRowSpan = rowspan,
                          cellWidth = width,
-                         cellHeight = height rendered,
                          cellContents = rendered,
                          cellBottomBorder = if rowspan < 2
                                                then SingleLine
