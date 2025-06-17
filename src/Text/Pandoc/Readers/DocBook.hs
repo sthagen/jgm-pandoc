@@ -15,6 +15,7 @@ Conversion of DocBook XML to 'Pandoc' document.
 -}
 module Text.Pandoc.Readers.DocBook ( readDocBook ) where
 import Control.Monad (MonadPlus(mplus))
+import Control.Applicative ()
 import Control.Monad.State.Strict
     ( MonadTrans(lift),
       StateT(runStateT),
@@ -931,9 +932,7 @@ parseBlock (Elem e) =
                                "lowerroman" -> LowerRoman
                                "upperroman" -> UpperRoman
                                _            -> Decimal
-          let start = fromMaybe 1 $
-                      filterElement (named "listitem") e
-                       >>= safeRead . attrValue "override"
+          let start = fromMaybe 1 $ safeRead $ attrValue "startingnumber" e
           orderedListWith (start,listStyle,DefaultDelim) . handleCompact
             <$> listitems
         "variablelist" -> definitionList <$> deflistitems
