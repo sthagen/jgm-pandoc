@@ -151,46 +151,26 @@ mapD f xs =
   in
    concatMapM handler xs
 
-isAltContentRun :: NameSpaces -> Element -> Bool
-isAltContentRun ns element
-  | isElem ns "w" "r" element
-  , Just _altContentElem <- findChildByName ns "mc" "AlternateContent" element
-  = True
-  | otherwise
-  = False
-
--- Elements such as <w:shape> are not always preferred
--- to be unwrapped. Only if they are part of an AlternateContent
--- element, they should be unwrapped.
--- This strategy prevents VML images breaking.
-unwrapAlternateContentElement :: NameSpaces -> Element -> [Element]
-unwrapAlternateContentElement ns element
-  | isElem ns "mc" "AlternateContent" element
-  || isElem ns "mc" "Fallback" element
-  || isElem ns "w" "pict" element
-  || isElem ns "v" "group" element
-  || isElem ns "v" "rect" element
-  || isElem ns "v" "roundrect" element
-  || isElem ns "v" "shape" element
-  || isElem ns "v" "textbox" element
-  || isElem ns "w" "txbxContent" element
-  = concatMap (unwrapAlternateContentElement ns) (elChildren element)
-  | otherwise
-  = unwrapElement ns element
-
 unwrapElement :: NameSpaces -> Element -> [Element]
 unwrapElement ns element
   | isElem ns "w" "sdt" element
   , Just sdtContent <- findChildByName ns "w" "sdtContent" element
   = concatMap (unwrapElement ns) (elChildren sdtContent)
-  | isElem ns "w" "r" element
-  , Just alternateContentElem <- findChildByName ns "mc" "AlternateContent" element
-  = unwrapAlternateContentElement ns alternateContentElem
   | isElem ns "w" "smartTag" element
   = concatMap (unwrapElement ns) (elChildren element)
   | isElem ns "w" "p" element
-  , Just (modified, altContentRuns) <- extractChildren element (isAltContentRun ns)
-  = (unwrapElement ns modified) ++ concatMap (unwrapElement ns) altContentRuns
+  , textboxes@(_:_) <- findChildrenByName ns "w" "r" element >>=
+                       findChildrenByName ns "mc" "AlternateContent" >>=
+                       findChildrenByName ns "mc" "Fallback" >>=
+                       findChildrenByName ns "w" "pict" >>=
+                       findChildrenByName ns "v" "shape" >>=
+                       findChildrenByName ns "v" "textbox" >>=
+                       findChildrenByName ns "w" "txbxContent"
+  = concatMap (unwrapElement ns) (concatMap elChildren textboxes) -- handle #9214
+  | isElem ns "w" "r" element
+  , Just fallback <- findChildByName ns "mc" "AlternateContent" element >>=
+                     findChildByName ns "mc" "Fallback"
+  = [element{ elContent = concatMap (unwrapContent ns) (elContent fallback) }]
   | otherwise
   = [element{ elContent = concatMap (unwrapContent ns) (elContent element) }]
 
@@ -1190,15 +1170,6 @@ childElemToRun ns element
 childElemToRun _ _ = throwError WrongElem
 
 elemToRun :: NameSpaces -> Element -> D [Run]
-elemToRun ns element
-  | isElem ns "w" "r" element
-  , Just altCont <- findChildByName ns "mc" "AlternateContent" element =
-    do let choices = findChildrenByName ns "mc" "Choice" altCont
-           choiceChildren = concatMap (take 1 . elChildren) choices
-       outputs <- mapD (childElemToRun ns) choiceChildren
-       case outputs of
-         r : _ -> return r
-         []    -> throwError WrongElem
 elemToRun ns element
   | isElem ns "w" "r" element
   , Just drawingElem <- findChildByName ns "w" "drawing" element =
