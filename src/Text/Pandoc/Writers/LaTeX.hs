@@ -183,6 +183,7 @@ pandocToLaTeX options (Pandoc meta blocks) = do
   st <- get
   titleMeta <- escapeCommas <$> -- see #10501
                 stringToLaTeX TextString (stringify $ docTitle meta)
+  subtitleMeta <- stringToLaTeX TextString (stringify $ lookupMetaInlines "subtitle" meta)
   authorsMeta <- mapM (stringToLaTeX TextString . stringify) $ docAuthors meta
   -- The trailer ID is as hash used to identify the PDF. Taking control of its
   -- value is important when aiming for reproducible PDF generation. Setting
@@ -233,6 +234,7 @@ pandocToLaTeX options (Pandoc meta blocks) = do
                                                  else 0)) $
                   defField "body" main $
                   defField "title-meta" titleMeta $
+                  defField "subtitle-meta" subtitleMeta $
                   defField "author-meta"
                         (T.intercalate "; " authorsMeta) $
                   defField "documentclass" documentClass $
@@ -543,7 +545,7 @@ blockToLaTeX (CodeBlock (identifier,classes,keyvalAttr) str) = do
                Right h -> do
                   when inNote $ modify (\s -> s{ stVerbInNote = True })
                   modify (\s -> s{ stHighlighting = True })
-                  return (flush $ linkAnchor $$ text (T.unpack h))
+                  return (flush $ linkAnchor $$ literal h)
   case () of
      _ | isEnabled Ext_literate_haskell opts && "haskell" `elem` classes &&
          "literate" `elem` classes           -> lhsCodeBlock
