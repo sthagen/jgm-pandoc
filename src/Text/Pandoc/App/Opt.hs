@@ -28,12 +28,12 @@ module Text.Pandoc.App.Opt (
           , fullDefaultsPath
           ) where
 import Control.Monad.Except (throwError)
-import Control.Monad.Trans (MonadIO, liftIO)
+import Control.Monad.Trans (MonadIO, liftIO, lift)
 import Control.Monad ((>=>), foldM)
 import Control.Monad.State.Strict (StateT, modify, gets)
 import System.FilePath ( addExtension, (</>), takeExtension, takeDirectory )
 import System.Directory ( canonicalizePath )
-import Data.Char (toLower)
+import Data.Char (toLower, isSpace)
 import Data.Maybe (fromMaybe)
 import GHC.Generics hiding (Meta)
 import Text.Pandoc.Filter (Filter (..))
@@ -62,7 +62,7 @@ import qualified Data.Map as M
 import qualified Data.ByteString.Char8 as B8
 import Text.Pandoc.Definition (Meta(..), MetaValue(..))
 import Data.Aeson (defaultOptions, Options(..), Result(..),
-                   genericToJSON, fromJSON, camelTo2)
+                   genericToJSON, fromJSON, camelTo2, eitherDecodeStrict)
 import Data.Aeson.TH (deriveJSON)
 import Control.Applicative ((<|>))
 import Data.Yaml
@@ -395,39 +395,49 @@ resolveVarsInOpt
                 }
 
  where
-  resolveVars :: FilePath -> StateT DefaultsState m FilePath
-  resolveVars [] = return []
-  resolveVars ('$':'{':xs) =
+  resolveVars = expandVars (optDataDir opt)
+  resolveVarsInFilter (JSONFilter fp) =
+    JSONFilter <$> resolveVars fp
+  resolveVarsInFilter (LuaFilter fp) =
+    LuaFilter <$> resolveVars fp
+  resolveVarsInFilter CiteprocFilter = return CiteprocFilter
+
+
+expandVars :: (PandocMonad m, MonadIO m)
+           => Maybe FilePath
+           -> FilePath
+           -> StateT DefaultsState m FilePath
+expandVars _ [] = return []
+expandVars mbDataDir ('$':'{':xs) =
     let (ys, zs) = break (=='}') xs
      in if null zs
            then return $ '$':'{':xs
            else do
-             val <- lookupEnv' ys
-             (val ++) <$> resolveVars (drop 1 zs)
-  resolveVars (c:cs) = (c:) <$> resolveVars cs
-  lookupEnv' :: String -> StateT DefaultsState m String
-  lookupEnv' "." = do
+             val <- expandEnv mbDataDir ys
+             (val ++) <$> expandVars mbDataDir (drop 1 zs)
+expandVars mbDataDir (c:cs) = (c:) <$> expandVars mbDataDir cs
+
+expandEnv :: (PandocMonad m, MonadIO m)
+          => Maybe FilePath
+          -> String
+          -> StateT DefaultsState m String
+expandEnv _ "." = do
     mbCurDefaults <- gets curDefaults
     maybe (return "")
           (fmap takeDirectory . liftIO . canonicalizePath)
           mbCurDefaults
-  lookupEnv' "USERDATA" = do
-    mbodatadir <- mapM resolveVars oDataDir
-    mbdatadir  <- getUserDataDir
+expandEnv mbDataDir "USERDATA" = do
+    mbodatadir <- mapM (expandVars mbDataDir) mbDataDir
+    mbdatadir'  <- getUserDataDir
     defdatadir <- liftIO defaultUserDataDir
-    return $ fromMaybe defdatadir (mbodatadir <|> mbdatadir)
-  lookupEnv' v = do
+    return $ fromMaybe defdatadir (mbodatadir <|> mbdatadir')
+expandEnv _ v = do
     mbval <- fmap T.unpack <$> lookupEnv (T.pack v)
     case mbval of
       Nothing -> do
         report $ EnvironmentVariableUndefined (T.pack v)
         return mempty
       Just x  -> return x
-  resolveVarsInFilter (JSONFilter fp) =
-    JSONFilter <$> resolveVars fp
-  resolveVarsInFilter (LuaFilter fp) =
-    LuaFilter <$> resolveVars fp
-  resolveVarsInFilter CiteprocFilter = return CiteprocFilter
 
 
 
@@ -438,8 +448,9 @@ parseDefaults :: (PandocMonad m, MonadIO m)
 parseDefaults n dataDir = parseDefsNames n >>= \ds -> return $ \o -> do
   -- get parent defaults:
   defsParent <- gets $ fromMaybe "" . curDefaults
+  expandedDataDir <- mapM (expandVars dataDir) dataDir
   -- get child defaults:
-  defsChildren <- mapM (fullDefaultsPath dataDir) ds
+  defsChildren <- mapM (\d -> expandVars expandedDataDir d >>= lift . fullDefaultsPath expandedDataDir) ds
   -- expand parent in defaults inheritance graph by children:
   defsGraph <- gets inheritanceGraph
   let defsGraphExp = expand defsGraph defsChildren defsParent
@@ -858,11 +869,19 @@ applyDefaults opt file = do
   setVerbosity $ optVerbosity opt
   modify $ \defsState -> defsState{ curDefaults = Just file }
   inp <- readFileStrict file
-  case decodeEither' (B8.unlines . takeWhile (/= "...") . B8.lines $ inp) of
-      Right f -> f opt
-      Left err'  -> throwError $
-         PandocParseError
-             $ T.pack $ Data.Yaml.prettyPrintParseException err'
+  let isJSON = B8.take 1 (B8.dropWhile isSpace inp) == "{"
+  if isJSON
+     then
+       case eitherDecodeStrict inp of
+         Right f -> f opt
+         Left err' -> throwError $ PandocParseError $ T.pack $
+            "Error parsing " <> file <> ":\n" <> err'
+     else
+       case decodeEither' (B8.unlines . takeWhile (/= "...") . B8.lines $ inp) of
+           Right f -> f opt
+           Left err'  -> throwError $ PandocParseError $ T.pack $
+                  "Error parsing " <> file <> ":\n" <>
+                  Data.Yaml.prettyPrintParseException err'
 
 fullDefaultsPath :: (PandocMonad m, MonadIO m)
                  => Maybe FilePath
