@@ -17,6 +17,7 @@ WEBSITE=../../web/pandoc.org
 REVISION?=1
 BENCHARGS?=--csv bench_$(TIMESTAMP).csv $(BASELINECMD) --timeout=6 +RTS -T --nonmoving-gc -RTS $(if $(PATTERN),--pattern "$(PATTERN)",)
 pandoc=$(shell cabal list-bin $(CABALOPTS) pandoc-cli)
+OPTIMIZE_WASM?=1
 
 all: build test binpath ## build executable and run tests
 .PHONY: all
@@ -151,10 +152,6 @@ coverage: ## code coverage information
 	hpc markup --destdir=coverage test/test-pandoc.tix
 	open coverage/hpc_index.html
 .PHONY: coverage
-
-weeder: ## run weeder to find dead code
-	weeder
-.PHONY: weeder
 
 transitive-deps: ## print transitive dependencies
 	cabal-plan topo | sort | sed -e 's/-[0-9]\..*//'
@@ -326,3 +323,16 @@ release-checklist-$(VERSION).org: RELEASE-CHECKLIST-TEMPLATE.org
 hie.yaml: ## regenerate hie.yaml
 	gen-hie > $@
 .PHONY: hie.yaml
+
+pandoc.wasm: ## build pandoc.wasm
+	-rm $@
+	wasm32-wasi-cabal update
+	wasm32-wasi-cabal build pandoc-cli
+ifeq ($(OPTIMIZE_WASM),1)
+	echo "Optimizing (this may take a long time, to avoid, set OPTIMIZE_WASM=0)..."
+	wasm-opt -Oz $$(wasm32-wasi-cabal list-bin pandoc-cli | tail -1) -o $@
+else
+	echo "Copying unoptimized pandoc.wasm..."
+	cp "$$(wasm32-wasi-cabal list-bin pandoc-cli | tail -1)" "$@"
+endif
+.PHONY: pandoc.wasm

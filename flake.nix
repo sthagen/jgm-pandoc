@@ -4,9 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
+    ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -21,18 +22,18 @@
         #   };
         # }).extend(self: super: {
         #   citeproc = pkgs.haskell.lib.dontCheck (self.callHackage "citeproc" "0.9.0.1" {});
-        #   commonmark-pandoc = self.callHackage "commonmark-pandoc" "0.2.3" {};
-        #   typst-symbols = self.callHackage "typst-symbols" "0.1.8.1" {};
-        #   typst = self.callHackage "typst" "0.8" {};
         #   texmath = self.callHackage "texmath" "0.12.10.2" {};
-        #   toml-parser = self.callHackage "toml-parser" "2.0.1.2" {};
         # });
 
         jailbreakUnbreak = pkg:
           pkgs.haskell.lib.doJailbreak (pkg.overrideAttrs (_: { meta = { }; }));
 
-        # DON'T FORGET TO PUT YOUR PACKAGE NAME HERE, REMOVING `throw`
+        # PUT YOUR PACKAGE NAME HERE:
         packageName = "pandoc";
+
+        wasmToolchain = ghc-wasm-meta.packages.${system}.default;
+        # Alternatively, if you want a specific "bundle":
+        # wasmToolchain = ghc-wasm-meta.packages.${system}.all_9_14;
       in {
         packages.${packageName} =
           haskellPackages.callCabal2nix packageName self rec {
@@ -44,11 +45,11 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            haskellPackages.haskell-language-server # you must build it with your ghc to work
+            wasmToolchain
+            haskellPackages.haskell-language-server
             haskellPackages.hlint
             haskellPackages.cabal-install
             haskellPackages.cabal-plan
-            haskellPackages.weeder
             haskellPackages.hpc
             haskellPackages.ghcid
             haskellPackages.stylish-haskell
@@ -59,15 +60,16 @@
             git
             gnumake
             bashInteractive
-            epubcheck # for validate-epub
-            nodejs # for validate-epub
             ripgrep
             unzip
-            libxml2 # for xmllint
             jq
+            libxml2 # for xmllint
+            epubcheck # for validate-epub
+            nodejs # for validate-epub
           ];
           inputsFrom = map (__getAttr "env") (__attrValues self.packages.${system});
         };
+
         devShell = self.devShells.${system}.default;
       });
 }
