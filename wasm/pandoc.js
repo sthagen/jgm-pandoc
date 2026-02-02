@@ -1,7 +1,9 @@
 /* pandoc.js: JavaScript interface to pandoc.wasm.
    Copyright (c) 2025 Tweag I/O Limited and John MacFarlane. MIT License.
 
-   Interface: await pandoc(options, stdin, files)
+   Interface:
+
+   await convert(options, stdin, files)
 
    - options is a JavaScript object representing pandoc options: this should
      correspond to the format used in pandoc's default files.
@@ -9,10 +11,21 @@
    - files is a JavaScript object whose keys are filenames and whose values
      are the data in the corresponding file, as Blobs.
 
-   The return value is a JavaScript object with 3 properties, stdout, stderr,
-   and warnings, all strings.  warnings is a JSON-encoded version of the warnings
-   produced by pandoc. If the pandoc process produces an output file, it will be
-   added to files.
+   The return value is a JavaScript object with 3 properties, stdout,
+   stderr, and warnings, all strings. warnings is a JSON-encoded
+   version of the warnings produced by pandoc. If the pandoc process
+   produces an output file, it will be added to files.
+
+   await query(options)
+
+    - options is a JavaScript object with a 'query' property and in
+      some cases a 'format' property. Possible queries include
+      'version', 'highlight-styles', 'highlight-languages', 'input-formats',
+      'output-formats', 'default-template' (requires 'format'),
+      and 'extensions-for-format' (requires 'format').
+
+   The return value is a JavaScript string or in some cases a list
+   of strings.
 */
 
 import {
@@ -70,7 +83,7 @@ memory_data_view().setUint32(argv_ptr, argv, true);
 
 instance.exports.hs_init_with_rtsopts(argc_ptr, argv_ptr);
 
-export async function getExtensionsForFormat(options) {
+export async function query(options) {
   const opts_str = JSON.stringify(options);
   const opts_ptr = instance.exports.malloc(opts_str.length);
   new TextEncoder().encodeInto(
@@ -83,12 +96,16 @@ export async function getExtensionsForFormat(options) {
   const err_file = new File(new Uint8Array(), { readonly: false });
   fileSystem.set("stdout", out_file);
   fileSystem.set("stderr", err_file);
-  instance.exports.get_extensions_for_format(opts_ptr, opts_str.length);
+  instance.exports.query(opts_ptr, opts_str.length);
 
-  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(out_file.data));
+  const err_text = new TextDecoder("utf-8", { fatal: true }).decode(err_file.data);
+  if (err_text) console.log(err_text);
+  const out_text = new TextDecoder("utf-8", { fatal: true }).decode(out_file.data);
+  return JSON.parse(out_text);
 }
 
-export async function pandoc(options, stdin, files) {
+
+export async function convert(options, stdin, files) {
   const opts_str = JSON.stringify(options);
   const opts_ptr = instance.exports.malloc(opts_str.length);
   new TextEncoder().encodeInto(
@@ -119,7 +136,7 @@ export async function pandoc(options, stdin, files) {
   if (stdin) {
     in_file.data = new TextEncoder().encode(stdin);
   }
-  instance.exports.wasm_main(opts_ptr, opts_str.length);
+  instance.exports.convert(opts_ptr, opts_str.length);
 
   if (options["output-file"]) {
     files[options["output-file"]] =
