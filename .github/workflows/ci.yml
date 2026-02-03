@@ -49,19 +49,16 @@ jobs:
           # NOTE: Update `CONTRIBUTING.md` when changing the minimum version
           - ghc: '9.6'
             cabal: 'latest'
-            cabalopts: '--ghc-option=-Werror -fhttp'
+            cabalopts: '--ghc-option=-Werror'
           - ghc: '9.8'
             cabal: 'latest'
-            cabalopts: '--ghc-option=-Werror -fhttp'
+            cabalopts: '--ghc-option=-Werror'
           - ghc: '9.10'
             cabal: 'latest'
-            cabalopts: '--ghc-option=-Werror -fhttp'
+            cabalopts: '--ghc-option=-Werror'
           - ghc: '9.12'
             cabal: 'latest'
-            cabalopts: '--ghc-option=-Werror -fhttp'
-          - ghc: '9.12'
-            cabal: 'latest'
-            cabalopts: '--ghc-option=-Werror -f-http --test-option="-p /XXXXX/"'
+            cabalopts: '--ghc-option=-Werror'
 
     steps:
     - uses: actions/checkout@v6
@@ -192,7 +189,7 @@ jobs:
     - name: Build and test
       run: |
           cabal update
-          cabal test ${{ matrix.versions.cabalopts }} --enable-tests --disable-optimization --ghc-options=-Werror all
+          cabal test --ghc-option=-Werror -fhttp --enable-tests --disable-optimization --ghc-options=-Werror all
 
 # We no longer run the macos tests, to make CI faster.
 # macos:
