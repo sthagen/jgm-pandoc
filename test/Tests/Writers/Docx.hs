@@ -222,6 +222,67 @@ tests = [ testGroup "inlines"
             "docx/document-properties-short-desc.native"
             "docx/golden/document-properties-short-desc.docx"
           ]
+        , testGroup "top-level-division"
+          -- Helper to count occurrences of a substring
+          -- Note: counts by splitting on "<w:sectPr" which marks section properties
+          [ testCase "no section break before first chapter (#10578)" $ do
+              -- With --top-level-division=chapter, there should be no section
+              -- break before the first chapter (to avoid blank first page)
+              let opts = def{ writerTopLevelDivision = TopLevelChapter }
+              bs <- runIOorExplode $ do
+                setVerbosity ERROR
+                let doc = Pandoc mempty
+                          [ Header 1 ("ch1", [], []) [Str "Chapter", Space, Str "1"]
+                          , Para [Str "First", Space, Str "chapter."]
+                          ]
+                writeDocx opts doc
+              let archive = toArchive bs
+              entry <- case findEntryByPath "word/document.xml" archive of
+                Nothing -> assertFailure "Missing word/document.xml in output docx"
+                Just e -> return e
+              let docXml = show (fromEntry entry)
+              -- Count occurrences of "<w:sectPr" (opening tag for section properties)
+              let countOccurrences needle haystack =
+                    length (filter (needle `isPrefixOf`) (tails haystack))
+                    where tails [] = []; tails s@(_:xs) = s : tails xs
+              let sectPrCount = countOccurrences "<w:sectPr" docXml
+              -- Should have exactly 1 sectPr (the final document section),
+              -- not 2 (which would mean one before the chapter heading)
+              assertBool ("Expected 1 sectPr (final section only), found " ++ show sectPrCount)
+                (sectPrCount == 1)
+          , testCase "section breaks between chapters (#11482)" $ do
+              -- With --top-level-division=chapter, there should be section
+              -- breaks between chapters (but not before the first one)
+              let opts = def{ writerTopLevelDivision = TopLevelChapter }
+              bs <- runIOorExplode $ do
+                setVerbosity ERROR
+                let doc = Pandoc mempty
+                          [ Header 1 ("ch1", [], []) [Str "Chapter", Space, Str "1"]
+                          , Para [Str "First", Space, Str "chapter."]
+                          , Header 1 ("ch2", [], []) [Str "Chapter", Space, Str "2"]
+                          , Para [Str "Second", Space, Str "chapter."]
+                          , Header 1 ("ch3", [], []) [Str "Chapter", Space, Str "3"]
+                          , Para [Str "Third", Space, Str "chapter."]
+                          ]
+                writeDocx opts doc
+              let archive = toArchive bs
+              entry <- case findEntryByPath "word/document.xml" archive of
+                Nothing -> assertFailure "Missing word/document.xml in output docx"
+                Just e -> return e
+              let docXml = show (fromEntry entry)
+              -- Count occurrences of "<w:sectPr" (opening tag for section properties)
+              let countOccurrences needle haystack =
+                    length (filter (needle `isPrefixOf`) (tails haystack))
+                    where tails [] = []; tails s@(_:xs) = s : tails xs
+              let sectPrCount = countOccurrences "<w:sectPr" docXml
+              -- Should have 3 sectPr elements:
+              -- - 1 before chapter 2
+              -- - 1 before chapter 3
+              -- - 1 final document section
+              -- (No section break before chapter 1)
+              assertBool ("Expected 3 sectPr elements, found " ++ show sectPrCount)
+                (sectPrCount == 3)
+          ]
         , testGroup "reference docx"
           [ testCase "no media directory override in content types" $ do
               let opts = def{ writerReferenceDoc = Just "docx/inline_images.docx" }
