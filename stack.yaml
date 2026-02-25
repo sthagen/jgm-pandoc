@@ -30,6 +30,8 @@ extra-deps:
   commit: 1e2ecd62451ddfc9139c680a3aa5fe2637299a7f
 - git: https://github.com/jgm/asciidoc-hs
   commit: 16775c344b62daf6cfdc162200afc77cfb387468
+- git: https://github.com/jgm/djoths
+  commit: adbed8db6660f72659803ffc6091b2117fa948fb
 
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
