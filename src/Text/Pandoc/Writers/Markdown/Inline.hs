@@ -89,6 +89,9 @@ escapeText opts = T.pack . go' . T.unpack
     | isEnabled Ext_mark opts = '\\':'=':go ('=':cs)
   go ('~':'~':cs)
     | isEnabled Ext_strikeout opts = '\\':'~':go ('~':cs)
+  go ('&':cs)
+    | Right _ <- parse characterReference "" ('&':cs)
+    = '\\':'&': go cs
   go (c:cs) =
     case c of
        '[' -> '\\':c:go cs
