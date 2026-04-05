@@ -129,10 +129,10 @@ blockToMediaWiki (Para inlines) = do
   contents <- inlineListToMediaWiki inlines
   let contents' = render Nothing contents
   let initEsc = if startsWithListMarker contents'
-                   then literal "\\"
+                   then literal "<nowiki></nowiki>"
                    else mempty
   return $ if tags
-              then  literal "<p>" <> contents <> literal "</p>"
+              then literal "<p>" <> contents <> literal "</p>"
               else initEsc <> contents $$
                    if null lev then blankline else mempty
 
@@ -492,7 +492,7 @@ inlineToMediaWiki (Link _ txt (src, _)) = do
   let label' = render Nothing label
   case txt of
      [Str s] | isURI src && escapeURI s == src -> return $ literal src
-     _  -> return $ literal $ if isURI src
+     _  -> return $ literal $ if isURI (T.takeWhile (/= '#') src) -- see #11562
        then "[" <> src <> " " <> label' <> "]"
        else
          if src == label'
