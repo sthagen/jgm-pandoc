@@ -199,7 +199,8 @@ handleOptInfo engine info = E.handle (handleError . Left) $ do
     VersionInfo -> versionInfo [] Nothing ""
     Help -> do
       prg <- getProgName
-      UTF8.hPutStr stdout (T.pack $ usageMessage prg options)
+      mapM_ (UTF8.hPutStrLn stdout . T.stripEnd . T.pack) $
+        lines $ usageMessage prg options
     OptError e -> E.throwIO e
   exitSuccess
 
