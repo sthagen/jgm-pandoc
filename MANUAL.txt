@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: 2026-03-19
+date: 2026-06-03
 ---
 
 # Synopsis
@@ -1970,6 +1970,11 @@ those in another file included with a `defaults:` entry.
 +----------------------------------+-----------------------------------+
 | ```                              | ``` yaml                          |
 | --abbreviations abbrevs.txt      | abbreviations: abbrevs.txt        |
+| ```                              | ```                               |
++----------------------------------+-----------------------------------+
+| ```                              | ``` yaml                          |
+| --typst-input foo=bar            | typst-inputs:                     |
+|                                  |   foo: bar                        |
 | ```                              | ```                               |
 +----------------------------------+-----------------------------------+
 | ```                              | ``` yaml                          |
