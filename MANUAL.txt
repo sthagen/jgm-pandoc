@@ -4614,7 +4614,7 @@ or two spaces.
 
 A term may have multiple definitions, and each definition may
 consist of one or more indented block elements (paragraph, code block,
-list, etc.). The blocks in the definition shoud be indented to the column
+list, etc.). The blocks in the definition should be indented to the column
 of the first non-space content after the `:` or `~` marker, or
 (if the `four_space_rule` extension is enabled) four spaces or
 one tab stop. As with other Markdown lists, you can "lazily" omit
@@ -4746,9 +4746,12 @@ lines that follow as a YAML metadata block or a table.
 
 ## Tables
 
-Four kinds of tables may be used. The first three kinds presuppose the use of
-a fixed-width font, such as Courier. The fourth kind can be used with
-proportionally spaced fonts, as it does not require lining up columns.
+Four kinds of tables may be used. The first three kinds (simple,
+multiline, and grid) require lining up columns and thus
+presuppose the use of a fixed-width font, such as Courier.
+The fourth kind (pipe tables) can be used with
+proportionally spaced fonts, as it does not require lining up
+columns.
 
 ### Extension: `table_captions` ###
 
