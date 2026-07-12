@@ -138,8 +138,8 @@ When using LaTeX, the following packages need to be available
 [`amsfonts`], [`amsmath`], [`lm`], [`unicode-math`],
 [`iftex`], [`listings`] (if the
 `--listings` option is used), [`fancyvrb`], [`longtable`],
-[`booktabs`], [`multirow`] (if the document contains a table with
-cells that cross multiple rows), [`graphicx`] (if the document
+[`caption`], [`booktabs`], [`multirow`] (if the document contains a table
+with cells that cross multiple rows), [`graphicx`] (if the document
 contains images), [`bookmark`], [`xcolor`],
 [`soul`], [`geometry`] (with the `geometry` variable set),
 [`setspace`] (with `linestretch`), and
@@ -191,6 +191,7 @@ better line breaks in URLs), and [`footnotehyper`] or
 [`lua-ul`]: https://ctan.org/pkg/lua-ul
 [`luatexja`]: https://ctan.org/pkg/luatexja
 [`longtable`]: https://ctan.org/pkg/longtable
+[`caption`]: https://ctan.org/pkg/caption
 [`mathspec`]: https://ctan.org/pkg/mathspec
 [`microtype`]: https://ctan.org/pkg/microtype
 [`multirow`]: https://ctan.org/pkg/multirow
@@ -3539,6 +3540,11 @@ The `--css` option also affects the output.
 [`install-font.sh`]: https://www.schaffter.ca/mom/bin/install-font.sh
 [ms-font-steps]: https://www.schaffter.ca/mom/momdoc/appendices.html#steps
 
+### Variables for RTF
+
+`fontsize`
+:   font size for body text, e.g. `12pt` or `12.5pt`.
+
 ### Variables set automatically
 
 Pandoc sets these variables automatically in response to [options] or
@@ -4552,6 +4558,10 @@ ordered list marker in place of a numeral:
 
 Note:  the '`#`' ordered list marker doesn't work with `commonmark`.
 
+As with `commonmark`, ordered sublists must start with `1` or the
+equivalent (e.g., `i` or `a`). This helps avoid unintentional
+lists caused by things like parenthesized dates.
+
 ### Extension: `startnum` ###
 
 Pandoc also pays attention to the type of list marker used, and to the
@@ -4995,6 +5005,29 @@ of the caption. (For the syntax, see
 [`header_attributes`][Extension: `header_attributes`].)
 
       : Here's the caption. {#ident .class key="value"}
+
+### Table placement in LaTeX ###
+
+By default, pandoc will render tables in LaTeX using the `longtable`
+environment. The tables will not "float" and they can span page boundaries.
+If you prefer standard "floating" tables (which are limited to what can
+fit on one page), add the `float` class to the table's attributes
+(which can be specified after the caption). Optionally, the `latex-placement`
+attribute may be used to pass parameters affecting the float placement:
+
+    : The caption of the table. {#ident .float latex-placement="ht"}
+
+Note that `longtable` does not work with two-column layouts, so if you
+are producing a two-column document using LaTeX, you will need to specify
+the `float` class on every table, or use this small Lua filter
+to add it automatically:
+
+```lua
+function Table(el)
+  el.classes:insert("float")
+  return el
+end
+```
 
 ## Metadata blocks
 

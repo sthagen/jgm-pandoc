@@ -1,14 +1,13 @@
-#let horizontalrule = line(start: (25%,0%), end: (75%,0%))
-
-#show terms.item: it => block(breakable: false)[
-  #text(weight: "bold")[#it.term]
-  #block(inset: (left: 1.5em, top: -0.4em))[#it.description]
-]
+#set terms(hanging-indent: 1.5em)
 
 #set table(
   inset: 6pt,
   stroke: none
 )
+
+#let horizontalrule = line(start: (25%,0%), end: (75%,0%))
+// Polyfill divider to allow compiling with typst < 0.15:
+#let divider = if "divider" in std { divider } else { horizontalRule }
 
 #show figure.where(
   kind: table
@@ -159,7 +158,7 @@
 This is a set of tests for pandoc. Most of them are adapted from John Gruber's
 markdown test suite.
 
-#horizontalrule
+#divider()
 
 = Headers
 <headers>
@@ -183,7 +182,7 @@ with no blank line
 <level-2>
 with no blank line
 
-#horizontalrule
+#divider()
 
 = Paragraphs
 <paragraphs>
@@ -197,7 +196,7 @@ Here's one with a bullet. \* criminey.
 
 There should be a hard line break \ here.
 
-#horizontalrule
+#divider()
 
 = Block Quotes
 <block-quotes>
@@ -236,7 +235,7 @@ This should not be a block quote: 2 \> 1.
 
 And a following paragraph.
 
-#horizontalrule
+#divider()
 
 = Code Blocks
 <code-blocks>
@@ -260,7 +259,7 @@ And:
 These should not be escaped:  \$ \\ \> \[ \{
 ```
 
-#horizontalrule
+#divider()
 
 = Lists
 <lists>
@@ -396,8 +395,8 @@ Same thing but with paragraphs:
   with a continuation
 
   #block[
-  #set enum(numbering: "i.", start: 4)
-  + sublist with roman numerals, starting with 4
+  #set enum(numbering: "i.", start: 1)
+  + sublist with roman numerals starting with i.
   + more items
     #block[
     #set enum(numbering: "(A)", start: 1)
@@ -410,16 +409,16 @@ Same thing but with paragraphs:
 Nesting:
 
 #block[
-#set enum(numbering: "A.", start: 1)
+#set enum(numbering: "A.", start: 4)
 + Upper Alpha
   #block[
   #set enum(numbering: "I.", start: 1)
   + Upper Roman.
     #block[
-    #set enum(numbering: "(1)", start: 6)
-    + Decimal start with 6
+    #set enum(numbering: "(1)", start: 1)
+    + Decimal start with 1
       #block[
-      #set enum(numbering: "a)", start: 3)
+      #set enum(numbering: "a)", start: 1)
       + Lower alpha with paren
       ]
     ]
@@ -438,37 +437,21 @@ M.A.~2007
 
 B. Williams
 
-#horizontalrule
+#divider()
 
 = Definition Lists
 <definition-lists>
 Tight using spaces:
 
-/ apple: #block[
-red fruit
-]
-
-/ orange: #block[
-orange fruit
-]
-
-/ banana: #block[
-yellow fruit
-]
+/ apple: red fruit
+/ orange: orange fruit
+/ banana: yellow fruit
 
 Tight using tabs:
 
-/ apple: #block[
-red fruit
-]
-
-/ orange: #block[
-orange fruit
-]
-
-/ banana: #block[
-yellow fruit
-]
+/ apple: red fruit
+/ orange: orange fruit
+/ banana: yellow fruit
 
 Loose:
 
@@ -511,7 +494,6 @@ red fruit
 
 computer
 ]
-
 / orange: #block[
 orange fruit
 
@@ -620,7 +602,7 @@ Code:
 
 Hr's:
 
-#horizontalrule
+#divider()
 
 = Inline Markup
 <inline-markup>
@@ -649,7 +631,7 @@ Subscripts: H#sub[2]O, H#sub[23]O, H#sub[many~of~them]O.
 These should not be superscripts or subscripts, because of the unescaped spaces:
 a^b c^d, a\~b c\~d.
 
-#horizontalrule
+#divider()
 
 = Smart quotes, ellipses, dashes
 <smart-quotes-ellipses-dashes>
@@ -670,7 +652,7 @@ Dashes between numbers: 5--7, 255--66, 1987--1999.
 
 Ellipses…and…and….
 
-#horizontalrule
+#divider()
 
 = LaTeX
 <latex>
@@ -694,7 +676,7 @@ These shouldn't be math:
 
 Here's a LaTeX table:
 
-#horizontalrule
+#divider()
 
 = Special Characters
 <special-characters>
@@ -748,7 +730,7 @@ Plus: +
 
 Minus: -
 
-#horizontalrule
+#divider()
 
 = Links
 <links>
@@ -827,7 +809,7 @@ Auto-links should not occur here: `<http://example.com/>`
 or here: <http://example.com/>
 ```
 
-#horizontalrule
+#divider()
 
 = Images
 <images>
@@ -841,7 +823,7 @@ From "Voyage dans la Lune" by Georges Melies (1902):
 
 Here is a movie #box(image("movie.jpg", alt: "movie")) icon.
 
-#horizontalrule
+#divider()
 
 = Footnotes
 <footnotes>

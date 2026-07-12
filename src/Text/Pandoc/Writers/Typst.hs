@@ -235,7 +235,7 @@ blockToTypst block =
       contents <- blocksToTypst blocks
       return $ "#quote(block: true)[" $$ chomp contents $$ "]" $$ blankline
     HorizontalRule ->
-      return $ blankline <> "#horizontalrule" <> blankline
+      return $ blankline <> "#divider()" <> blankline
     OrderedList attribs items -> do
       let addBlock = case attribs of
                        (1, DefaultStyle, DefaultDelim) -> id
@@ -264,8 +264,11 @@ blockToTypst block =
       return $ (if isTightList items
                    then vcat items'
                    else vsep items') $$ blankline
-    DefinitionList items ->
-      ($$ blankline) . vsep <$> mapM defListItemToTypst items
+    DefinitionList items -> do
+      let concat' = if all (isTightList . snd) items
+                    then vcat
+                    else vsep
+      ($$ blankline) . concat' <$> mapM defListItemToTypst items
     Table (ident,tabclasses,tabkvs) (Caption _ caption) colspecs thead tbodies tfoot -> do
       let lab = toLabel FreestandingLabel ident
       capt' <- if null caption
@@ -400,7 +403,10 @@ defListItemToTypst (term, defns) = do
   term' <- inlinesToTypst term
   modify $ \st -> st{ stEscapeContext = NormalContext }
   defns' <- mapM blocksToTypst defns
-  return $ nowrap ("/ " <> term' <> ": " <> "#block[") $$
+  return $
+    case defns of
+      [[Plain _]] -> hang 4 (nowrap ("/ " <> term' <> ": ")) (vcat defns')
+      _ -> nowrap ("/ " <> term' <> ": " <> "#block[") $$
             chomp (vsep defns') $$ "]"
 
 listItemToTypst :: PandocMonad m => Int -> Doc Text -> [Block] -> TW m (Doc Text)

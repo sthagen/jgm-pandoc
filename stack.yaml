@@ -21,20 +21,27 @@ extra-deps:
 - hslua-packaging-2.4.1
 - hslua-typing-0.2.0
 - pandoc-lua-marshal-0.3.2.1
-- skylighting-format-blaze-html-0.1.2
-- djot-0.1.4
 - asciidoc-0.1.0.3
 - doclayout-0.5.0.3
 - commonmark-0.3
 - commonmark-pandoc-0.3
-- commonmark-extensions-0.2.7
 - citeproc-0.13.0.1
 - pandoc-types-1.23.1.2
-- typst-symbols-0.2
-- typst-0.10
 - emojis-0.1.5
 - git: https://github.com/jgm/texmath.git
-  commit: 170899673ee31de9096e178605e8da31a36e4185
+  commit: e5d689366e4d480f96e9453f455d1a4362fad880
+- git: https://github.com/jgm/djoths.git
+  commit: 6d13d92126d3d10c571bcb9543fd6c889e9aad3f
+- git: https://github.com/jgm/commonmark-hs
+  commit: 73903fa7723ca2b1a1120063451e9647d1382754
+  subdirs: [commonmark-extensions]
+- git: https://github.com/jgm/typst-hs.git
+  commit: 1a94f1fd69841fd4039441afa3e1ed330db8e334
+- git: https://github.com/jgm/skylighting.git
+  commit: c196a0e4da03b7212db8fcc122a6a1c1fcdecb87
+  subdirs: [skylighting-format-blaze-html]
+- git: https://github.com/jgm/typst-symbols.git
+  commit: 928839de6742b61ee601ce4510cf4dcfd044354d
 
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
