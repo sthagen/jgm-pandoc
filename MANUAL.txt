@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: 2026-06-03
+date: 2026-07-21
 ---
 
 # Synopsis
@@ -5790,7 +5790,8 @@ HTML slide shows and EPUB), LaTeX, and ConTeXt.
 ## Images
 
 A link immediately preceded by a `!` will be treated as an image.
-The link text will be used as the image's alt text:
+The link text (the part in square brackets) will be used as the
+image's alt text:
 
     ![la lune](lalune.jpg "Voyage to the moon")
 
