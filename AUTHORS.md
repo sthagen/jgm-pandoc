@@ -351,6 +351,7 @@
 - Peter Wang
 - Philip Pesca
 - Philippe Ombredanne
+- Philipp Gillé
 - Phillip Alday
 - Pranesh Prakash
 - Prat
@@ -486,6 +487,7 @@
 - ech0
 - etclub
 - favonia
+- gemmaro
 - guqicun
 - har7an
 - harabat
@@ -493,6 +495,7 @@
 - infinity0x
 - jeongminkim-islab
 - josch
+- k6G52m4Dz75W
 - kaizshang91
 - lawcho
 - lifeunleaded
