@@ -99,7 +99,6 @@ import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import qualified Text.Pandoc.Class.PandocMonad as P
 import Text.Pandoc.Error
 import Text.Pandoc.Logging
-import Data.List.NonEmpty (nonEmpty)
 import Data.Aeson (eitherDecode)
 import qualified Data.Text.Lazy as TL
 import Text.Pandoc.UTF8 (fromTextLazy)
@@ -628,14 +627,20 @@ rowsToRows rows = do
   return (fmap (Pandoc.Row nullAttr) cells)
 
 splitHeaderRows :: Bool -> [Docx.Row] -> ([Docx.Row], [Docx.Row])
-splitHeaderRows hasFirstRowFormatting rs = bimap reverse reverse $ fst
-  $ if hasFirstRowFormatting
-    then L.foldl' f ((take 1 rs, []), True) (drop 1 rs)
-    else L.foldl' f (([], []), False) rs
+splitHeaderRows hasFirstRowFormatting rs =
+  bimap reverse reverse $ fst $
+  if hasFirstRowFormatting
+     then L.foldl' f ((take 1 rs, []), True) (drop 1 rs)
+     else L.foldl' f (([], []), False) rs
   where
     f ((headerRows, bodyRows), previousRowWasHeader) r@(Docx.Row h cs)
       | h == HasTblHeader || (previousRowWasHeader && any isContinuationCell cs)
-        = ((r : headerRows, bodyRows), True)
+        = if null headerRows
+             -- in rare cases we have non-header rows before a header row.
+             -- in this case it's important to retain the order of rows,
+             -- so we promote the preceeding body rows to header rows:
+             then ((r : bodyRows, []), True)
+             else ((r : headerRows, bodyRows), True)
       | otherwise
         = ((headerRows, r : bodyRows), False)
 
@@ -834,22 +839,22 @@ bodyPartToBlocks (Tbl mbsty cap grid look parts) = do
       cap' = caption shortCaption fullCaption
       (hdr, rows) = splitHeaderRows (firstRowFormatting look) parts
 
-  let width = maybe 0 maximum $ nonEmpty $ map rowLength parts
-      rowLength :: Docx.Row -> Int
-      rowLength (Docx.Row _ c) = sum (fmap (\(Docx.Cell _ gridSpan _ _) -> fromIntegral gridSpan) c)
-
   headerCells <- rowsToRows hdr
   bodyCells <- rowsToRows rows
 
-      -- Horizontal column alignment is taken from the first row's cells.
-  let getAlignment (Docx.Cell al colspan _ _) = replicate (fromIntegral colspan)
-                   $ convertAlign al
-      alignments = case rows of
-                     [] -> replicate width Pandoc.AlignDefault
-                     Docx.Row _ cs : _ -> concatMap getAlignment cs
-      widths = map (\n -> if n == 0
+  let widths = map (\n -> if n == 0
                              then ColWidthDefault
                              else ColWidth n) grid
+      -- Horizontal column alignment is taken from the first row's cells.
+      numcols = length widths
+      getAlignment (Docx.Cell al colspan _ _) =
+        take numcols $ replicate (fromIntegral colspan) (convertAlign al) ++
+                       repeat Pandoc.AlignDefault
+      getAlignments (Docx.Row _ cs) = concatMap getAlignment cs
+      alignments = take numcols $
+                   case hdr ++ rows of
+                     [] -> repeat Pandoc.AlignDefault
+                     r : _ -> getAlignments r
 
   extStylesEnabled <- asks (isEnabled Ext_styles . docxOptions)
   let attr = case mbsty of

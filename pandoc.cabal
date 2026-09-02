@@ -1,6 +1,6 @@
 cabal-version:   2.4
 name:            pandoc
-version:         3.10.2
+version:         3.11
 build-type:      Simple
 license:         GPL-2.0-or-later
 license-file:    COPYING.md
@@ -201,8 +201,6 @@ data-files:
                  data/creole.lua
                  -- lua init script
                  data/init.lua
-                 -- bash completion template
-                 data/bash_completion.tpl
                  -- citeproc
                  data/default.csl
                  citeproc/biblatex-localization/*.lbx.strings
@@ -228,6 +226,7 @@ extra-source-files:
                  test/command/9603.docx
                  test/command/11113.docx
                  test/command/11689.docx
+                 test/command/11833.docx
                  test/command/biblio.bib
                  test/command/averroes.bib
                  test/command/A.txt
@@ -281,6 +280,7 @@ extra-source-files:
                  test/command/7861/metadata/placeholder
                  test/command/11486/scroll.revealjs
                  test/command/11498.png
+                 test/command/11301-styles.opendocument
                  test/asciidoc-reader.adoc
                  test/asciidoc-reader.native
                  test/asciidoc-reader-include.rb
@@ -463,7 +463,7 @@ source-repository head
 
 flag embed_data_files
   Description:   Embed data files in binary for relocatable executable.
-  Default:       False
+  Default:       True
 
 flag http
   Description:   Support for fetching resources using HTTP.
@@ -533,7 +533,7 @@ library
                  crypton               >= 0.30     && < 1.2,
                  data-default          >= 0.4      && < 0.9,
                  deepseq               >= 1.3      && < 1.6,
-                 directory             >= 1.2.3    && < 1.4,
+                 directory             >= 1.2.5    && < 1.4,
                  doclayout             >= 0.5.0.3  && < 0.6,
                  doctemplates          >= 0.11     && < 0.12,
                  emojis                >= 0.1.5    && < 0.2,
@@ -546,7 +546,7 @@ library
                  ipynb                 >= 0.2      && < 0.3,
                  jira-wiki-markup      >= 1.5.1    && < 1.6,
                  mime-types            >= 0.1.1    && < 0.2,
-                 mtl                   >= 2.2      && < 2.4,
+                 mtl                   >= 2.3      && < 2.4,
                  network-uri           >= 2.6      && < 2.8,
                  pandoc-types          >= 1.23.1.2 && < 1.24,
                  parsec                >= 3.1      && < 3.2,
@@ -562,7 +562,7 @@ library
                  syb                   >= 0.1      && < 0.8,
                  tagsoup               >= 0.14.6   && < 0.15,
                  temporary             >= 1.1      && < 1.4,
-                 texmath               >= 0.13.2.1 && < 0.14,
+                 texmath               >= 0.13.2.2 && < 0.14,
                  text                  >= 1.1.1.0  && < 2.2,
                  text-conversions      >= 0.3      && < 0.4,
                  time                  >= 1.5      && < 1.17,
@@ -574,10 +574,10 @@ library
                  zip-archive           >= 0.4.3.1  && < 0.5,
                  zlib                  >= 0.5      && < 0.8,
                  xml                   >= 1.3.12   && < 1.4,
-                 typst                 >= 0.11     && < 0.12,
+                 typst                 >= 0.11.0.1 && < 0.12,
                  vector                >= 0.12     && < 0.14,
-                 djot                  >= 0.1.4.1  && < 0.2,
-                 asciidoc              >= 0.1.0.4  && < 0.2
+                 djot                  >= 0.1.4.2  && < 0.2,
+                 asciidoc              >= 0.1.0.5  && < 0.2
 
   if !os(windows)
     build-depends:  unix >= 2.4 && < 2.9
@@ -719,6 +719,7 @@ library
                    Text.Pandoc.Transforms,
                    Text.Pandoc.Version
   other-modules:   Text.Pandoc.App.CommandLineOptions,
+                   Text.Pandoc.App.Completion,
                    Text.Pandoc.App.Input,
                    Text.Pandoc.App.Opt,
                    Text.Pandoc.App.OutputSettings,
@@ -846,7 +847,7 @@ test-suite test-pandoc
                   Glob              >= 0.7     && < 0.11,
                   bytestring        >= 0.9     && < 0.13,
                   containers        >= 0.4.2.1 && < 0.9,
-                  directory         >= 1.2.3   && < 1.4,
+                  directory         >= 1.2.5   && < 1.4,
                   doctemplates      >= 0.11    && < 0.12,
                   filepath          >= 1.1     && < 1.6,
                   mtl               >= 2.2     && < 2.4,
