@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -64,6 +65,9 @@ module Text.Pandoc.Class.PandocMonad
 import Control.Monad.Except (MonadError (catchError, throwError))
 import Control.Monad.Trans (MonadTrans, lift)
 import Control.Monad (when)
+import Data.Char (chr, digitToInt, isHexDigit, toLower)
+import Data.List (intercalate)
+import Data.Word (Word8)
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds,
                              posixSecondsToUTCTime)
@@ -72,7 +76,7 @@ import Network.URI ( escapeURIString, nonStrictRelativeTo,
                      unEscapeString, parseURIReference, isAllowedInURI,
                      parseURI, URI(..) )
 import System.FilePath ((</>), takeExtension, dropExtension,
-                        isRelative, makeRelative)
+                        isRelative, makeRelative, splitDirectories)
 import System.Random (StdGen)
 import Text.Collate.Lang (Lang(..), parseLang)
 import Text.Pandoc.Class.CommonState (CommonState (..))
@@ -85,10 +89,10 @@ import Text.Pandoc.Shared (safeRead, makeCanonical, tshow)
 import Text.Pandoc.URI (uriPathToPath, pBase64DataURI)
 import qualified Data.Attoparsec.Text as A
 import Text.Pandoc.Walk (walkM)
-import qualified Text.Pandoc.UTF8 as UTF8
 import Data.ByteString.Base64 (decodeLenient)
 import Text.Parsec (ParsecT, getPosition, sourceLine, sourceName)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import qualified Debug.Trace
@@ -140,7 +144,6 @@ class (Functor m, Applicative m, Monad m, MonadError PandocError m)
   getCommonState :: m CommonState
   -- | Set the value of the 'CommonState' used by all instances
   -- of 'PandocMonad'.
-  -- | Get the value of a specific field of 'CommonState'.
   putCommonState :: CommonState -> m ()
   -- | Get the value of a specific field of 'CommonState'.
   getsCommonState :: (CommonState -> a) -> m a
@@ -201,13 +204,15 @@ runSilently action = do
   -- get current settings
   origLog <- getsCommonState stLog
   origVerbosity <- getVerbosity
+  let restore = modifyCommonState
+        (\st -> st { stVerbosity = origVerbosity, stLog = origLog })
   -- reset log level and set verbosity to the minimum
   modifyCommonState (\st -> st { stVerbosity = ERROR, stLog = []})
-  result <- action
+  -- restore the original log and verbosity even if the action fails
+  result <- action `catchError` (\e -> restore *> throwError e)
   -- get log messages reported while running `action`
   newLog <- getsCommonState stLog
-  modifyCommonState (\st -> st { stVerbosity = origVerbosity, stLog = origLog})
-
+  restore
   return (result, newLog)
 
 -- | Set request header to use in HTTP requests.
@@ -221,7 +226,16 @@ setRequestHeader name val = modifyCommonState $ \st ->
 
 -- | Determine whether certificate validation is disabled
 setNoCheckCertificate :: PandocMonad m => Bool -> m ()
-setNoCheckCertificate noCheckCertificate = modifyCommonState $ \st -> st{stNoCheckCertificate = noCheckCertificate}
+setNoCheckCertificate noCheckCertificate = modifyCommonState $ \st ->
+  st{ stNoCheckCertificate = noCheckCertificate
+#ifdef PANDOC_HTTP_SUPPORT
+    -- discard any cached HTTP manager, since it was created with
+    -- TLS settings based on the previous value of this option
+    , stManager = if stNoCheckCertificate st == noCheckCertificate
+                     then stManager st
+                     else Nothing
+#endif
+    }
 
 -- | Initialize the media bag.
 setMediaBag :: PandocMonad m => MediaBag -> m ()
@@ -281,7 +295,7 @@ getRequestHeaders = getsCommonState stRequestHeaders
 setRequestHeaders :: PandocMonad m => [(T.Text, T.Text)] -> m ()
 setRequestHeaders hs = modifyCommonState $ \st -> st{ stRequestHeaders = hs }
 
--- | Get the absolute UL or directory of first source file.
+-- | Get the absolute URL or directory of first source file.
 getSourceURL :: PandocMonad m => m (Maybe T.Text)
 getSourceURL = getsCommonState stSourceURL
 
@@ -372,7 +386,7 @@ downloadOrRead :: PandocMonad m
                => T.Text
                -> m (B.ByteString, Maybe MimeType)
 downloadOrRead s
- | "data:" `T.isPrefixOf` s,
+ | T.toLower (T.take 5 s) == "data:",
    Right (bs, mt) <- A.parseOnly (pBase64DataURI <* A.endOfInput) s
    = pure (bs, Just mt)
  | otherwise = do
@@ -389,9 +403,10 @@ downloadOrRead s
             Nothing -> openURL s' -- will throw error
     (Nothing, s') ->
        case parseURI (T.unpack s') of  -- requires absolute URI
-            Just URI{ uriScheme = "file:", uriPath = upath}
+            Just URI{ uriScheme = sch, uriPath = upath}
+              | map toLower sch == "file:"
               -> readLocalFile $ uriPathToPath (T.pack upath)
-            Just URI{ uriScheme = "data:", uriPath = upath}
+              | map toLower sch == "data:"
               -> pure $ extractURIData upath
             -- We don't want to treat C:/ as a scheme:
             Just u' | length (uriScheme u') > 2 -> openURL (T.pack $ show u')
@@ -420,18 +435,40 @@ downloadOrRead s
 -- Extract data from a data URI's path component.
 extractURIData :: String -> (B.ByteString, Maybe MimeType)
 extractURIData upath =
-  case break (== ';') (filter (/= ' ') mimespec) of
-     (mime', ";base64") -> (decodeLenient contents, Just (T.pack mime'))
-     (mime', _) -> (contents, Just (T.pack mime'))
+  if isBase64
+     then (decodeLenient contents, Just mime)
+     else (contents, Just mime)
   where
-    (mimespec, rest) = break (== ',') $ unEscapeString upath
-    contents = UTF8.fromString $ drop 1 rest
+    (mimespec, rest) = break (== ',') upath
+    -- The base64 indicator is the final parameter of the media type
+    -- and may follow other parameters, e.g.
+    -- data:text/plain;charset=utf-8;base64,...
+    metaParts = splitParts (filter (/= ' ') (unEscapeString mimespec))
+    splitParts s = case break (== ';') s of
+                     (x, [])    -> [x]
+                     (x, _:s')  -> x : splitParts s'
+    isBase64 = length metaParts > 1 && last metaParts == "base64"
+    mime = T.pack $ intercalate ";" $
+             if isBase64 then init metaParts else metaParts
+    -- Percent-escapes in a data URI represent raw octets (RFC 2397),
+    -- so we decode them to bytes directly.  (unEscapeString cannot be
+    -- used here: it UTF-8-decodes consecutive escapes, which corrupts
+    -- binary data when the result is re-encoded.)
+    contents = unEscapeBytes $ drop 1 rest
+    unEscapeBytes = B8.pack . go
+      where
+        go ('%':x:y:cs)
+          | isHexDigit x, isHexDigit y
+            = chr (digitToInt x * 16 + digitToInt y) : go cs
+        go (c:cs) = c : go cs
+        go [] = []
 
 -- | Checks if the file path is relative to a parent directory.
 isRelativeToParentDir :: FilePath -> Bool
 isRelativeToParentDir fname =
-  let canonical = makeCanonical fname
-   in length canonical >= 2 && take 2 canonical == ".."
+  case splitDirectories (makeCanonical fname) of
+    "..":_ -> True
+    _      -> False
 
 -- | Returns possible user data directory if the file path refers to a file or
 -- subdirectory within it.
@@ -468,9 +505,9 @@ toTextM :: PandocMonad m => FilePath -> B.ByteString -> m T.Text
 toTextM fp bs =
   case TSE.decodeUtf8' . filterCRs . dropBOM $ bs of
     Left (TSE.DecodeError _ (Just w)) ->
-      case B.elemIndex w bs of
-        Just offset ->
-          throwError $ PandocUTF8DecodingError (T.pack fp) offset w
+      case findDecodingError bs of
+        Just (offset, w') ->
+          throwError $ PandocUTF8DecodingError (T.pack fp) offset w'
         Nothing -> throwError $ PandocUTF8DecodingError (T.pack fp) 0 w
     Left e -> throwError $ PandocAppError (tshow e)
     Right t -> return t
@@ -479,7 +516,45 @@ toTextM fp bs =
      if "\xEF\xBB\xBF" `B.isPrefixOf` bs'
         then B.drop 3 bs'
         else bs'
-   filterCRs = B.filter (/=13)
+   -- Only allocate a filtered copy if a CR is actually present;
+   -- B.elem compiles to a fast memchr.
+   filterCRs bs' = if 13 `B.elem` bs'
+                      then B.filter (/=13) bs'
+                      else bs'
+
+-- Find the offset and value of the first byte at which UTF-8 decoding
+-- fails (RFC 3629).  Used to give an accurate position in decoding
+-- error messages.  (The BOM and CR bytes stripped before decoding are
+-- themselves valid UTF-8, so scanning the unstripped input finds the
+-- same error, at its offset in the original file.)
+findDecodingError :: B.ByteString -> Maybe (Int, Word8)
+findDecodingError = go 0
+ where
+  go !i bs = case B.uncons bs of
+    Nothing -> Nothing
+    Just (w, rest)
+      | w < 0x80  -> go (i + 1) rest
+      | w < 0xC2  -> Just (i, w)  -- continuation byte or overlong lead
+      | w == 0xE0 -> cont i w rest [(0xA0,0xBF),(0x80,0xBF)]
+      | w == 0xED -> cont i w rest [(0x80,0x9F),(0x80,0xBF)]  -- no surrogates
+      | w < 0xE0  -> cont i w rest [(0x80,0xBF)]
+      | w <  0xF0 -> cont i w rest [(0x80,0xBF),(0x80,0xBF)]
+      | w == 0xF0 -> cont i w rest [(0x90,0xBF),(0x80,0xBF),(0x80,0xBF)]
+      | w == 0xF4 -> cont i w rest [(0x80,0x8F),(0x80,0xBF),(0x80,0xBF)]
+      | w <  0xF4 -> cont i w rest [(0x80,0xBF),(0x80,0xBF),(0x80,0xBF)]
+      | otherwise -> Just (i, w)  -- above U+10FFFF
+  -- check that the bytes following the lead byte w at offset i fall
+  -- into the given ranges; report the first byte that does not
+  cont i w = go' (i + 1)
+   where
+    go' !j rest [] = go j rest
+    go' !j rest ((lo,hi):ranges) =
+      case B.uncons rest of
+        Just (b, rest')
+          | b >= lo && b <= hi -> go' (j + 1) rest' ranges
+          | otherwise          -> Just (j, b)
+        -- input ends in the middle of a sequence: report the lead byte
+        Nothing -> Just (i, w)
 
 -- | Returns @fp@ if the file exists in the current directory; otherwise
 -- searches for the data file relative to @/subdir/@. Returns @Nothing@

@@ -33,7 +33,7 @@ import Text.Pandoc.Options (ReaderOptions)
 import Text.Pandoc.Parsing
   ( HasIdentifierList (..), HasLastStrPosition (..), HasLogMessages (..)
   , HasMacros (..), HasQuoteContext (..), HasReaderOptions (..)
-  , ParsecT, ParserState, QuoteContext (NoQuote)
+  , ParsecT, ParserState, QuoteContext (NoQuote), SourcePos
   )
 import Text.Pandoc.TeX (Macro)
 
@@ -46,7 +46,8 @@ type TagParser m = HTMLParser m [Tag Text]
 -- | Global HTML parser state
 data HTMLState = HTMLState
   { parserState :: ParserState
-  , noteTable   :: [(Text, Blocks)]
+  , noteTable   :: Map Text Blocks
+  , noteRefPos  :: Map Text SourcePos -- ^ position of first ref to each note
   , baseHref    :: Maybe URI
   , identifiers :: Set Text
   , logMessages :: [LogMessage]
@@ -54,6 +55,7 @@ data HTMLState = HTMLState
   , readerOpts  :: ReaderOptions
   , inFootnotes :: Bool
   , inPre       :: Bool
+  , iframeDepth :: Int -- ^ how many iframes deep we are (recursion limit)
   }
 
 -- | Local HTML parser state

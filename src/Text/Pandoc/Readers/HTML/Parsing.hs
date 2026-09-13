@@ -199,20 +199,23 @@ t1 `closes` t2 |
 _ `closes` _ = False
 
 toStringAttr :: [(Text, Text)] -> [(Text, Text)]
-toStringAttr = foldr go []
+toStringAttr = go mempty
   where
-   go :: (Text, Text) -> [(Text, Text)] -> [(Text, Text)]
+   go :: Set.Set Text -> [(Text, Text)] -> [(Text, Text)]
+   go _ [] = []
+   go seen ((x,y):rest)
+     -- prevent duplicate attributes; the first one wins:
+     | x' `Set.member` seen = go seen rest
+     | otherwise = (x', y) : go (Set.insert x' seen) rest
+    where x' = normalizeName x
    -- treat xml:lang as lang
-   go ("xml:lang",y) ats = go ("lang",y) ats
-   -- prevent duplicate attributes
-   go (x,y) ats
-     | any (\(x',_) -> x == x') ats = ats
-     | otherwise      =
-        case T.stripPrefix "data-" x of
-          Just x' | x' `Set.notMember` (html5Attributes <>
-                                        html4Attributes <> rdfaAttributes)
-            -> go (x',y) ats
-          _ -> (x,y):ats
+   normalizeName "xml:lang" = "lang"
+   -- strip data- prefix unless the bare name is a standard attribute
+   normalizeName x =
+     case T.stripPrefix "data-" x of
+       Just x' | x' `Set.notMember` standardAttrs -> x'
+       _ -> x
+   standardAttrs = html5Attributes <> html4Attributes <> rdfaAttributes
 
 -- Unlike fromAttrib from tagsoup, this distinguishes
 -- between a missing attribute and an attribute with empty content.

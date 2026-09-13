@@ -1,5 +1,3 @@
-{-# LANGUAGE CPP             #-}
-{-# LANGUAGE Arrows          #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections   #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -39,9 +37,7 @@ module Text.Pandoc.Readers.ODT.StyleReader
 , readStylesAt
 ) where
 
-import Prelude hiding (Applicative(..))
-import Control.Applicative hiding (liftA, liftA2, liftA3)
-import Control.Arrow
+import Control.Applicative ((<|>), optional)
 
 import Data.Default
 import qualified Data.Foldable as F
@@ -56,18 +52,15 @@ import qualified Text.Pandoc.XML.Light as XML
 
 import Text.Pandoc.Shared (safeRead, tshow)
 
-import Text.Pandoc.Readers.ODT.Arrows.Utils
-
 import Text.Pandoc.Readers.ODT.Generic.Fallible
 import qualified Text.Pandoc.Readers.ODT.Generic.SetMap as SM
 import Text.Pandoc.Readers.ODT.Generic.Utils
 import Text.Pandoc.Readers.ODT.Generic.XMLConverter
 
-import Text.Pandoc.Readers.ODT.Base
 import Text.Pandoc.Readers.ODT.Namespaces
 
 readStylesAt :: XML.Element -> Fallible Styles
-readStylesAt e = runConverter' readAllStyles mempty e
+readStylesAt e = runConverter readAllStyles mempty e
 
 --------------------------------------------------------------------------------
 -- Reader for font declarations and font pitches
@@ -99,41 +92,29 @@ type FontFaceName = Text
 type FontPitches = M.Map FontFaceName FontPitch
 
 -- To get there, the fonts have to be read and the pitches extracted.
--- But the resulting map are only needed at one later place, so it should not be
--- transported on the value level, especially as we already use a state arrow.
--- So instead, the resulting map is lifted into the state of the reader.
--- (An alternative might be ImplicitParams, but again, we already have a state.)
+-- But the resulting map is only needed at one later place, so it should not be
+-- transported on the value level. Instead, it is lifted into the state of the
+-- reader.
 --
--- So the main style readers will have the types
-type StyleReader     a b  = XMLReader     FontPitches a b
--- and
-type StyleReaderSafe a b  = XMLReaderSafe FontPitches a b
--- respectively.
+-- So the main style readers will have the type
+type StyleReader a = XMLConverter Namespace FontPitches a
 --
--- But before we can work with these, we need to define the reader that reads
--- the fonts:
+-- But before we can work with this, we need to define the reader that reads
+-- the fonts. It is polymorphic in the extra state, since the pitches are not
+-- yet available while it runs.
 
 -- | A reader for font pitches
-fontPitchReader :: XMLReader s a FontPitches
-fontPitchReader = executeInSub NsOffice "font-face-decls" (
-                          withEveryL NsStyle "font-face" (liftAsSuccess (
-                              findAttr' NsStyle "name"
-                              &&&
-                              lookupDefaultingAttr NsStyle "font-pitch"
-                            ))
-                    >>?^ ( M.fromList . L.foldl' accumLegalPitches [] )
-                  ) `ifFailedDo` returnV (Right M.empty)
-  where accumLegalPitches ls (Nothing,_) = ls
-        accumLegalPitches ls (Just n,p)  = (n,p):ls
+fontPitchReader :: XMLConverter Namespace s FontPitches
+fontPitchReader =
+  executeInSub NsOffice "font-face-decls" (do
+    fonts <- withEveryL NsStyle "font-face" $ do
+               name  <- findAttr' NsStyle "name"
+               pitch <- lookupDefaultingAttr NsStyle "font-pitch"
+               return (name, pitch)
+    return $ M.fromList [ (n, p) | (Just n, p) <- fonts ])
+  <|> return M.empty
 
-
--- | A wrapper around the font pitch reader that lifts the result into the
--- state.
-readFontPitches :: StyleReader a a
-readFontPitches = producingExtraState () () fontPitchReader
-
-
--- | Looking up a pitch in the state of the arrow.
+-- | Looking up a pitch in the extra state.
 --
 -- The function does the following:
 -- * Look for the font pitch in an attribute.
@@ -141,15 +122,12 @@ readFontPitches = producingExtraState () () fontPitchReader
 --   and use the pitch from there.
 -- * Return the result in a Maybe
 --
-findPitch :: XMLReaderSafe FontPitches a (Maybe FontPitch)
-findPitch =     ( lookupAttr NsStyle "font-pitch"
-                  `ifFailedDo`     findAttr NsStyle "font-name"
-                               >>? (     keepingTheValue getExtraState
-                                     >>% M.lookup
-                                     >>^ maybeToChoice
-                                   )
-                )
-            >>> choiceToMaybe
+findPitch :: StyleReader (Maybe FontPitch)
+findPitch = optional
+  $     lookupAttr NsStyle "font-pitch"
+    <|> (do fontName <- findAttr NsStyle "font-name"
+            pitches  <- getExtraState
+            fromMaybeF $ M.lookup fontName pitches)
 
 --------------------------------------------------------------------------------
 -- Definitions of main data
@@ -416,84 +394,77 @@ instance Read ListItemNumberFormat where
 --------------------------------------------------------------------------------
 
 --
-readAllStyles :: StyleReader a Styles
-readAllStyles = (      readFontPitches
-                  >>?! (     readAutomaticStyles
-                         &&& readStyles ))
-                  >>?%? chooseMax
+readAllStyles :: StyleReader Styles
+readAllStyles = do
+  fontPitchReader >>= setExtraState
+  autoStyles <- tryC readAutomaticStyles
+  styles     <- tryC readStyles
+  fromFallible $ chooseMax autoStyles styles
  -- all top elements are always on the same hierarchy level
 
 --
-readStyles :: StyleReader a Styles
-readStyles = executeInSub NsOffice "styles" $ liftAsSuccess
-  $ liftA3 Styles
-    ( tryAll NsStyle "style"         readStyle        >>^ M.fromList )
-    ( tryAll NsText  "list-style"    readListStyle    >>^ M.fromList )
-    ( tryAll NsStyle "default-style" readDefaultStyle >>^ M.fromList )
+readStyles :: StyleReader Styles
+readStyles = executeInSub NsOffice "styles" $
+  Styles <$> (M.fromList <$> tryAll NsStyle "style"         readStyle       )
+         <*> (M.fromList <$> tryAll NsText  "list-style"    readListStyle   )
+         <*> (M.fromList <$> tryAll NsStyle "default-style" readDefaultStyle)
 
 --
-readAutomaticStyles :: StyleReader a Styles
-readAutomaticStyles = executeInSub NsOffice "automatic-styles" $ liftAsSuccess
-  $ liftA3 Styles
-    ( tryAll NsStyle "style"         readStyle        >>^ M.fromList )
-    ( tryAll NsText  "list-style"    readListStyle    >>^ M.fromList )
-    ( returnV M.empty                                                )
+readAutomaticStyles :: StyleReader Styles
+readAutomaticStyles = executeInSub NsOffice "automatic-styles" $
+  Styles <$> (M.fromList <$> tryAll NsStyle "style"         readStyle       )
+         <*> (M.fromList <$> tryAll NsText  "list-style"    readListStyle   )
+         <*> pure M.empty
 
 --
-readDefaultStyle :: StyleReader a (StyleFamily, StyleProperties)
-readDefaultStyle =      lookupAttr NsStyle "family"
-                   >>?! keepingTheValue readStyleProperties
+readDefaultStyle :: StyleReader (StyleFamily, StyleProperties)
+readDefaultStyle = (,) <$> lookupAttr NsStyle "family"
+                       <*> readStyleProperties
 
 --
-readStyle :: StyleReader a (StyleName,Style)
-readStyle =      findAttr NsStyle "name"
-            >>?! keepingTheValue
-                   ( liftA4 Style
-                       ( lookupAttr' NsStyle "family"            )
-                       ( findAttr'   NsStyle "parent-style-name" )
-                       ( findAttr'   NsStyle "list-style-name"   )
-                       readStyleProperties
-                   )
+readStyle :: StyleReader (StyleName, Style)
+readStyle = do
+  name  <- findAttr NsStyle "name"
+  style <- Style <$> lookupAttr' NsStyle "family"
+                 <*> findAttr'   NsStyle "parent-style-name"
+                 <*> findAttr'   NsStyle "list-style-name"
+                 <*> readStyleProperties
+  return (name, style)
 
 --
-readStyleProperties :: StyleReaderSafe a StyleProperties
-readStyleProperties = liftA2 SProps
-                       ( readTextProperties >>> choiceToMaybe )
-                       ( readParaProperties >>> choiceToMaybe )
+readStyleProperties :: StyleReader StyleProperties
+readStyleProperties = SProps <$> optional readTextProperties
+                             <*> optional readParaProperties
 
 --
-readTextProperties :: StyleReader a TextProperties
+readTextProperties :: StyleReader TextProperties
 readTextProperties =
-  executeInSub NsStyle "text-properties" $ liftAsSuccess
-    ( liftA6 PropT
-       ( searchAttr   NsXSL_FO "font-style"  False isFontEmphasised )
-       ( searchAttr   NsXSL_FO "font-weight" False isFontBold       )
-       findPitch
-       ( getAttr      NsStyle  "text-position"                      )
-       readUnderlineMode
-       readStrikeThroughMode
-     )
+  executeInSub NsStyle "text-properties" $
+    PropT <$> searchAttr NsXSL_FO "font-style"  False isFontEmphasised
+          <*> searchAttr NsXSL_FO "font-weight" False isFontBold
+          <*> findPitch
+          <*> getAttr    NsStyle  "text-position"
+          <*> readUnderlineMode
+          <*> readStrikeThroughMode
   where isFontEmphasised = [("normal",False),("italic",True),("oblique",True)]
         isFontBold = ("normal",False):("bold",True)
                     :map ((,True) . tshow) ([100,200..900]::[Int])
 
-readUnderlineMode     :: StyleReaderSafe a (Maybe UnderlineMode)
+readUnderlineMode     :: StyleReader (Maybe UnderlineMode)
 readUnderlineMode     = readLineMode "text-underline-mode"
                                      "text-underline-style"
 
-readStrikeThroughMode :: StyleReaderSafe a (Maybe UnderlineMode)
+readStrikeThroughMode :: StyleReader (Maybe UnderlineMode)
 readStrikeThroughMode = readLineMode "text-line-through-mode"
                                      "text-line-through-style"
 
-readLineMode :: Text -> Text -> StyleReaderSafe a (Maybe UnderlineMode)
-readLineMode modeAttr styleAttr = proc x -> do
-  isUL <- searchAttr  NsStyle styleAttr False isLinePresent -< x
-  mode <- lookupAttr' NsStyle  modeAttr                     -< x
-  if isUL
-    then case mode of
-           Just m  -> returnA -< Just m
-           Nothing -> returnA -< Just UnderlineModeNormal
-    else              returnA -< Nothing
+readLineMode :: Text -> Text -> StyleReader (Maybe UnderlineMode)
+readLineMode modeAttr styleAttr = do
+  isUL <- searchAttr  NsStyle styleAttr False isLinePresent
+  mode <- lookupAttr' NsStyle  modeAttr
+  return $ if isUL
+             then mode <|> Just UnderlineModeNormal
+             else Nothing
   where
     isLinePresent = ("none",False) : map (,True)
                     [ "dash"      , "dot-dash" , "dot-dot-dash" , "dotted"
@@ -501,20 +472,16 @@ readLineMode modeAttr styleAttr = proc x -> do
                     ]
 
 --
-readParaProperties :: StyleReader a ParaProperties
+readParaProperties :: StyleReader ParaProperties
 readParaProperties =
-   executeInSub NsStyle "paragraph-properties" $ liftAsSuccess
-     ( liftA3 PropP
-       ( liftA2 readNumbering
-         ( isSet'           NsText   "number-lines"           )
-         ( readAttr'        NsText   "line-number"            )
-       )
-       ( liftA2 readIndentation
-         ( isSetWithDefault NsStyle  "auto-text-indent" False )
-         ( getAttr          NsXSL_FO "text-indent"            )
-       )
-       (   getAttr          NsXSL_FO "margin-left"            )
-     )
+  executeInSub NsStyle "paragraph-properties" $
+    PropP <$> ( readNumbering
+                  <$> isSet'    NsText "number-lines"
+                  <*> readAttr' NsText "line-number" )
+          <*> ( readIndentation
+                  <$> isSetWithDefault NsStyle  "auto-text-indent" False
+                  <*> getAttr          NsXSL_FO "text-indent" )
+          <*> getAttr NsXSL_FO "margin-left"
   where readNumbering (Just True) (Just n) = NumberingRestart n
         readNumbering (Just True)  _       = NumberingKeep
         readNumbering      _       _       = NumberingNone
@@ -527,39 +494,37 @@ readParaProperties =
 ----
 
 --
-readListStyle :: StyleReader a (StyleName, ListStyle)
-readListStyle =
-       findAttr NsStyle "name"
-  >>?! keepingTheValue
-       ( liftA ListStyle
-         $ liftA3 SM.union3
-             ( readListLevelStyles NsText "list-level-style-number" LltNumbered )
-             ( readListLevelStyles NsText "list-level-style-bullet" LltBullet   )
-             ( readListLevelStyles NsText "list-level-style-image"  LltImage    ) >>^ M.mapMaybe chooseMostSpecificListLevelStyle
-       )
+readListStyle :: StyleReader (StyleName, ListStyle)
+readListStyle = do
+  name   <- findAttr NsStyle "name"
+  styles <- SM.union3
+              <$> readListLevelStyles NsText "list-level-style-number" LltNumbered
+              <*> readListLevelStyles NsText "list-level-style-bullet" LltBullet
+              <*> readListLevelStyles NsText "list-level-style-image"  LltImage
+  return ( name
+         , ListStyle $ M.mapMaybe chooseMostSpecificListLevelStyle styles )
+
 --
 readListLevelStyles :: Namespace -> ElementName
                     -> ListLevelType
-                    -> StyleReaderSafe a (SM.SetMap Int ListLevelStyle)
+                    -> StyleReader (SM.SetMap Int ListLevelStyle)
 readListLevelStyles namespace elementName levelType =
-  tryAll namespace elementName (readListLevelStyle levelType)
-    >>^ SM.fromList
+  SM.fromList <$> tryAll namespace elementName (readListLevelStyle levelType)
 
 --
-readListLevelStyle :: ListLevelType -> StyleReader a (Int, ListLevelStyle)
-readListLevelStyle levelType =      readAttr NsText "level"
-                               >>?! keepingTheValue
-                                    ( liftA5 toListLevelStyle
-                                      ( returnV       levelType             )
-                                      ( findAttr'     NsStyle "num-prefix"  )
-                                      ( findAttr'     NsStyle "num-suffix"  )
-                                      ( getAttr       NsStyle "num-format"  )
-                                      ( findAttrText' NsText  "start-value" )
-                                    )
+readListLevelStyle :: ListLevelType -> StyleReader (Int, ListLevelStyle)
+readListLevelStyle levelType = do
+  level <- readAttr NsText "level"
+  style <- toListLevelStyle
+             <$> findAttr' NsStyle "num-prefix"
+             <*> findAttr' NsStyle "num-suffix"
+             <*> getAttr   NsStyle "num-format"
+             <*> findAttr' NsText  "start-value"
+  return (level, style)
   where
-  toListLevelStyle _ p s LinfNone b         = ListLevelStyle LltBullet p s LinfNone (startValue b)
-  toListLevelStyle _ p s f@(LinfString _) b = ListLevelStyle LltBullet p s f (startValue b)
-  toListLevelStyle t p s f b                = ListLevelStyle t      p s f (startValue b)
+  toListLevelStyle p s LinfNone b         = ListLevelStyle LltBullet p s LinfNone (startValue b)
+  toListLevelStyle p s f@(LinfString _) b = ListLevelStyle LltBullet p s f (startValue b)
+  toListLevelStyle p s f b                = ListLevelStyle levelType p s f (startValue b)
   startValue mbx = fromMaybe 1 (mbx >>= safeRead)
 
 --
@@ -605,7 +570,7 @@ lookupListStyleByName name Styles{..} = M.lookup name listStylesByName
 parents               :: Style       -> Styles ->      [Style]
 parents style styles = L.unfoldr findNextParent style -- Ha!
   where findNextParent Style{..}
-          = fmap duplicate $ (`lookupStyle` styles) =<< styleParentName
+          = fmap (\p -> (p, p)) $ (`lookupStyle` styles) =<< styleParentName
 
 -- | Looks up the style family of the current style. Normally, every style
 -- should have one. But if not, all parents are searched.

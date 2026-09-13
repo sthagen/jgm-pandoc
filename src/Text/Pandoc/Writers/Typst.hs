@@ -33,7 +33,8 @@ import Control.Monad.State ( StateT, evalStateT, gets, modify )
 import Text.Pandoc.Writers.Shared ( lookupMetaInlines, lookupMetaString,
                                     metaToContext, defField, resetField,
                                     setupTranslations )
-import Text.Pandoc.Shared (isTightList, orderedListMarkers, tshow, stringify)
+import Text.Pandoc.Shared (isTightList, orderedListMarkers, tshow,
+                           stringifyInlines)
 import Text.Pandoc.Highlighting (highlight, formatTypstBlock, formatTypstInline,
                                  styleToTypst)
 import Text.Pandoc.Translations (Term(Abstract), translateTerm)
@@ -362,17 +363,18 @@ blockToTypst block =
                 $$ footer
             )
             $$ ")"
-      return $ if "typst:no-figure" `elem` tabclasses
-        then toTypstBracesSetText typstTextAttrs table
-        else "#figure("
-            $$
-            nest 2
-            ("align(center)[" <> toTypstPoundSetText typstTextAttrs <> "#" <> table <> "]"
-              $$ capt'
-              $$ typstFigureKind
-              $$ ")")
-            $$ lab
-          $$ blankline
+      return $
+        (if "typst:no-figure" `elem` tabclasses
+            then toTypstBracesSetText typstTextAttrs table
+            else "#figure("
+                 $$
+                 nest 2
+                 ("align(center)[" <> toTypstPoundSetText typstTextAttrs <> "#" <> table <> "]"
+                   $$ capt'
+                   $$ typstFigureKind
+                   $$ ")"))
+        $$ lab
+        $$ blankline
     Figure (ident,_,kvs) (Caption _mbshort capt) blocks -> do
       caption <- blocksToTypst capt
       opts <-  gets stOptions
@@ -402,7 +404,7 @@ blockToTypst block =
       contents <- blocksToTypst blocks
       return $ "#block" <> toTypstPropsListParens typstAttrs <> "["
         $$ toTypstPoundSetText typstTextAttrs
-        $$ contents
+        $$ chomp contents
         $$ ("]" <+> lab)
 
 defListItemToTypst :: PandocMonad m => ([Inline], [[Block]]) -> TW m (Doc Text)
@@ -410,7 +412,7 @@ defListItemToTypst (term, defns) = do
   modify $ \st -> st{ stEscapeContext = TermContext }
   term' <- inlinesToTypst term
   modify $ \st -> st{ stEscapeContext = NormalContext }
-  defns' <- mapM blocksToTypst defns
+  defns' <- mapM (fmap chomp . blocksToTypst) defns
   return $
     case defns of
       [[Plain _]] -> hang 4 (nowrap ("/ " <> term' <> ": ")) (vcat defns')
@@ -598,7 +600,7 @@ getAlt (_, _, kvs) imgInlines =
     Just alt -> Just alt
     Nothing -> case imgInlines of
                  [] -> Nothing
-                 _ -> Just (stringify imgInlines)
+                 _ -> Just (stringifyInlines imgInlines)
 
 textstyle :: PandocMonad m => Doc Text -> [Inline] -> TW m (Doc Text)
 textstyle s inlines = do

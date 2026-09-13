@@ -24,6 +24,7 @@ module Text.Pandoc.Readers.LaTeX ( readLaTeX,
 import Control.Applicative (many, optional, (<|>))
 import Control.Monad
 import Control.Monad.Except (throwError)
+import Control.Monad.Reader (runReaderT)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Char (isDigit, isLetter, isAlphaNum, toUpper, chr)
 import Data.Default
@@ -87,11 +88,21 @@ readLaTeX :: (PandocMonad m, ToSources a)
           -> m Pandoc
 readLaTeX opts ltx = do
   let sources = toSources ltx
-  parsed <- runParserT parseLaTeX def{ sOptions = opts } "source"
+  parsed <- flip runReaderT latexEnv $
+               runParserT parseLaTeX def{ sOptions = opts } "source"
                (TokStream False (tokenizeSources sources))
   case parsed of
     Right result -> return result
     Left e       -> throwError $ fromParsecError sources e
+
+-- | The command dispatch tables, built once per parse and shared
+-- through the reader environment (see 'LaTeXEnv').
+latexEnv :: PandocMonad m => LaTeXEnv m
+latexEnv = LaTeXEnv
+  { envInlineCommands = inlineCommands
+  , envBlockCommands  = blockCommands
+  , envEnvironments   = environments
+  }
 
 parseLaTeX :: PandocMonad m => LP m Pandoc
 parseLaTeX = do
@@ -156,7 +167,7 @@ rawLaTeXBlock = do
   lookAhead (try (char '\\' >> letter))
   toks <- getInputTokens
   snd <$> (
-          rawLaTeXParser toks
+          rawLaTeXParser latexEnv toks
              (makeAtLetterSection <|>
               macroDef (const mempty) <|>
               do choice (map controlSeq
@@ -164,7 +175,7 @@ rawLaTeXBlock = do
                  skipMany opt
                  braced
                  return mempty) blocks
-      <|> rawLaTeXParser toks
+      <|> rawLaTeXParser latexEnv toks
            (void (environment <|> blockCommand))
            (mconcat <$> many (block <|> beginOrEndCommand)))
 
@@ -199,10 +210,10 @@ rawLaTeXInline = do
   lookAhead (try (char '\\' >> letter))
   toks <- getInputTokens
   raw <- snd <$>
-          (   rawLaTeXParser toks
+          (   rawLaTeXParser latexEnv toks
               (mempty <$ (controlSeq "input" >> skipMany rawopt >> braced))
               inlines
-          <|> rawLaTeXParser toks (void inline) inlines
+          <|> rawLaTeXParser latexEnv toks (void inline) inlines
           )
   finalbraces <- mconcat <$> many (try (string "{}")) -- see #5439
   return $ raw <> T.pack finalbraces
@@ -211,7 +222,8 @@ inlineCommand :: PandocMonad m => ParsecT Sources ParserState m Inlines
 inlineCommand = do
   lookAhead (try (char '\\' >> letter))
   toks <- getInputTokens
-  fst <$> rawLaTeXParser toks (void (inlineEnvironment <|> inlineCommand'))
+  fst <$> rawLaTeXParser latexEnv toks
+          (void (inlineEnvironment <|> inlineCommand'))
           inlines
 
 -- inline elements:
@@ -337,21 +349,23 @@ inlineCommand' = try $ do
        rawcommand <- getRawCommand name (cmd <> star)
        (guardEnabled Ext_raw_tex >> return (rawInline "latex" rawcommand))
          <|> ignore rawcommand
-  lookupListDefault raw names inlineCommands
+  commandMap <- envInlineCommands <$> askEnv
+  lookupListDefault raw names commandMap
 
 tok :: PandocMonad m => LP m Inlines
 tok = tokWith inline
 
 unescapeURL :: Text -> Text
-unescapeURL = T.concat . go . T.splitOn "\\"
-  where
-    isEscapable c = T.any (== c) "#$%&~_^\\{}"
-    go (x:xs) = x : map unescapeInterior xs
-    go []     = []
-    unescapeInterior t
-      | Just (c, _) <- T.uncons t
-      , isEscapable c = t
-      | otherwise = "\\" <> t
+unescapeURL t =
+  let (xs, ys) = T.break (== '\\') t
+  in case T.uncons ys of
+       Nothing -> xs
+       Just (_, rest) ->
+         case T.uncons rest of
+           Just (c, rest')
+             | isEscapable c -> xs <> T.cons c (unescapeURL rest')
+           _ -> xs <> "\\" <> unescapeURL rest
+  where isEscapable c = T.any (== c) "#$%&~_^\\{}"
 
 inlineCommands :: PandocMonad m => M.Map Text (LP m Inlines)
 inlineCommands = M.unions
@@ -407,22 +421,30 @@ inlineCommands = M.unions
     , ("sl", extractSpaces emph <$> inlines)
     , ("bf", extractSpaces strong <$> inlines)
     , ("tt", formatCode nullAttr <$> inlines)
+    , ("ttfamily", extractSpaces (formatCode nullAttr) <$> inlines)
     , ("rm", inlines)
     , ("itshape", extractSpaces emph <$> inlines)
     , ("slshape", extractSpaces emph <$> inlines)
     , ("scshape", extractSpaces smallcaps <$> inlines)
     , ("bfseries", extractSpaces strong <$> inlines)
-    , ("MakeUppercase", makeUppercase <$> tok)
-    , ("MakeTextUppercase", makeUppercase <$> tok) -- textcase
-    , ("uppercase", makeUppercase <$> tok)
-    , ("MakeLowercase", makeLowercase <$> tok)
-    , ("MakeTextLowercase", makeLowercase <$> tok)
-    , ("lowercase", makeLowercase <$> tok)
+    , ("MakeUppercase", caseTransform "upper" T.toUpper)
+    , ("MakeTextUppercase", caseTransform "upper" T.toUpper) -- textcase
+    , ("uppercase", caseTransform "upper" T.toUpper)
+    , ("MakeLowercase", caseTransform "lower" T.toLower)
+    , ("MakeTextLowercase", caseTransform "lower" T.toLower)
+    , ("lowercase", caseTransform "lower" T.toLower)
+    , ("MakeTitlecase", makeTitlecaseCommand)
+    , ("NoCaseChange", spanWith ("",["nocasechange"],[]) <$> tok)
+    , ("CaseSwitch", tok <* tok <* tok <* tok)
     , ("thanks", skipopts >> note <$> grouped block)
     , ("footnote", skipopts >> footnote)
     , ("footnotemark", footnotemark)
     , ("footnotetext", footnotetext)
     , ("newline", pure B.linebreak)
+    -- xparse argument markers, in case they leak into the document:
+    , ("NoValue", pure (B.str "-NoValue-"))
+    , ("BooleanTrue", pure mempty)
+    , ("BooleanFalse", pure mempty)
     , ("passthrough", fixPassthroughEscapes <$> tok)
     -- \passthrough macro used by latex writer
                            -- for listings
@@ -457,6 +479,7 @@ inlineCommands = M.unions
     , ("iftoggle", try $ ifToggle >> inline)
     -- include
     , ("input", rawInlineOr "input" $ include "input")
+    , ("expandableinput", rawInlineOr "expandableinput" $ include "input")
     -- soul package
     , ("st", extractSpaces strikeout <$> tok)
     , ("ul", underline <$> tok)
@@ -471,6 +494,19 @@ inlineCommands = M.unions
     -- this is used internally by pandoc but the definition is too complicated
     -- for pandoc to handle (see #11140):
     , ("pandocbounded", tok)
+    -- LaTeX3 constants
+    , ("c_ampersand_str", pure (str "&"))
+    , ("c_atsign_str", pure (str "@"))
+    , ("c_backslash_str", pure (str "\\"))
+    , ("c_left_brace_str", pure (str "{"))
+    , ("c_right_brace_str", pure (str "}"))
+    , ("c_circumflex_str", pure (str "^"))
+    , ("c_colon_str", pure (str ":"))
+    , ("c_dollar_str", pure (str "$"))
+    , ("c_hash_str", pure (str "#"))
+    , ("c_percent_str", pure (str "%"))
+    , ("c_tilde_str", pure (str "~"))
+    , ("c_underscore_str", pure (str "_"))
     ]
 
 bracedFilename :: PandocMonad m => LP m Text
@@ -547,15 +583,97 @@ ifdim = do
   contents <- manyTill anyTok (controlSeq "fi")
   return $ rawInline "latex" $ "\\ifdim" <> untokenize contents <> "\\fi"
 
-makeUppercase :: Inlines -> Inlines
-makeUppercase = fromList . walk (alterStr T.toUpper) . toList
+-- | Parse the argument of a case-changing command (\MakeUppercase,
+-- \MakeLowercase) and apply the case transformation, honoring
+-- exclusions declared with \Declare*caseExclusions.
+caseTransform :: PandocMonad m => Text -> (Text -> Text) -> LP m Inlines
+caseTransform kind f = do
+  void $ option [] keyvals -- locale options, ignored
+  excl <- M.findWithDefault Set.empty kind . sCaseExclusions <$> getState
+  caseTransformWith excl f <$> tok
 
-makeLowercase :: Inlines -> Inlines
-makeLowercase = fromList . walk (alterStr T.toLower) . toList
+-- | Apply a case transformation to text, leaving math, code and
+-- citations untouched, unwrapping (and skipping) \NoCaseChange
+-- content, and skipping excluded words.
+caseTransformWith :: Set.Set Text -> (Text -> Text) -> Inlines -> Inlines
+caseTransformWith excl f = fromList . go . toList
+  where
+    go = concatMap goInline
+    goInline (Span ("",["nocasechange"],[]) ils) = ils
+    goInline (Str t)
+      | t `Set.member` excl = [Str t]
+      | otherwise = [Str (f t)]
+    goInline (Emph ils) = [Emph (go ils)]
+    goInline (Strong ils) = [Strong (go ils)]
+    goInline (Underline ils) = [Underline (go ils)]
+    goInline (Strikeout ils) = [Strikeout (go ils)]
+    goInline (Superscript ils) = [Superscript (go ils)]
+    goInline (Subscript ils) = [Subscript (go ils)]
+    goInline (SmallCaps ils) = [SmallCaps (go ils)]
+    goInline (Quoted qt ils) = [Quoted qt (go ils)]
+    goInline (Span attr ils) = [Span attr (go ils)]
+    goInline (Link attr ils target) = [Link attr (go ils) target]
+    goInline x = [x] -- Math, Code, Cite, Space, etc.
 
-alterStr :: (Text -> Text) -> Inline -> Inline
-alterStr f (Str xs) = Str (f xs)
-alterStr _ x = x
+-- | Parse the arguments of \MakeTitlecase, supporting the
+-- @words=all@ option and title-case exclusions.
+makeTitlecaseCommand :: PandocMonad m => LP m Inlines
+makeTitlecaseCommand = do
+  options <- option [] keyvals
+  excl <- M.findWithDefault Set.empty "title" . sCaseExclusions <$> getState
+  (if lookup "words" options == Just "all"
+      then makeTitlecaseAll excl
+      else makeTitlecase) <$> tok
+
+-- | Titlecase the first letter of each word (\MakeTitlecase with
+-- @words=all@), skipping excluded words.
+makeTitlecaseAll :: Set.Set Text -> Inlines -> Inlines
+makeTitlecaseAll excl = fromList . go . toList
+  where
+    go [] = []
+    go xs =
+      let (w, rest) = break isSep xs
+          (seps, rest') = span isSep rest
+       in tcWord w ++ seps ++ go rest'
+    isSep Space = True
+    isSep SoftBreak = True
+    isSep LineBreak = True
+    isSep _ = False
+    tcWord w
+      | stringify w `Set.member` excl = w
+      | otherwise = toList (makeTitlecase (fromList w))
+
+-- | Handle \DeclareUppercaseExclusions and friends: store a
+-- comma-separated list of words excluded from case changing.
+declareCaseExclusions :: PandocMonad m => Text -> LP m Blocks
+declareCaseExclusions kind = do
+  ws <- map T.strip . T.splitOn "," . untokenize <$> braced
+  updateState $ \st -> st{ sCaseExclusions =
+      M.insertWith Set.union kind (Set.fromList ws) (sCaseExclusions st) }
+  return mempty
+
+-- | Uppercase the first character of the first string (LaTeX3
+-- \MakeTitlecase, which title-cases only the first word by default).
+makeTitlecase :: Inlines -> Inlines
+makeTitlecase = fromList . snd . go . toList
+  where
+    go :: [Inline] -> (Bool, [Inline])
+    go (x : xs) =
+      case goInline x of
+        (True, x')  -> (True, x' : xs)
+        (False, x') -> (x' :) <$> go xs
+    go [] = (False, [])
+    goInline (Str t) | not (T.null t) =
+      (True, Str (T.toTitle (T.take 1 t) <> T.drop 1 t))
+    goInline (Emph ils) = Emph <$> go ils
+    goInline (Strong ils) = Strong <$> go ils
+    goInline (Underline ils) = Underline <$> go ils
+    goInline (SmallCaps ils) = SmallCaps <$> go ils
+    goInline (Span attr ils) = Span attr <$> go ils
+    goInline (Link attr ils target) =
+      (\ils' -> Link attr ils' target) <$> go ils
+    goInline (Quoted qt ils) = Quoted qt <$> go ils
+    goInline x = (False, x)
 
 fixPassthroughEscapes :: Inlines -> Inlines
 fixPassthroughEscapes = walk go
@@ -704,13 +822,16 @@ inline = do
                 -> eatOneToken *>
                     option (str "-") (symbol '-' *>
                       option (str "–") (str "—" <$ symbol '-'))
-        "'"     -> eatOneToken *>
-                    option (str "’") (str  "”" <$ (guard ligatures *> symbol '\''))
+        "'" | ligatures
+                -> eatOneToken *>
+                    option (str "’") (str "”" <$ symbol '\'')
+            | otherwise
+                -> symbolAsString
         "~"     -> str "\160" <$ eatOneToken
         "`" | ligatures
                 -> doubleQuote <|> singleQuote <|> (str "‘" <$ symbol '`')
             | otherwise
-                -> str "‘" <$ symbol '`'
+                -> symbolAsString
         "\"" | ligatures
                 -> doubleQuote <|> singleQuote <|> symbolAsString
         "“"     -> doubleQuote <|> symbolAsString
@@ -740,13 +861,10 @@ inlines = mconcat <$> many inline
 opt :: PandocMonad m => LP m Inlines
 opt = do
   toks <- try (sp *> bracketedToks <* sp)
-  -- now parse the toks as inlines
-  st <- getState
-  parsed <- runParserT (mconcat <$> many inline) st "bracketed option"
-              (TokStream False toks)
-  case parsed of
-    Right result -> return result
-    Left e       -> throwError $ fromParsecError (toSources toks) e
+  -- now parse the toks as inlines; parseFromToks preserves any
+  -- state changes (e.g. macro definitions), since an optional
+  -- argument is not a TeX group
+  parseFromToks (mconcat <$> many inline) toks
 
 -- block elements:
 
@@ -764,7 +882,7 @@ preamble = mconcat <$> many preambleBlock
 rule :: PandocMonad m => LP m Blocks
 rule = do
   skipopts
-  width <- T.takeWhile (\c -> isDigit c || c == '.') . stringify <$> tok
+  width <- T.takeWhile (\c -> isDigit c || c == '.') . stringifyInlines <$> tok
   _thickness <- tok
   -- 0-width rules are used to fix spacing issues:
   case safeRead width of
@@ -945,7 +1063,8 @@ blockCommand = try $ do
         lookAhead $ blankline <|> startCommand
         return $ curr <> mconcat rest
   let raw = rawDefiniteBlock <|> rawMaybeBlock
-  lookupListDefault raw names blockCommands
+  commandMap <- envBlockCommands <$> askEnv
+  lookupListDefault raw names commandMap
 
 closing :: PandocMonad m => LP m Blocks
 closing = do
@@ -1062,10 +1181,30 @@ blockCommands = M.fromList
    -- include
    , ("include", rawBlockOr "include" $ include "include")
    , ("input", rawBlockOr "input" $ include "input")
+   , ("expandableinput", rawBlockOr "expandableinput" $ include "input")
    , ("subfile", rawBlockOr "subfile" doSubfile)
    , ("usepackage", rawBlockOr "usepackage" usepackage)
    -- preamble
    , ("PackageError", mempty <$ (braced >> braced >> braced))
+   -- LaTeX3 conveniences, parsed and ignored:
+   , ("ExplSyntaxOn", pure mempty)
+   , ("ExplSyntaxOff", pure mempty)
+   , ("ShowCommand", mempty <$ withVerbatimMode (spaces *> anyControlSeq))
+   , ("ShowEnvironment", mempty <$ braced)
+   , ("DeclareKeys", mempty <$ (skipopts *> braced))
+   , ("DeclareUnknownKeyHandler", mempty <$ (skipopts *> braced))
+   , ("ProcessKeyOptions", mempty <$ skipopts)
+   , ("SetKeys", mempty <$ (skipopts *> braced))
+   -- LaTeX3 case changing
+   , ("DeclareUppercaseExclusions", declareCaseExclusions "upper")
+   , ("DeclareLowercaseExclusions", declareCaseExclusions "lower")
+   , ("DeclareTitlecaseExclusions", declareCaseExclusions "title")
+   , ("AddToNoCaseChangeList", mempty <$ braced)
+   , ("DeclareCaseChangeEquivalent", mempty <$
+        (withVerbatimMode (spaces *> anyControlSeq) *> braced))
+   , ("DeclareUppercaseMapping", mempty <$ (skipopts *> braced *> braced))
+   , ("DeclareLowercaseMapping", mempty <$ (skipopts *> braced *> braced))
+   , ("DeclareTitlecaseMapping", mempty <$ (skipopts *> braced *> braced))
    -- epigraph package
    , ("epigraph", epigraph)
    -- alignment
@@ -1154,7 +1293,8 @@ environment :: PandocMonad m => LP m Blocks
 environment = try $ do
   controlSeq "begin"
   name <- untokenize <$> braced
-  M.findWithDefault mzero name environments <|>
+  envMap <- envEnvironments <$> askEnv
+  M.findWithDefault mzero name envMap <|>
     langEnvironment name <|>
     theoremEnvironment blocks inlines opt name <|>
     if M.member name (inlineEnvironments

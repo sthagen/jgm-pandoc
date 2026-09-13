@@ -188,7 +188,6 @@ import Text.Parsec
       ParsecT,
       SourcePos,
       SourceName,
-      setSourceName,
       Column,
       Line,
       incSourceLine,

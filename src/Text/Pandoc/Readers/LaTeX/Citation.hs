@@ -13,8 +13,6 @@ import qualified Data.Map as M
 import Data.Text (Text)
 import Control.Applicative ((<|>), optional, many)
 import Control.Monad (mzero)
-import Control.Monad.Trans (lift)
-import Control.Monad.Except (throwError)
 import Text.Pandoc.Parsing hiding (blankline, many, mathDisplay, mathInline,
                             optional, space, spaces, withRaw, (<|>))
 
@@ -113,14 +111,10 @@ simpleCiteArgs inline = try $ do
   opt :: PandocMonad m => LP m Inlines
   opt = do
     toks <- try (sp *> bracketedToks <* sp)
-    -- now parse the toks as inlines
-    st <- getState
-    parsed <- lift $
-      runParserT (mconcat <$> many inline) st "bracketed option"
-       (TokStream False toks)
-    case parsed of
-      Right result -> return result
-      Left e       -> throwError $ fromParsecError (toSources toks) e
+    -- now parse the toks as inlines; parseFromToks preserves any
+    -- state changes (e.g. macro definitions), since an optional
+    -- argument is not a TeX group
+    parseFromToks (mconcat <$> many inline) toks
 
 
 

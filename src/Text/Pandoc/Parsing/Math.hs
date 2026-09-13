@@ -15,7 +15,7 @@ module Text.Pandoc.Parsing.Math
   )
 where
 
-import Control.Monad (mzero, when)
+import Control.Monad (mzero, when, guard)
 import Data.Text (Text)
 import Text.Parsec ((<|>), ParsecT, Stream(..), notFollowedBy, many1, try)
 import Text.Pandoc.Options
@@ -44,8 +44,10 @@ mathInlineWith op cl = try $ do
                            (try (string "text" >>
                                  (("\\text" <>) <$> inBalancedBraces 0 ""))
                             <|>  (\c -> T.pack ['\\',c]) <$> anyChar))
-                   <|> ("\n" <$ blankline <* notFollowedBy' blankline <* notFollowedBy (char '$'))
-                   <|> (T.pack <$> many1 spaceChar <* notFollowedBy (char '$'))
+                   <|> ("\n" <$ blankline <* notFollowedBy' blankline <*
+                          (guard (op /= "$") <|> notFollowedBy (char '$')))
+                   <|> (T.pack <$> many1 spaceChar <*
+                          (guard (op /= "$") <|> notFollowedBy (char '$')))
                     ) (try $ textStr cl)
   notFollowedBy digit  -- to prevent capture of $5
   return $ trimMath $ T.concat words'

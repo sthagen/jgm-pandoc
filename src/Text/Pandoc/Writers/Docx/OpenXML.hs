@@ -25,7 +25,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.Except (catchError)
 import Crypto.Hash (hashWith, SHA1(SHA1))
 import qualified Data.ByteString.Lazy as BL
-import Data.Char (isLetter, isSpace)
+import Data.Char (isSpace, isAlphaNum)
 import Text.Pandoc.Char (isCJK)
 import Data.Ord (comparing)
 import Data.String (fromString)
@@ -241,7 +241,7 @@ writeOpenXML opts (Pandoc meta blocks) = do
   let includeLOT = writerListOfTables opts || lookupMetaBool "lot" meta
   abstractTitle <- case lookupMeta "abstract-title" meta of
       Just (MetaBlocks bs)   -> pure $ stringify bs
-      Just (MetaInlines ils) -> pure $ stringify ils
+      Just (MetaInlines ils) -> pure $ stringifyInlines ils
       Just (MetaString s)    -> pure s
       _                      -> translateTerm Abstract
   abstract <-
@@ -326,9 +326,13 @@ writeOpenXML opts (Pandoc meta blocks) = do
 
 -- | Convert a list of Pandoc blocks to OpenXML.
 blocksToOpenXML :: (PandocMonad m) => WriterOptions -> [Block] -> WS m [Content]
-blocksToOpenXML opts =
-  fmap concat . mapM (blockToOpenXML opts)
-  . separateTables . filter (not . isForeignRawBlock)
+blocksToOpenXML opts bs = do
+  oldFirstPara <- gets stFirstPara
+  modify $ \st -> st{ stFirstPara = True }
+  result <- concat <$> mapM (blockToOpenXML opts)
+            (separateTables (filter (not . isForeignRawBlock) bs))
+  modify $ \st -> st{ stFirstPara = oldFirstPara }
+  pure result
 
 isForeignRawBlock :: Block -> Bool
 isForeignRawBlock (RawBlock format _) = format /= "openxml"
@@ -447,16 +451,16 @@ blockToOpenXML' opts (Para lst)
       let displayMathPara = case lst of
                                  [x] -> isDisplayMath x
                                  _   -> False
-      paraProps <- getParaProps displayMathPara
       bodyTextStyle <- pStyleM $ if isFirstPara
                        then "First Paragraph"
                        else "Body Text"
-      let paraProps' = case paraProps of
-            []               -> [mknode "w:pPr" [] [bodyTextStyle]]
-            ps               -> ps
+      paraProps <- local (\env -> env{ envParaProperties =
+                                        envParaProperties env <>
+                                        EnvProps (Just bodyTextStyle) [] })
+                      (getParaProps displayMathPara)
       modify $ \s -> s { stFirstPara = False }
       contents <- inlinesToOpenXML opts lst
-      return [Elem $ mknode "w:p" [] (map Elem paraProps' ++ contents)]
+      return [Elem $ mknode "w:p" [] (map Elem paraProps ++ contents)]
 blockToOpenXML' opts (LineBlock lns) = blockToOpenXML opts $ linesToPara lns
 blockToOpenXML' _ b@(RawBlock format str)
   | format == Format "openxml" = return [
@@ -911,7 +915,6 @@ inlineToOpenXML' opts (Code attrs str) = do
 inlineToOpenXML' opts (Note bs) = do
   notes <- gets stFootnotes
   notenum <- getUniqueId
-  oldFirstPara <- gets stFirstPara
   footnoteStyle <- rStyleM "Footnote Reference"
   let notemarker = mknode "w:r" []
                    [ mknode "w:rPr" [] footnoteStyle
@@ -927,7 +930,6 @@ inlineToOpenXML' opts (Note bs) = do
                                 , envInNote = True })
               (withParaPropM (pStyleM "Footnote Text") $
                blocksToOpenXML opts $ insertNoteRef bs)
-  modify $ \s -> s{ stFirstPara = oldFirstPara }
   let newnote = mknode "w:footnote" [("w:id", notenum)] contents
   modify $ \s -> s{ stFootnotes = newnote : notes }
   return [ Elem $ mknode "w:r" []
@@ -1054,7 +1056,7 @@ inlineToOpenXML' opts (Image attr@(imgident, _, _) alt (src, title)) = do
               , mknode "wp:effectExtent"
                 [("b","0"),("l","0"),("r","0"),("t","0")] ()
               , mknode "wp:docPr"
-                [ ("descr", stringify alt)
+                [ ("descr", stringifyInlines alt)
                 , ("title", title)
                 , ("id", docprid)
                 , ("name","Picture")
@@ -1140,14 +1142,18 @@ wrapBookmark ident contents = do
   return $ Elem bookmarkStart : contents ++ [Elem bookmarkEnd]
 
 -- Word imposes a 40 character limit on bookmark names and requires
--- that they begin with a letter.  So we just use a hash of the
--- identifier when otherwise we'd have an illegal bookmark name.
+-- that they begin with a letter or @_@ and contain only letters,
+-- numbers or underscores. Bookmarks beginning with @_@ are
+-- hidden in the user interface (and in particular hidden from screen
+-- readers, which we want); these are to be used for cross-references.
+-- When the id is otherwise illegal we use a hash of the identifier.
 toBookmarkName :: Text -> Text
 toBookmarkName s
-  | Just (c, _) <- T.uncons s
-  , isLetter c
-  , T.length s <= 40 = s
-  | otherwise = T.pack $ 'X' : drop 1 (show (hashWith SHA1 (fromText s)))
+  | T.length s < 40
+  , T.all (\c -> isAlphaNum c || c == '_') s
+    = "_" <> s
+  | otherwise = "_" <> T.pack (drop 1 (show (hashWith SHA1 (fromText s))))
+  -- we drop 1 because a SHA1 is 40 characters and we need room for the `_`
 
 maxListLevel :: Int
 maxListLevel = 8

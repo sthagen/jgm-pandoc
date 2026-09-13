@@ -1,4 +1,5 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE BangPatterns               #-}
 {- |
    Module      : Text.Pandoc.Parsing
    Copyright   : © 2006-2024 John MacFarlane
@@ -121,7 +122,9 @@ guardDisabled ext =
 -- | Update the position on which the last string ended.
 updateLastStrPos :: (Stream s m a, HasLastStrPosition st)
                  => ParsecT s st m ()
-updateLastStrPos = getPosition >>= updateState . setLastStrPos . Just
+updateLastStrPos = do
+  !pos <- getPosition
+  updateState $ setLastStrPos $ Just pos
 
 -- | Whether we are right after the end of a string.
 notAfterString :: (Stream s m a, HasLastStrPosition st) => ParsecT s st m Bool

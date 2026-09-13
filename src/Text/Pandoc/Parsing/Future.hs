@@ -17,10 +17,8 @@ module Text.Pandoc.Parsing.Future
   )
 where
 
-import Prelude hiding (Applicative(..))
-import Control.Applicative (Applicative(..))
 import Control.Monad.Reader
-  ( asks, runReader, MonadReader(ask), Reader, ReaderT(ReaderT) )
+  ( asks, runReader, MonadReader(ask), Reader )
 
 -- | Reader monad wrapping the parser state. This is used to possibly
 -- delay evaluation until all relevant information has been parsed and
@@ -31,9 +29,8 @@ newtype Future s a = Future { runDelayed :: Reader s a }
 instance Semigroup a => Semigroup (Future s a) where
   (<>) = liftA2 (<>)
 
-instance (Semigroup a, Monoid a) => Monoid (Future s a) where
+instance Monoid a => Monoid (Future s a) where
   mempty = return mempty
-  mappend = (<>)
 
 -- | Run a delayed action with the given state.
 runF :: Future s a -> s -> a

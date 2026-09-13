@@ -45,9 +45,11 @@ module Text.Pandoc.Shared (
                      removeFormatting,
                      deNote,
                      stringify,
+                     stringifyInlines,
                      capitalize,
                      compactify,
                      compactifyDL,
+                     compactifyTable,
                      linesToPara,
                      figureDiv,
                      makeSections,
@@ -96,7 +98,7 @@ import Data.List (find, groupBy, intercalate, intersperse, union)
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe)
-import Data.Monoid (Any (..) )
+import Data.Monoid (Any (..), All (..) )
 import Data.Semigroup (Min (..))
 import Data.Sequence (ViewL (..), ViewR (..), viewl, viewr)
 import qualified Data.Set as Set
@@ -369,23 +371,55 @@ deNote x        = x
 -- Footnotes are skipped (since we don't want their contents in link
 -- labels).
 stringify :: Walkable Inline a => a -> T.Text
-stringify = query go . walk fixInlines
-  where go :: Inline -> T.Text
-        go Space                                       = " "
-        go SoftBreak                                   = " "
-        go (Str x)                                     = x
-        go (Code _ x)                                  = x
-        go (Math _ x)                                  = x
-        go (RawInline (Format "html") (T.unpack -> ('<':'b':'r':_)))
-                                                       = " " -- see #2105
-        go LineBreak                                   = " "
-        go _                                           = ""
+stringify = T.concat . query go . walk fixInlines
+  where go :: Inline -> [T.Text]
+        go Space        = [" "]
+        go SoftBreak    = [" "]
+        go (Str x)      = [x]
+        go (Code _ x)   = [x]
+        go (Math _ x)   = [x]
+        go (RawInline (Format "html") t)
+          | "<br" `T.isPrefixOf` t = [" "] -- see #2105
+        go LineBreak    = [" "]
+        go _            = []
 
         fixInlines :: Inline -> Inline
         fixInlines (Cite _ ils) = Cite [] ils
         fixInlines (Note _) = Note []
         fixInlines (q@Quoted{}) = deQuote q
         fixInlines x = x
+
+-- | Like 'stringify', but specialized to sequences of inlines
+-- (e.g. @['Inline']@ or 'Inlines').  Produces the same result as
+-- 'stringify' in a single pass, without rebuilding the tree.
+stringifyInlines :: Foldable t => t Inline -> T.Text
+stringifyInlines ils0 = T.concat $ foldr go [] ils0
+  where
+    go :: Inline -> [T.Text] -> [T.Text]
+    go il acc = case il of
+      Str x           -> x : acc
+      Space           -> " " : acc
+      SoftBreak       -> " " : acc
+      Code _ x        -> x : acc
+      Math _ x        -> x : acc
+      LineBreak       -> " " : acc
+      RawInline (Format "html") t
+        | "<br" `T.isPrefixOf` t -> " " : acc -- see #2105
+      RawInline _ _   -> acc
+      Note _          -> acc -- footnotes are skipped
+      Cite _ ils      -> foldr go acc ils -- citation metadata is dropped
+      Quoted SingleQuote ils -> "\8216" : foldr go ("\8217" : acc) ils
+      Quoted DoubleQuote ils -> "\8220" : foldr go ("\8221" : acc) ils
+      Emph ils        -> foldr go acc ils
+      Underline ils   -> foldr go acc ils
+      Strong ils      -> foldr go acc ils
+      Strikeout ils   -> foldr go acc ils
+      Superscript ils -> foldr go acc ils
+      Subscript ils   -> foldr go acc ils
+      SmallCaps ils   -> foldr go acc ils
+      Span _ ils      -> foldr go acc ils
+      Link _ ils _    -> foldr go acc ils
+      Image _ ils _   -> foldr go acc ils
 
 -- | Unwrap 'Quoted' inline elements, enclosing the contents with
 -- English-style Unicode quotes instead.
@@ -441,6 +475,26 @@ compactifyDL items =
              _     -> items
         _          -> items
 
+-- | If every cell of the table is either empty or consists of a
+-- single Para or Plain element, convert all Para to Plain for a compact
+-- table.
+compactifyTable ::
+  (Walkable Block a, Walkable [Block] a, Walkable Inline a) => a -> a
+compactifyTable x = if isSimpleTable x
+                       then walk fixNotes $ walk paraToPlain x
+                       else x
+ where
+  isSimpleCell :: [Block] -> All
+  isSimpleCell [] = All True
+  isSimpleCell [Para _] = All True
+  isSimpleCell [Plain _] = All True
+  isSimpleCell _ = All False
+  isSimpleTable = getAll . query isSimpleCell
+  paraToPlain (Para ils) = Plain ils
+  paraToPlain b = b
+  -- walk descends into the notes, so we need to fix them back up:
+  fixNotes (Note [Plain ils]) = Note [Para ils]
+  fixNotes i = i
 
 -- | Combine a list of lines by adding hard linebreaks.
 combineLines :: [[Inline]] -> [Inline]
@@ -463,7 +517,8 @@ figureDiv (ident, classes, kv) (Caption shortcapt longcapt) body =
               , ["figure"] `union` classes
               , kv
               )
-      captkv = maybe mempty (\s -> [("short-caption", stringify s)]) shortcapt
+      captkv = maybe mempty (\s -> [("short-caption", stringifyInlines s)])
+                 shortcapt
       capt = [Div ("", ["caption"], captkv) longcapt | not (null longcapt)]
   in Div divattr (body ++ capt)
 
@@ -475,7 +530,7 @@ isPara _        = False
 -- | Convert Pandoc inline list to plain text identifier.
 inlineListToIdentifier :: Extensions -> [Inline] -> T.Text
 inlineListToIdentifier exts =
-  textToIdentifier exts . stringify . unEmojify
+  textToIdentifier exts . stringifyInlines . unEmojify
   where
     unEmojify :: [Inline] -> [Inline]
     unEmojify
@@ -672,7 +727,7 @@ taskListItemFromAscii :: Extensions -> [Block] -> [Block]
 taskListItemFromAscii = handleTaskListItem fromMd
   where
     fromMd (Str "[" : Space : Str "]" : Space : is) = Str "☐" : Space : is
-    fromMd (Str "[ ]"                 : Space : is) = Str "☒" : Space : is
+    fromMd (Str "[ ]"                 : Space : is) = Str "☐" : Space : is
     fromMd (Str "[x]"                 : Space : is) = Str "☒" : Space : is
     fromMd (Str "[X]"                 : Space : is) = Str "☒" : Space : is
     fromMd [Str "[" , Space , Str "]"] = [Str "☐"]
@@ -743,7 +798,8 @@ formatCode attr = B.fromList . walk fmt . B.toList
     fmt = concatMap go . groupBy (\a b -> isPlaintext a && isPlaintext b)
       where
         go xs
-          | all isPlaintext xs = B.toList $ B.codeWith attr $ stringify xs
+          | all isPlaintext xs = B.toList $ B.codeWith attr $
+                                   stringifyInlines xs
           | otherwise = xs
 
 --

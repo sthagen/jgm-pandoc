@@ -250,6 +250,51 @@ tests = [ testGroup "basic"
             mconcat ["^^" <> T.pack [i] | i <- hex] =?>
             para (str $ T.pack $ ['p'..'y']++['!'..'&'])
           ]
+        , testGroup "symbol commands"
+          [ "qed" =:
+            "A\\qed" =?> para (str "A\xa0\x25FB")
+          ]
+        , testGroup "newif"
+          [ "newif defines conditional" =:
+            "\\newif\\iffoo\\footrue\\iffoo yes\\fi" =?>
+            para (str "yes")
+          , "newif requires name starting with if" =:
+            "\\newif\\foobar\\foobar hi\\fi" =?>
+            para (str "hi")
+          ]
+        , testGroup "conditionals"
+          [ "unknown conditional nested in skipped branch" =:
+            "\\iffalse X\\ifdim\\wd0>0pt Y\\fi Z\\fi W" =?>
+            para "W"
+          , "nested conditionals with else branches" =:
+            "\\iftrue A\\iffalse B\\else C\\fi D\\else E\\fi F" =?>
+            para "ACDF"
+          , "newif conditional nested in skipped branch" =:
+            "\\newif\\iffoo\\iffalse x\\iffoo y\\fi z\\fi w" =?>
+            para "w"
+          , "nested conditional in else branch" =:
+            "\\iffalse a\\else b\\iffalse c\\else d\\fi e\\fi f" =?>
+            para "bdef"
+          ]
+        , testGroup "ligatures"
+          [ "quote ligatures in normal text" =:
+            "it's ``x'' `y'" =?>
+            para ("it\8217s " <> doubleQuoted "x" <> " " <> singleQuoted "y")
+          , "apostrophe in texttt stays ASCII" =:
+            "\\texttt{it's}" =?> para (code "it's")
+          , "backtick in texttt stays ASCII" =:
+            "\\texttt{`x'}" =?> para (code "`x'")
+          ]
+        , testGroup "urls"
+          [ "url with escaped %" =:
+            "\\url{http://example.com/a\\%b}" =?>
+            para (linkWith ("",["uri"],[]) "http://example.com/a%b" ""
+                   (str "http://example.com/a%b"))
+          , "url with escaped backslash" =:
+            "\\url{http://example.com/a\\\\b}" =?>
+            para (linkWith ("",["uri"],[]) "http://example.com/a\\b" ""
+                   (str "http://example.com/a\\b"))
+          ]
         , testGroup "memoir scene breaks"
           [ "plainbreak" =:
             "hello\\plainbreak{2}goodbye" =?>

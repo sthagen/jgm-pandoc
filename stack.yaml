@@ -25,16 +25,22 @@ extra-deps:
 - citeproc-0.13.0.1
 - skylighting-format-blaze-html-0.1.2.1
 - typst-symbols-0.3
-- typst-0.11.0.1
-- djot-0.1.4.2
-- asciidoc-0.1.0.5
-- texmath-0.13.2.2
+- git: https://github.com/jgm/asciidoc-hs
+  commit: 8d090846ddb061871e2434f6f55462467cb5a052
+- git: https://github.com/jgm/doclayout
+  commit: d98289d576ba621a17e184ca5a1ff9a8d8390542
+- git: https://github.com/jgm/doctemplates
+  commit: 3c3a61267b709de279074e54ecf391f0f631bb2f
+- git: https://github.com/jgm/typst-hs
+  commit: a2ebb326923ff7c3e8bfe99d24a6e62d2a3984ee
+- git: https://github.com/jgm/djoths
+  commit: 20549c6b7466cfbf8c3645ddfac68e223ca113f3
+- git: https://github.com/jgm/texmath
+  commit: a7451e20f371b451b94136c50fefa882a2852bf1
 # needed because not yet in nixpkgs:
 - pandoc-types-1.23.1.2
 # needed because not yet in nixpkgs:
 - emojis-0.1.5
-# needed because not yet in nixpkgs:
-- doclayout-0.5.0.3
 ghc-options:
    "$locals": -fhide-source-paths -Wno-missing-home-modules
 resolver: lts-24.51

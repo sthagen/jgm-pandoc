@@ -9,6 +9,7 @@ import Text.Pandoc.Scripting (noEngine)
 import GHC.IO.Encoding
 import Test.Tasty
 import qualified Tests.Command
+import qualified Tests.ImageSize
 import qualified Tests.Old
 import qualified Tests.Readers.Creole
 import qualified Tests.Readers.Docx
@@ -65,6 +66,7 @@ tests pandocPath = testGroup "pandoc tests"
         , testGroup "Shared" Tests.Shared.tests
         , testGroup "MediaBag" Tests.MediaBag.tests
         , testGroup "XML" Tests.XML.tests
+        , testGroup "ImageSize" Tests.ImageSize.tests
         , testGroup "Writers"
           [ testGroup "Native" Tests.Writers.Native.tests
           , testGroup "ConTeXt" Tests.Writers.ConTeXt.tests

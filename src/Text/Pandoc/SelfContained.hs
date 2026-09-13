@@ -16,16 +16,16 @@ offline, by incorporating linked images, CSS, and scripts into
 the HTML using data URIs.
 -}
 module Text.Pandoc.SelfContained ( makeDataURI, makeSelfContained ) where
-import Codec.Compression.GZip as Gzip
+import qualified Codec.Compression.Zlib.Internal as Zlib
 import Control.Applicative ((<|>))
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64 (encode)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
-import Data.Char (isAlphaNum, isAscii)
+import Data.Char (toLower)
 import Crypto.Hash (hashWith, SHA1(SHA1))
-import Network.URI (escapeURIString)
+import Network.URI (escapeURIString, isUnescapedInURI)
 import System.FilePath (takeDirectory, takeExtension, (</>))
 import Text.HTML.TagSoup
 import Text.Pandoc.Class.PandocMonad (PandocMonad (..), fetchItem,
@@ -44,19 +44,16 @@ import Data.Maybe (isNothing)
 import qualified Data.Map as M
 import Control.Monad.State
 
-isOk :: Char -> Bool
-isOk c = isAscii c && isAlphaNum c
-
 makeDataURI :: (MimeType, ByteString) -> T.Text
 makeDataURI (mime, raw) =
   if textual
-     then "data:" <> mime' <> "," <> T.pack (escapeURIString isOk (toString raw))
+     then "data:" <> mime' <> "," <> T.pack (escapeURIString isUnescapedInURI (toString raw))
      else "data:" <> mime' <> ";base64," <> toText (encode raw')
   where textual = "text/" `T.isPrefixOf` mime
         raw' = if "+xml" `T.isSuffixOf` mime
                   then B.filter (/= '\r') raw  -- strip off CRs
                   else raw
-        mime' = if textual && T.any (== ';') mime
+        mime' = if textual && not (T.any (== ';') mime)
                    then mime <> ";charset=utf-8"
                    else mime  -- mime type already has charset
 
@@ -70,9 +67,10 @@ isSourceAttribute tagname (x,_) =
 
 data ConvertState =
   ConvertState
-  { isHtml5 :: Bool
-  , svgMap  :: M.Map T.Text (T.Text, [Attribute T.Text])
+  { svgMap  :: M.Map T.Text (T.Text, [Attribute T.Text])
     -- map from hash to (id, svg attributes)
+  , fetchCache :: M.Map (MimeType, T.Text) GetDataResult
+    -- cache of fetched resources, keyed on mime type hint and url
   } deriving (Show)
 
 convertTags :: PandocMonad m =>
@@ -102,7 +100,7 @@ convertTags (t@(TagOpen "script" as):tc@(TagClose "script"):ts) =
                   | ("text/javascript" `T.isPrefixOf` mime ||
                      "application/javascript" `T.isPrefixOf` mime ||
                      "application/x-javascript" `T.isPrefixOf` mime) &&
-                     not ("</script" `B.isInfixOf` bs) ->
+                     not ("</script" `B.isInfixOf` B.map toLower bs) ->
                      return $
                        TagOpen "script" [(k,v) | (k,v) <- as
                                                , k == "type" ||
@@ -155,12 +153,15 @@ convertTags (t@(TagOpen tagname as):ts)
                           Nothing -> False
                           Just cs -> "inline-svg" `elem` cs
        as' <- mapM (processAttribute inlineSvgs) as
-       let attrs = addRole "img" $ addAriaLabel $ rights as'
+       let attrs = rights as'
        let svgContents = lefts as'
        rest <- convertTags ts
        case svgContents of
          [] -> return $ TagOpen tagname attrs : rest
          ((hash, tags) : _) -> do
+             -- inlining the SVG loses the img element's alt text, so
+             -- we add role and aria-label to the svg element:
+             let svgImgAttrs = addRole "img" $ addAriaLabel attrs
              -- drop "</img>" if present
              let rest' = case rest of
                            TagClose tn : xs | tn == tagname ->  xs
@@ -168,7 +169,8 @@ convertTags (t@(TagOpen tagname as):ts)
              svgmap <- gets svgMap
              case M.lookup hash svgmap of
                Just (svgid, svgattrs) -> do
-                 let attrs' = [(k,v) | (k,v) <- combineSvgAttrs svgattrs attrs
+                 let attrs' = [(k,v) | (k,v) <- combineSvgAttrs svgattrs
+                                                  svgImgAttrs
                                      , k /= "id"]
                  return $ TagOpen "svg" attrs' :
                           TagOpen "use" [("href", "#" <> svgid),
@@ -180,7 +182,7 @@ convertTags (t@(TagOpen tagname as):ts)
                Nothing ->
                   case dropWhile (not . isTagOpenName "svg") tags of
                     TagOpen "svg" svgattrs : tags' -> do
-                      let attrs' = combineSvgAttrs svgattrs attrs
+                      let attrs' = combineSvgAttrs svgattrs svgImgAttrs
                       let svgid = case lookup "id" attrs' of
                                      Just id' -> id'
                                      Nothing -> "svg_" <> hash
@@ -188,11 +190,7 @@ convertTags (t@(TagOpen tagname as):ts)
                                     [(k,v) | (k,v) <- attrs', k /= "id"]
                       modify $ \st ->
                         st{ svgMap = M.insert hash (svgid, attrs'') (svgMap st) }
-                      let fixUrl x =
-                            case T.breakOn "url(#" x of
-                              (_,"") -> x
-                              (before, after) -> before <>
-                                  "url(#" <> svgid <> "_" <> T.drop 5 after
+                      let fixUrl = T.replace "url(#" ("url(#" <> svgid <> "_")
                       let addIdPrefix ("id", x) = ("id", svgid <> "_" <> x)
                           addIdPrefix (k, x)
                            | k == "xlink:href" || k == "href" =
@@ -290,7 +288,7 @@ combineSvgAttrs svgAttrs imgAttrs =
                     _ -> []
 
 cssURLs :: PandocMonad m
-        => FilePath -> ByteString -> m ByteString
+        => FilePath -> ByteString -> StateT ConvertState m ByteString
 cssURLs d orig = do
   res <- runParserT (parseCSSUrls d) () "css" orig
   case res of
@@ -300,21 +298,22 @@ cssURLs d orig = do
        Right bs  -> return bs
 
 parseCSSUrls :: PandocMonad m
-             => FilePath -> ParsecT ByteString () m ByteString
+             => FilePath
+             -> ParsecT ByteString () (StateT ConvertState m) ByteString
 parseCSSUrls d = B.concat <$> P.many
   (pCSSWhite <|> pCSSComment <|> pCSSImport d <|> pCSSUrl d <|> pCSSOther)
 
 pCSSImport :: PandocMonad m
-           => FilePath -> ParsecT ByteString () m ByteString
+           => FilePath
+           -> ParsecT ByteString () (StateT ConvertState m) ByteString
 pCSSImport d = P.try $ do
   P.string "@import"
   P.spaces
   res <- (pQuoted <|> pUrl) >>= handleCSSUrl d
   P.spaces
   P.char ';'
-  P.spaces
   case res of
-       Left b       -> return $ B.pack "@import " <> b
+       Left b       -> return $ B.pack "@import " <> b <> B.pack ";"
        Right (_, b) -> return b
 
 -- Note: some whitespace in CSS is significant, so we can't collapse it!
@@ -334,7 +333,8 @@ pCSSOther =
   (B.singleton <$> P.char '/')
 
 pCSSUrl :: PandocMonad m
-        => FilePath -> ParsecT ByteString () m ByteString
+        => FilePath
+        -> ParsecT ByteString () (StateT ConvertState m) ByteString
 pCSSUrl d = P.try $ do
   res <- pUrl >>= handleCSSUrl d
   case res of
@@ -366,7 +366,7 @@ pUrl = P.try $ do
 
 handleCSSUrl :: PandocMonad m
              => FilePath -> (T.Text, ByteString)
-             -> ParsecT ByteString () m
+             -> ParsecT ByteString () (StateT ConvertState m)
                   (Either ByteString (MimeType, ByteString))
 handleCSSUrl d (url, fallback) =
   case escapeURIString (/='|') (T.unpack $ trim url) of
@@ -382,7 +382,7 @@ handleCSSUrl d (url, fallback) =
                       (mt, b) <- if "text/css" `T.isPrefixOf` mt'
                                     -- see #5725: in HTML5, content type
                                     -- isn't allowed on style type attribute
-                                    then ("text/css",) <$> cssURLs d raw
+                                    then ("text/css",) <$> lift (cssURLs d raw)
                                     else return (mt', raw)
                       return $ Right (mt, b)
                     CouldNotFetch _ -> return $ Left fallback
@@ -393,19 +393,45 @@ data GetDataResult =
   | Fetched (MimeType, ByteString)
   deriving (Show)
 
+-- | Decompress gzipped data, catching decompression errors instead
+-- of throwing an imprecise exception from pure code.
+decompressGzip :: ByteString -> Either T.Text ByteString
+decompressGzip bs =
+  B.concat <$>
+    Zlib.foldDecompressStreamWithInput
+      (\chunk rest -> (chunk :) <$> rest)
+      (const (Right []))
+      (Left . T.pack . show)
+      (Zlib.decompressST Zlib.gzipFormat Zlib.defaultDecompressParams)
+      (L.fromStrict bs)
+
 getData :: PandocMonad m
         => MimeType -> T.Text
-        -> m GetDataResult
+        -> StateT ConvertState m GetDataResult
 getData mimetype src
   | "data:" `T.isPrefixOf` src = return $ AlreadyDataURI src -- already data: uri
-  | otherwise = catchError fetcher handler
+  | otherwise = do
+      cache <- gets fetchCache
+      case M.lookup (mimetype, src) cache of
+        Just res -> return res
+        Nothing -> do
+          res <- catchError fetcher handler
+          modify $ \st ->
+            st{ fetchCache = M.insert (mimetype, src) res (fetchCache st) }
+          return res
  where
    fetcher = do
       let ext = T.toLower $ T.pack $ takeExtension $ T.unpack src
       (raw, respMime) <- fetchItem src
-      let raw' = if ext `elem` [".gz", ".svgz"]
-                 then B.concat $ L.toChunks $ Gzip.decompress $ L.fromChunks [raw]
-                 else raw
+      if ext `elem` [".gz", ".svgz"]
+         then case decompressGzip raw of
+                Right raw' -> processFetched raw' respMime
+                Left err -> do
+                  let msg = "could not decompress: " <> err
+                  report $ CouldNotFetchResource src msg
+                  return $ CouldNotFetch $ PandocSomeError msg
+         else processFetched raw respMime
+   processFetched raw' respMime = do
       let mime = case (mimetype, respMime) of
                   ("",Nothing) -> "application/octet-stream"
                   (x, Nothing) -> x
@@ -441,10 +467,7 @@ getData mimetype src
 makeSelfContained :: PandocMonad m => T.Text -> m T.Text
 makeSelfContained inp = do
   let tags = parseTags inp
-  let html5 = case tags of
-                  (TagOpen "!DOCTYPE" [("html","")]:_) -> True
-                  _ -> False
-  let convertState = ConvertState { isHtml5 = html5,
-                                    svgMap = mempty }
+  let convertState = ConvertState { svgMap = mempty,
+                                    fetchCache = mempty }
   out' <- evalStateT (convertTags tags) convertState
   return $ renderTags' out'

@@ -6,6 +6,7 @@ import Test.Tasty.HUnit
 -- import Tests.Helpers
 import Text.Pandoc.Class.IO (extractMedia)
 import Text.Pandoc.Class (fillMediaBag, runIOorExplode)
+import Text.Pandoc.MediaBag (insertMedia, lookupMedia, mediaPath)
 import System.IO.Temp (withTempDirectory)
 import System.FilePath
 import Text.Pandoc.Builder as B
@@ -14,6 +15,34 @@ import System.Directory (doesFileExist, makeAbsolute)
 
 tests :: [TestTree]
 tests = [
+  testCase "insertMedia mediaPath sanitization" $ do
+      -- a ".." substring that is not a path component is harmless
+      -- and should not cause the file to be renamed:
+      let bag = insertMedia "foo..bar.png" Nothing "contents" mempty
+      (mediaPath <$> lookupMedia "foo..bar.png" bag) @?= Just "foo..bar.png"
+      -- a ".." path component must not survive into mediaPath:
+      let bag2 = insertMedia "../evil.png" Nothing "contents" mempty
+      case lookupMedia "../evil.png" bag2 of
+        Nothing -> assertFailure "item not found in media bag"
+        Just item -> assertBool "mediaPath contains a .. component"
+          (".." `notElem` splitDirectories (mediaPath item)),
+  testCase "path canonicalization" $ do
+      -- redundant . and .. components are collapsed, so equivalent
+      -- spellings of a path refer to the same item:
+      let bag = insertMedia "img/../sub/./lalune.png" Nothing "contents" mempty
+      (mediaPath <$> lookupMedia "sub/lalune.png" bag) @?= Just "sub/lalune.png"
+      (mediaPath <$> lookupMedia "img/../sub/lalune.png" bag)
+        @?= Just "sub/lalune.png",
+  testCase "no mediaPath collisions between escaped and literal keys" $ do
+      -- "a%20b.png" used to unescape to the same mediaPath as the
+      -- literal "a b.png", so one clobbered the other on extraction:
+      let bag = insertMedia "a%20b.png" Nothing "contents1" $
+                insertMedia "a b.png" Nothing "contents2" mempty
+      case (lookupMedia "a%20b.png" bag, lookupMedia "a b.png" bag) of
+        (Just i1, Just i2) -> assertBool
+          "escaped and literal keys share a mediaPath"
+          (mediaPath i1 /= mediaPath i2)
+        _ -> assertFailure "items not found in media bag",
   testCase "test fillMediaBag & extractMedia" $
       withTempDirectory "." "extractMediaTest" $ \tmpdir -> do
         -- Use absolute paths so the test does not need to change
@@ -27,7 +56,9 @@ tests = [
                   -- absolute path -> extracted with hashed name
                   B.para (B.image (T.pack absLalune) "" mempty) <>
                   B.para (B.image "data:image/png;base64,cHJpbnQgImhlbGxvIgo=;.lua+%2f%2e%2e%2f%2e%2e%2fa%2elua" "" mempty) <>
-                  B.para (B.image "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" "" mempty)
+                  B.para (B.image "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" "" mempty) <>
+                  -- the data: scheme is case-insensitive
+                  B.para (B.image "DATA:image/gif;base64,dXBwZXJjYXNlIGRhdGEgdXJpIHRlc3QK" "" mempty)
         let fooDir = absTmpdir </> "foo"
         runIOorExplode $ do
           fillMediaBag d
@@ -42,6 +73,9 @@ tests = [
           (exists3 && not exists4)
         exists5 <- doesFileExist (fooDir </> "d5fceb6532643d0d84ffe09c40c481ecdf59e15a.gif")
         assertBool "data uri with gif is not properly decoded" exists5
+        exists5a <- doesFileExist
+          (fooDir </> "81c7546d23179ce1b344a763aa9038c3a8ff85d0.gif")
+        assertBool "data uri with uppercase scheme is not extracted" exists5a
         -- double-encoded version:
         let e = B.doc $
                   B.para (B.image "data:image/png;base64,cHJpbnQgInB3bmVkIgo=;.lua+%252f%252e%252e%252f%252e%252e%252fb%252elua" "" mempty)

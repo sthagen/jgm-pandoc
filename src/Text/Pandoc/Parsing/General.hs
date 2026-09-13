@@ -64,7 +64,6 @@ where
 
 import Control.Monad
   ( join
-  , liftM
   , unless
   , void
   , when
@@ -129,8 +128,6 @@ import Text.Parsec
   , setInput
   , setPosition
   , skipMany
-  , sourceColumn
-  , sourceName
   , tokenPrim
   , try
   , unexpected
@@ -142,6 +139,7 @@ import Text.Pandoc.Error
 import Text.Pandoc.Parsing.Capabilities
 import Text.Pandoc.Parsing.State
 import Text.Pandoc.Parsing.Future (Future (..))
+import qualified Data.Map as M
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Text.Pandoc.Builder as B
@@ -151,7 +149,7 @@ import qualified Data.Bifunctor as Bifunctor
 -- | Remove whitespace from start and end; just like @'trimInlines'@,
 -- but lifted into the 'Future' type.
 trimInlinesF :: Future s Inlines -> Future s Inlines
-trimInlinesF = liftM trimInlines
+trimInlinesF = fmap trimInlines
 
 -- | Like @count@, but packs its result
 countChar :: (Stream s m Char, UpdateSourcePos s Char, Monad m)
@@ -311,12 +309,14 @@ oneOfStringsCI :: (Stream s m Char, UpdateSourcePos s Char)
                => [Text] -> ParsecT s st m Text
 oneOfStringsCI = oneOfStrings' ciMatch
   where ciMatch x y = toLower' x == toLower' y
-        -- this optimizes toLower by checking common ASCII case
-        -- first, before calling the expensive unicode-aware
-        -- function:
-        toLower' c | isAsciiUpper c = chr (ord c + 32)
-                   | isAscii c = c
-                   | otherwise = toLower c
+
+-- | Optimized 'toLower': checks the common ASCII case
+-- first, before calling the expensive unicode-aware
+-- function.
+toLower' :: Char -> Char
+toLower' c | isAsciiUpper c = chr (ord c + 32)
+           | isAscii c = c
+           | otherwise = toLower c
 
 -- | Parses a space or tab.
 spaceChar :: (Stream s m Char, UpdateSourcePos s Char)
@@ -356,7 +356,7 @@ gobbleSpaces :: (HasReaderOptions st, Monad m)
              => Int -> ParsecT Sources st m ()
 gobbleSpaces 0 = return ()
 gobbleSpaces n
-  | n < 0     = error "gobbleSpaces called with negative number"
+  | n < 0     = Prelude.fail "gobbleSpaces called with negative number"
   | otherwise = try $ do
       char ' ' <|> eatOneSpaceOfTab
       gobbleSpaces (n - 1)
@@ -369,12 +369,11 @@ eatOneSpaceOfTab = do
   -- replace the tab on the input stream with spaces
   let numSpaces = tabstop - ((sourceColumn pos - 1) `mod` tabstop)
   inp <- getInput
-  setInput $
-    case inp of
-      Sources [] -> error "eatOneSpaceOfTab - empty Sources list"
-      Sources ((fp,t):rest) ->
-        -- drop the tab and add spaces
-        Sources ((fp, T.replicate numSpaces " " <> T.drop 1 t):rest)
+  case inp of
+    Sources [] -> Prelude.fail "eatOneSpaceOfTab - empty Sources list"
+    Sources ((fp,t):rest) -> setInput $
+      -- drop the tab and add spaces
+      Sources ((fp, T.replicate numSpaces " " <> T.drop 1 t):rest)
   char ' '
 
 -- | Gobble up to n spaces; if tabs are encountered, expand them
@@ -383,7 +382,7 @@ gobbleAtMostSpaces :: (HasReaderOptions st, Monad m)
                    => Int -> ParsecT Sources st m Int
 gobbleAtMostSpaces 0 = return 0
 gobbleAtMostSpaces n
-  | n < 0     = error "gobbleAtMostSpaces called with negative number"
+  | n < 0     = Prelude.fail "gobbleAtMostSpaces called with negative number"
   | otherwise = option 0 $ do
       char ' ' <|> eatOneSpaceOfTab
       (+ 1) <$> gobbleAtMostSpaces (n - 1)
@@ -487,8 +486,36 @@ emailAddress = try $ toResult <$> mailbox <*> (char '@' *> domain)
 emailPunctChars :: Set.Set Char
 emailPunctChars = Set.fromList "!\"#$%&'*+-/=?^_{|}~;"
 
+-- | Trie over 'Char', used for efficient matching against the
+-- (large, static) set of known URI schemes.
+data CharTrie = CharTrie !Bool !(M.Map Char CharTrie)
+
+trieInsert :: Text -> CharTrie -> CharTrie
+trieInsert t (CharTrie terminal m) =
+  case T.uncons t of
+    Nothing -> CharTrie True m
+    Just (c, rest) -> CharTrie terminal $
+      M.alter (Just . trieInsert rest . fromMaybe (CharTrie False mempty)) c m
+
+-- | Trie of known URI schemes; keys are case-folded with 'toLower''.
+schemeTrie :: CharTrie
+schemeTrie = foldr trieInsert (CharTrie False mempty)
+                   (map (T.map toLower') (Set.toList schemes))
+
+-- | Parses a known URI scheme, case-insensitively, preferring the
+-- longest matching scheme.  Returns the scheme as written in the input.
 uriScheme :: (Stream s m Char, UpdateSourcePos s Char) => ParsecT s st m Text
-uriScheme = oneOfStringsCI (Set.toList schemes)
+uriScheme = TL.toStrict . TB.toLazyText <$> try (go mempty schemeTrie)
+ where
+  go acc (CharTrie _ m) = do
+    c <- anyChar
+    case M.lookup (toLower' c) m of
+      Nothing -> Prelude.fail "not a URI scheme"
+      Just subtrie@(CharTrie terminal _) ->
+        let !acc' = acc <> TB.singleton c
+        in if terminal
+              then option acc' (try (go acc' subtrie))
+              else go acc' subtrie
 
 -- | Parses a URI. Returns pair of original and URI-escaped version.
 uri :: (Stream s m Char, UpdateSourcePos s Char) => ParsecT s st m (Text, Text)
@@ -661,8 +688,7 @@ registerHeader (ident,classes,kvs) header' = do
        let id'' = if Ext_ascii_identifiers `extensionEnabled` exts
                      then toAsciiText id'
                      else id'
-       updateState $ updateIdentifierList $ Set.insert id'
-       updateState $ updateIdentifierList $ Set.insert id''
+       updateState $ updateIdentifierList (Set.insert id' . Set.insert id'')
        return (id'',classes,kvs)
      else do
         unless (T.null ident) $ do

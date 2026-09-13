@@ -177,6 +177,7 @@ Paragraph before.
   align: (auto,auto,auto,),
   [A], [B], [C],
 )}
+
 Paragraph after.
 ```
 
@@ -231,5 +232,6 @@ Paragraph before.
   align: (auto,auto,auto,),
   [A], [B], [C],
 )
+
 Paragraph after.
 ```

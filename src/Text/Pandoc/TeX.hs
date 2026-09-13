@@ -50,5 +50,49 @@ data MacroScope = GlobalScope | GroupScope
 data Macro = Macro MacroScope ExpansionPoint [ArgSpec] (Maybe [Tok]) [Tok]
      deriving Show
 
-data ArgSpec = ArgNum Int | Pattern [Tok]
+data ArgSpec = ArgNum Int
+             | Pattern [Tok]
+             | BoolArg Bool Tok
+               -- ^ xparse @s@ and @t@ specifiers: an optional token
+               -- (e.g. a star); expands to @\\BooleanTrue@ or
+               -- @\\BooleanFalse@.  The Bool is False if the @!@
+               -- modifier was used (no space-skipping before the
+               -- token).
+             | DelimArg Bool Tok Tok (Maybe [Tok])
+               -- ^ xparse @o@, @O@, @d@, @D@, @r@, @R@ specifiers:
+               -- argument between opening and closing delimiter
+               -- tokens, with an optional default; when absent and
+               -- no default is given, expands to @\\NoValue@.  The
+               -- Bool is False if the @!@ modifier was used (no
+               -- space-skipping before the opening delimiter).
+             | VerbArg
+               -- ^ xparse @v@ specifier: a verbatim argument, either
+               -- braced or between two identical delimiter
+               -- characters; substituted as a single Word token
+               -- containing the raw text.
+             | EmbellishArg [(Tok, Maybe [Tok])]
+               -- ^ xparse @e@ and @E@ specifiers: a set of optional
+               -- \"embellishments\" (a token followed by an
+               -- argument), matched in any order, each with an
+               -- optional default; a missing embellishment expands
+               -- to its default, or to @\\NoValue@.
+             | ProcessedArg [[Tok]] ArgSpec
+               -- ^ xparse @>{processor}@ modifier: the processors
+               -- are applied to the grabbed argument from right to
+               -- left (i.e., the one nearest the specifier first).
+             | BodyArg Bool Int
+               -- ^ xparse @b@ specifier (environments only): the
+               -- environment body, grabbed up to the following
+               -- 'Pattern' (the @\\end{...}@).  The Bool is False if
+               -- the @!@ modifier was used (no space-trimming at the
+               -- ends of the body).
+             | VerbBodyArg Bool Int
+               -- ^ xparse @c@ specifier (environments only): the
+               -- environment body, grabbed verbatim up to the
+               -- following 'Pattern' (the @\\end{...}@); substituted
+               -- as one raw Word token per line, with spaces
+               -- replaced by U+2423 and lines separated by @\\\\@,
+               -- mirroring how LaTeX typesets it.  The Bool is
+               -- False if the @!@ modifier was used (no trimming of
+               -- leading and trailing blank lines).
      deriving Show

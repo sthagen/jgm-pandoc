@@ -53,7 +53,8 @@ import Text.Pandoc.Readers.HTML (htmlInBalanced, htmlTag, isBlockTag,
 import Text.Pandoc.Readers.HTML.TagCategories (voidTags)
 import Text.Pandoc.Readers.LaTeX (applyMacros, rawLaTeXBlock, rawLaTeXInline)
 import Text.Pandoc.Shared
-import Text.Pandoc.URI (escapeURI, isURI, pBase64DataURI)
+import Text.Pandoc.URI (escapeURI, pBase64DataURI)
+import Network.URI (isURI)
 import Text.Pandoc.XML (fromEntities)
 import Text.Pandoc.Readers.Metadata (yamlBsToMeta, yamlBsToRefs, yamlMetaBlock)
 -- import Debug.Trace (traceShowId)
@@ -1533,7 +1534,7 @@ table = try $ do
   return $ do
     caption' <- caption
     (TableComponents _attr _capt colspecs th tb tf) <- tableComponents
-    return $ B.tableWith attr
+    return $ compactifyTable $ B.tableWith attr
                 (B.simpleCaption $ B.plain caption') colspecs th tb tf
 
 --
@@ -1872,13 +1873,21 @@ source = do
 
 base64DataURI :: PandocMonad m => ParsecT Sources s m Text
 base64DataURI = do
-  Sources ((pos, txt):rest) <- getInput
-  let r = A.parse (fst <$> A.match pBase64DataURI) txt
-  case r of
-    A.Done remaining consumed -> do
-      let pos' = incSourceColumn pos (T.length consumed)
-      setInput $ Sources ((pos', remaining):rest)
-      return consumed
+  inp <- getInput
+  case inp of
+    Sources ((pos, txt):rest) ->
+      -- feed mempty to force a result if attoparsec returns Partial:
+      case A.feed (A.parse (fst <$> A.match pBase64DataURI) txt) mempty of
+        A.Done remaining consumed -> do
+          -- keep the chunk's position unchanged: chunk positions are
+          -- invariant (see uncons in T.P.Sources), and withRaw's
+          -- sourcesDifference relies on this.  Instead, advance parsec's
+          -- own position (a data URI cannot contain newlines):
+          setInput $ Sources ((pos, remaining):rest)
+          curPos <- getPosition
+          setPosition $ incSourceColumn curPos (T.length consumed)
+          return consumed
+        _ -> mzero
     _ -> mzero
 
 linkTitle :: PandocMonad m => MarkdownParser m Text
@@ -2050,7 +2059,9 @@ rebasePath pos path = do
       isFragment = T.take 1 path == "#"
       path' = T.unpack path
       isAbsolutePath = Posix.isAbsolute path' || Windows.isAbsolute path'
-   in if T.null path || isFragment || isAbsolutePath || isURI path
+   in if T.null path || isFragment || isAbsolutePath || isURI (T.unpack path)
+         -- note: we use Network.URI.isURI instead of T.P.URI.isURI
+         -- because it doesn't whitelist schemes; see #11858.
          then path
          else
            case takeDirectory fp of

@@ -169,7 +169,7 @@ jobs:
       with:
         path: |
           dist-newstyle
-        key: ${{ runner.os }}-stack-work-${{ hashFiles('cabal.project') }}-${{ secrets.CACHE_VERSION }}
+        key: ${{ runner.os }}-cabal-work-${{ hashFiles('cabal.project') }}-${{ secrets.CACHE_VERSION }}
 
     - name: Build and test
       run: |

@@ -103,7 +103,7 @@ archiveToODT archive = do
   let media = filteredFilesFromArchive archive filePathIsODTMedia
   let startState = readerState styles media
   either (\_ -> Left $ PandocParseError "Could not convert opendocument") Right
-    (runConverter' read_body startState contentElem)
+    (runConverter read_body startState contentElem)
 
 
 --
