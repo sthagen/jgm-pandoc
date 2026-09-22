@@ -23,7 +23,7 @@ module Text.Pandoc.Readers.Markdown (
 import Control.Monad
 import Control.Monad.Except (throwError)
 import qualified Data.Bifunctor as Bifunctor
-import Data.Char (isAlphaNum, isPunctuation, isSpace)
+import Data.Char (isAlphaNum, isDigit, isLetter, isPunctuation, isSpace)
 import Data.List (transpose, elemIndex, sortOn)
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -413,7 +413,7 @@ quotedTitle c = try $ do
   char c
   notFollowedBy spaces
   let pEnder = try $ char c >> notFollowedBy (satisfy isAlphaNum)
-  let regChunk = many1Char (noneOf ['\\','\n','&',c]) <|> litChar
+  let regChunk = takeWhile1P (`notElem` ['\\','\n','&',c]) <|> litChar
   let nestedChunk = (\x -> (c `T.cons` x) `T.snoc` c) <$> quotedTitle c
   T.unwords . T.words . T.concat <$> manyTill (nestedChunk <|> regChunk) pEnder
 
@@ -661,7 +661,7 @@ identifier = do
 identifierAttr :: PandocMonad m => MarkdownParser m (Attr -> Attr)
 identifierAttr = try $ do
   char '#'
-  result <- T.pack <$> many1 (alphaNum <|> oneOf "-_:.") -- see #7920
+  result <- takeWhile1P (\x -> isAlphaNum x || x `elem` ("-_:." :: [Char])) -- see #7920
   return $ \(_,cs,kvs) -> (result,cs,kvs)
 
 classAttr :: PandocMonad m => MarkdownParser m (Attr -> Attr)
@@ -860,7 +860,7 @@ orderedListStart mbstydelim = try $ do
   skipNonindentSpaces
   notFollowedBy $ string "p." >> spaceChar >> digit  -- page number
   (do guardDisabled Ext_fancy_lists
-      start <- many1Char digit >>= safeRead
+      start <- takeWhile1P isDigit >>= safeRead
       char '.'
       gobbleSpaces 1 <|> () <$ lookAhead newline
       optional $ try (gobbleAtMostSpaces 3 >> notFollowedBy spaceChar)
@@ -1648,8 +1648,8 @@ code = try $ do
   skipSpaces
   result <- trim . T.concat
         <$> manyTill
-              (   many1Char (noneOf "`\n")
-              <|> many1Char (char '`')
+              (   takeWhile1P (\c -> c /= '`' && c /= '\n')
+              <|> takeWhile1P (== '`')
               <|> (char '\n'
                     >> notFollowedBy (inList >> listStart)
                     >> notFollowedBy' blankline
@@ -1684,7 +1684,7 @@ enclosure c = do
   guardDisabled Ext_intraword_underscores
     <|> guard (c == '*')
     <|> (guard =<< notAfterString)
-  cs <- many1Char (char c)
+  cs <- takeWhile1P (== c)
   (return (B.str cs) <>) <$> whitespace
     <|>
         case T.length cs of
@@ -1784,7 +1784,7 @@ subscript = do
         mmdShortSubscript = try $ do
           guardEnabled Ext_short_subsuperscripts
           char '~'
-          result <- T.pack <$> many1 alphaNum
+          result <- takeWhile1P isAlphaNum
           return $ return $ B.str result
 
 whitespace :: PandocMonad m => MarkdownParser m (F Inlines)
@@ -1799,7 +1799,7 @@ nonEndline = satisfy (/='\n')
 str :: PandocMonad m => MarkdownParser m (F Inlines)
 str = do
   !result <- mconcat <$> many1
-             ( T.pack <$> (many1 alphaNum)
+             ( takeWhile1P isAlphaNum
               <|> "." <$ try (char '.' <* notFollowedBy (char '.')) )
   updateLastStrPos
   (do guardEnabled Ext_smart
@@ -1863,7 +1863,8 @@ source = do
         try parenthesizedChars
           <|> (notFollowedBy (oneOf "\n\r )") >> litChar)
           <|> (lookAhead (oneOf "\n\r") >> notFollowedBy linkTitle' >> litChar)
-          <|> try (many1Char spaceChar <* notFollowedBy (oneOf "\"')"))
+          <|> try (takeWhile1P (\x -> x == ' ' || x == '\t')
+                    <* notFollowedBy (oneOf "\"')"))
   let sourceURL = T.unwords . T.words . T.concat <$> many urlChunk
   src <- try (litBetween '<' '>') <|> try base64DataURI <|> sourceURL
   tit <- option "" linkTitle'
@@ -2030,6 +2031,20 @@ bareURL :: PandocMonad m => MarkdownParser m (F Inlines)
 bareURL = do
   guardEnabled Ext_autolink_bare_uris
   getState >>= guard . stateAllowLinks
+  -- Fast rejection: a bare URI must contain ':' (after the scheme) and
+  -- an email address '@', in both cases before any whitespace, since
+  -- neither can contain whitespace.  So if the whitespace-delimited
+  -- token ahead contains neither ':' nor '@', both parsers must fail.
+  -- (If the token extends beyond the current input chunk, we skip the
+  -- check and just try the parsers.)
+  inp <- getInput
+  case unSources inp of
+    (_,t):_ ->
+      case T.find (\c -> isSpace c || c == ':' || c == '@') t of
+        Just ':' -> return ()
+        Just '@' -> return ()
+        _ -> mzero
+    [] -> return ()
   try $ do
     (cls, (orig, src)) <- (("uri",) <$> uri) <|> (("email",) <$> emailAddress)
     notFollowedBy $ try $ spaces >> htmlTag (~== TagClose ("a" :: Text))
@@ -2132,7 +2147,7 @@ rawConTeXtEnvironment :: PandocMonad m => ParsecT Sources st m Text
 rawConTeXtEnvironment = try $ do
   string "\\start"
   completion <- inBrackets (letter <|> digit <|> spaceChar)
-               <|> many1Char letter
+               <|> takeWhile1P isLetter
   !contents <- manyTill (rawConTeXtEnvironment <|> countChar 1 anyChar)
                        (try $ string "\\stop" >> textStr completion)
   return $! "\\start" <> completion <> T.concat contents <> "\\stop" <> completion
@@ -2185,7 +2200,9 @@ divFenced = do
     string ":::"
     skipMany (char ':')
     skipMany spaceChar
-    attribs <- attributes <|> ((\x -> ("",[x],[])) <$> many1Char nonspaceChar)
+    attribs <- attributes <|> ((\x -> ("",[x],[])) <$>
+                  takeWhile1P (\x -> x /= ' ' && x /= '\t' &&
+                                     x /= '\n' && x /= '\r'))
     skipMany spaceChar
     skipMany (char ':')
     blankline
@@ -2230,7 +2247,7 @@ emoji = do
   guardEnabled Ext_emoji
   try $ do
     char ':'
-    emojikey <- many1Char (alphaNum <|> oneOf "_+-")
+    emojikey <- takeWhile1P (\x -> isAlphaNum x || x `elem` ("_+-" :: [Char]))
     char ':'
     case emojiToInline emojikey of
       Just i -> return (return $ B.singleton i)

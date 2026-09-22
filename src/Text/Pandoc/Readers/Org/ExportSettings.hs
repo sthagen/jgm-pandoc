@@ -24,7 +24,7 @@ import Data.Text (Text, unpack)
 
 -- | Read and handle space separated org-mode export settings.
 exportSettings :: PandocMonad m => OrgParser m ()
-exportSettings = void $ sepBy skipSpaces exportSetting
+exportSettings = void $ sepEndBy exportSetting skipSpaces
 
 -- | Setter function for export settings.
 type ExportSettingSetter a = a -> ExportSettings -> ExportSettings
@@ -32,7 +32,7 @@ type ExportSettingSetter a = a -> ExportSettings -> ExportSettings
 -- | Read and process a single org-mode export option.
 exportSetting :: PandocMonad m => OrgParser m ()
 exportSetting = choice
-  [ booleanSetting "^" (\val es -> es { exportSubSuperscripts = val })
+  [ subSupSetting "^" (\val es -> es { exportSubSuperscripts = val })
   , booleanSetting "'" (\val es -> es { exportSmartQuotes = val })
   , booleanSetting "*" (\val es -> es { exportEmphasizedText = val })
   , booleanSetting "-" (\val es -> es { exportSpecialStrings = val })
@@ -143,6 +143,22 @@ complementableListSetting = genericExportSetting $ choice
      char '"'
        *> manyTillChar alphaNum (char '"')
 
+-- | Parses either @t@, @{}@, or @nil@ into a 'SubSupOption' value.
+subSupSetting :: Monad m
+              => Text
+              -> ExportSettingSetter SubSupOption
+              -> OrgParser m ()
+subSupSetting = genericExportSetting $ subSupBraced <|> subSupBoolean
+ where
+   subSupBraced = SubSupBraced <$ optionString "{}"
+
+   subSupBoolean = try $ do
+     exportBool <- elispBoolean
+     return $
+       if exportBool
+       then SubSupAll
+       else SubSupNone
+
 -- | Parses either @t@, @nil@, or @verbatim@ into a 'TeXExport' value.
 texSetting :: Monad m
            => Text
@@ -166,7 +182,7 @@ ignoredSetting s = try (() <$ textStr s <* char ':' <* many1 nonspaceChar)
 -- | Read any setting string, but ignore it and emit a warning.
 ignoreAndWarn :: PandocMonad m => OrgParser m ()
 ignoreAndWarn = try $ do
-  opt <- many1Char nonspaceChar
+  opt <- takeWhile1P (\c -> c /= ' ' && c /= '\t' && c /= '\n' && c /= '\r')
   report (UnknownOrgExportOption opt)
   return ()
 

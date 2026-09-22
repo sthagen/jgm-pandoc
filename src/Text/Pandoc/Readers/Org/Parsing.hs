@@ -37,6 +37,8 @@ module Text.Pandoc.Readers.Org.Parsing
   , manyChar
   , many1Char
   , manyTillChar
+  , takeWhileP
+  , takeWhile1P
   , many1Till
   , many1TillChar
   , notFollowedBy'
@@ -94,6 +96,7 @@ module Text.Pandoc.Readers.Org.Parsing
   , try
   , sepBy
   , sepBy1
+  , sepEndBy
   , sepEndBy1
   , endBy1
   , option
@@ -106,6 +109,7 @@ module Text.Pandoc.Readers.Org.Parsing
   , getPosition
   ) where
 
+import qualified Data.Set as Set
 import Data.Text (Text)
 import Text.Pandoc.Readers.Org.ParserState
 
@@ -223,7 +227,7 @@ orgTagWordChar = alphaNum <|> oneOf "@%#_"
 orgAnchor :: Monad m => OrgParser m Text
 orgAnchor = try $ do
   string "<<"
-  anchorId <- many1Char (noneOf "\t\n\r<>\"' ")
+  anchorId <- takeWhile1P (`notElem` ("\t\n\r<>\"' " :: [Char]))
   string ">>"
   skipSpaces
   recordAnchorId anchorId
@@ -231,4 +235,4 @@ orgAnchor = try $ do
 
 recordAnchorId :: Monad m => Text -> OrgParser m ()
 recordAnchorId i = updateState $ \s ->
-  s{ orgStateAnchorIds = i : orgStateAnchorIds s }
+  s{ orgStateAnchorIds = Set.insert i (orgStateAnchorIds s) }

@@ -48,7 +48,7 @@ import Network.URI (URI (..), parseURIReference, escapeURIString)
 import Text.Pandoc.URI (urlEncode)
 import Numeric (showHex)
 import Text.DocLayout (render, literal, Doc)
-import Text.Blaze.Internal (MarkupM (Empty), customLeaf, customParent)
+import Text.Blaze.Internal (MarkupM (Append, Empty), customLeaf, customParent)
 import Text.DocTemplates (FromContext (lookupContext), Context (..), Val(..))
 import qualified Text.DocTemplates.Internal as DT
 import Text.Blaze.Html hiding (contents)
@@ -125,20 +125,24 @@ defaultWriterState = WriterState {stNotes= [],
 
 strToHtml :: Text -> Html
 strToHtml t
-    | T.any isSpecial t =
-       let !x = L.foldl' go mempty $ T.groupBy samegroup t
-        in x
+    | T.any isSpecial t = go t
     | otherwise = toHtml t
   where
-    samegroup c d = d == '\xFE0E' || not (isSpecial c || isSpecial d)
     isSpecial '\'' = True
     isSpecial '"' = True
     isSpecial c = needsVariationSelector c
-    go h "\'" = h <> preEscapedString "\'"
-    go h "\"" = h <> preEscapedString "\""
-    go h txt | T.length txt == 1 && T.all needsVariationSelector txt
-           = h <> preEscapedString (T.unpack txt <> "\xFE0E")
-    go h txt = h <> toHtml txt
+    go s =
+      let (plain, rest) = T.break isSpecial s
+          html = if T.null plain then mempty else toHtml plain
+      in  case T.uncons rest of
+            Nothing -> html
+            Just ('\'', rest') -> html <> preEscapedText "'" <> go rest'
+            Just ('"', rest')  -> html <> preEscapedText "\"" <> go rest'
+            Just (c, rest')
+              -- don't add a variation selector if one is already there:
+              | T.take 1 rest' == "\xFE0E" -> html <> toHtml c <> go rest'
+              | otherwise -> html <> preEscapedText (T.pack [c, '\xFE0E'])
+                                  <> go rest'
 
 -- See #5469: this prevents iOS from substituting emojis.
 needsVariationSelector :: Char -> Bool
@@ -149,6 +153,14 @@ needsVariationSelector _   = False
 -- | Hard linebreak.
 nl :: Html
 nl = preEscapedString "\n"
+
+-- | True if the markup contains no content at all.  'mconcat' and
+-- '<>' on 'MarkupM' build 'Append' nodes without collapsing empty
+-- markup, so simply matching on 'Empty' is not enough.
+isEmptyMarkup :: MarkupM a -> Bool
+isEmptyMarkup (Empty _)    = True
+isEmptyMarkup (Append x y) = isEmptyMarkup x && isEmptyMarkup y
+isEmptyMarkup _            = False
 
 -- | Convert Pandoc document to Html 5 string.
 writeHtml5String :: PandocMonad m => WriterOptions -> Pandoc -> m Text
@@ -352,7 +364,7 @@ pandocToHtml opts (Pandoc meta blocks) = do
             ]
           nl
           H.link ! A.rel "stylesheet" !
-            A.href (toValue $ toURI html5 url <> "katex.min.css")
+            A.href (toValue $ toURI html5 $ url <> "katex.min.css")
 
         _ -> mempty
   let mCss :: Maybe [Text] = lookupContext "css" metadata
@@ -572,7 +584,7 @@ footnoteSection opts refLocation startCounter notes = do
   let container x
         | html5
         , epubVersion == Just EPUB3
-                = H5.section ! A.id (fromString idName)
+                = H5.section ! prefixedId opts (fromString idName)
                              ! A.class_ className
                              ! customAttribute "epub:type" "footnotes" $ x
         | html5
@@ -633,16 +645,24 @@ obfuscateLink opts attr (TL.toStrict . renderHtml -> txt) s = do
               (linkText, altText) =
                  if txt == T.drop 7 s' -- autolink
                     then ("e", name' <> " at " <> domain')
-                    else ("'" <> obfuscateString txt <> "'",
+                    else ("'" <>
+                          T.replace "</" "<\\/" (obfuscateMarkup txt) <> "'",
                           txt <> " (" <> name' <> " at " <> domain' <> ")")
-              (_, classNames, _) = attr
+              (ident, classNames, kvs) = attr
               classNamesStr = T.concat $ map (" "<>) classNames
+              otherAttrsStr = T.concat $
+                [ " id=\"" <>
+                  escapeJSAttrVal (writerIdentifierPrefix opts <> ident) <>
+                  "\"" | not (T.null ident) ] ++
+                [ " " <> k <> "=\"" <> escapeJSAttrVal v <> "\""
+                | (k, v) <- kvs ]
           in  case meth of
                 ReferenceObfuscation ->
-                     -- need to use preEscapedString or &'s are escaped to &amp; in URL
-                     return $
-                     preEscapedText $ "<a href=\"" <> obfuscateString s'
-                     <> "\" class=\"email\">" <> obfuscateString txt <> "</a>"
+                     -- preEscaped is needed or the &'s in the
+                     -- entity-obfuscated text are escaped to &amp;
+                     addAttrs opts (ident, "email":classNames, kvs) $
+                       H.a ! A.href (preEscapedToValue $ obfuscateString s')
+                           $ preEscapedText $ obfuscateMarkup txt
                 JavascriptObfuscation ->
                      return $
                      (H.script ! A.type_ "text/javascript" $
@@ -650,12 +670,12 @@ obfuscateLink opts attr (TL.toStrict . renderHtml -> txt) s = do
                      obfuscateString domain <> "';a='" <> at' <> "';n='" <>
                      obfuscateString name' <> "';e=n+a+h;\n" <>
                      "document.write('<a h'+'ref'+'=\"ma'+'ilto'+':'+e+'\" clas'+'s=\"em' + 'ail" <>
-                     classNamesStr <> "\">'+" <>
+                     classNamesStr <> "\"" <> otherAttrsStr <> ">'+" <>
                      linkText  <> "+'<\\/'+'a'+'>');\n// -->\n")) >>
-                     H.noscript (preEscapedText $ obfuscateString altText)
+                     H.noscript (preEscapedText $ obfuscateMarkup altText)
                 _ -> throwError $ PandocSomeError $ "Unknown obfuscation method: " <> tshow meth
         _ -> addAttrs opts attr $ H.a ! A.href (toValue $ toURI html5 s)
-                                      $ toHtml txt  -- malformed email
+                                      $ preEscapedText txt  -- malformed email
 
 -- | Obfuscate character as entity.
 obfuscateChar :: Char -> Text
@@ -667,6 +687,37 @@ obfuscateChar char =
 -- | Obfuscate string using entities.
 obfuscateString :: Text -> Text
 obfuscateString = T.concatMap obfuscateChar . fromEntities
+
+-- | Obfuscate the character data in a rendered HTML fragment,
+-- leaving the tags themselves intact.
+obfuscateMarkup :: Text -> Text
+obfuscateMarkup t
+  | T.null t = ""
+  | otherwise =
+      let (chars, rest)  = T.break (== '<') t
+          (tag, rest') = T.break (== '>') rest
+      in  obfuscateString chars <>
+          case T.uncons rest' of
+            Just ('>', rest'') -> tag <> ">" <> obfuscateMarkup rest''
+            _ -> tag  -- unterminated tag; emit as is
+
+-- | Escape text for an HTML attribute value that is embedded in a
+-- single-quoted JavaScript string literal (as used in
+-- 'JavascriptObfuscation').  Everything problematic is replaced
+-- with an entity, which the HTML parser decodes when the string is
+-- written to the document.
+escapeJSAttrVal :: Text -> Text
+escapeJSAttrVal = T.concatMap $ \c ->
+  case c of
+    '&'  -> "&amp;"
+    '<'  -> "&lt;"
+    '>'  -> "&gt;"
+    '"'  -> "&quot;"
+    '\'' -> "&#39;"
+    '\\' -> "&#92;"
+    '\n' -> "&#10;"
+    '\r' -> "&#13;"
+    _    -> T.singleton c
 
 -- | Create HTML tag with attributes.
 tagWithAttributes :: WriterOptions
@@ -703,7 +754,7 @@ toAttrs kvs = do
   addAttr html5 mbEpubVersion x y
     | T.null x = id  -- see #7546
     | html5
-      = if (x `Set.member` (html5Attributes <> rdfaAttributes)
+      = if (x `Set.member` html5AttrsPlusRdfa
             && x /= "label") -- #10048
              || T.any (== ':') x -- e.g. epub: namespace
              || "data-" `T.isPrefixOf` x
@@ -711,11 +762,18 @@ toAttrs kvs = do
            then (customAttribute (textTag x) (toValue y) :)
            else (customAttribute (textTag ("data-" <> x)) (toValue y) :)
     | mbEpubVersion == Just EPUB2
-    , not (x `Set.member` (html4Attributes <> rdfaAttributes) ||
+    , not (x `Set.member` html4AttrsPlusRdfa ||
       "xml:" `T.isPrefixOf` x)
       = id
     | otherwise
       = (customAttribute (textTag x) (toValue y) :)
+
+-- Top-level constants, so that the set unions are computed only once.
+html5AttrsPlusRdfa :: Set.Set Text
+html5AttrsPlusRdfa = html5Attributes <> rdfaAttributes
+
+html4AttrsPlusRdfa :: Set.Set Text
+html4AttrsPlusRdfa = html4Attributes <> rdfaAttributes
 
 attrsToHtml :: PandocMonad m
             => WriterOptions -> Attr -> StateT WriterState m [Attribute]
@@ -764,9 +822,9 @@ blockToHtmlInner opts (Para lst) = do
           inlineToHtml opts (Image attr txt (src, tit))
     _ -> do
       contents <- inlineListToHtml opts lst
-      case contents of
-        Empty _ | not (isEnabled Ext_empty_paragraphs opts) -> return mempty
-        _ -> return $ H.p contents
+      if isEmptyMarkup contents && not (isEnabled Ext_empty_paragraphs opts)
+         then return mempty
+         else return $ H.p contents
 blockToHtmlInner opts (LineBlock lns) = do
   htmlLines <- inlineListToHtml opts $ intercalate [LineBreak] lns
   return $ H.div ! A.class_ "line-block" $ htmlLines
@@ -796,17 +854,18 @@ blockToHtmlInner opts (Div (ident, "section":dclasses, dkvs)
   let inDiv' zs = RawBlock (Format "html") ("<div class=\""
                        <> fragmentClass <> "\">") :
                    (zs ++ [RawBlock (Format "html") "</div>"])
-  let breakOnPauses zs
-        | slide = case splitBy isPause zs of
+  let breakOnPauses zs = case splitBy isPause zs of
                            []   -> []
                            y:ys -> y ++ concatMap inDiv' ys
-        | otherwise = zs
+  let breakPauses = if slide
+                       then walk breakOnPauses
+                       else id  -- avoid a pointless traversal
   let (titleBlocks, innerSecs) =
         if titleSlide
            -- title slides have no content of their own
            then let (as, bs) = break isSec xs
-                in  (walk breakOnPauses as, bs)
-           else ([], walk breakOnPauses xs)
+                in  (breakPauses as, bs)
+           else ([], breakPauses xs)
   let secttag  = if html5
                     then H5.section
                     else H.div
@@ -910,7 +969,7 @@ blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
                  then -- we don't use blockListToHtml because it inserts
                       -- a newline between the column divs, which throws
                       -- off widths! see #4028
-                      mconcat <$> mapM (blockToHtml opts) bs'
+                      mconcat <$> mapM (blockToHtml opts') bs'
                  else blockListToHtml opts' bs'
   let contents' = nl >> contents >> nl
   let (divtag, classes'') = if html5 && "section" `elem` classes'
@@ -1169,7 +1228,7 @@ tableToHtml opts (Ann.Table attr caption colspecs thead tbodies tfoot) = do
   let attr' = case lookup "style" kvs of
                 Nothing | totalWidth < 1 && totalWidth > 0
                   -> (ident,classes, ("style","width:" <>
-                         T.pack (show (round (totalWidth * 100) :: Int))
+                         T.pack (show (truncate (totalWidth * 100) :: Int))
                          <> "%;"):kvs)
                 _ -> attr
   addAttrs opts attr' $ H.table $ do
@@ -1378,10 +1437,8 @@ toListItem item = nl *> H.li item
 blockListToHtml :: PandocMonad m
                 => WriterOptions -> [Block] -> StateT WriterState m Html
 blockListToHtml opts lst =
-  mconcat . intersperse (nl) . filter nonempty
+  mconcat . intersperse (nl) . filter (not . isEmptyMarkup)
     <$> mapM (blockToHtml opts) lst
-  where nonempty (Empty _) = False
-        nonempty _         = True
 
 -- | Convert list of Pandoc inline elements to HTML.
 inlineListToHtml :: PandocMonad m => WriterOptions -> [Inline] -> StateT WriterState m Html
@@ -1788,7 +1845,7 @@ allowsRef _           = False
 intrinsicEventsHTML4 :: [Text]
 intrinsicEventsHTML4 =
   [ "onclick", "ondblclick", "onmousedown", "onmouseup", "onmouseover"
-  , "onmouseout", "onmouseout", "onkeypress", "onkeydown", "onkeyup"]
+  , "onmousemove", "onmouseout", "onkeypress", "onkeydown", "onkeyup"]
 
 
 -- | Check to see if Format is valid HTML

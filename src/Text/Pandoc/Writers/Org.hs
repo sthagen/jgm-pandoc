@@ -40,6 +40,7 @@ import Text.Pandoc.Writers.Shared
 
 data WriterState =
   WriterState { stNotes   :: [[Block]]
+              , stNoteNum :: Int
               , stHasMath :: Bool
               , stOptions :: WriterOptions
               }
@@ -50,6 +51,7 @@ type Org = StateT WriterState
 writeOrg :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeOrg opts document = do
   let st = WriterState { stNotes = [],
+                         stNoteNum = 0,
                          stHasMath = False,
                          stOptions = opts }
   evalStateT (pandocToOrg document) st
@@ -66,7 +68,7 @@ pandocToOrg (Pandoc meta blocks) = do
                (fmap chomp . inlineListToOrg)
                meta
   body <- blockListToOrg blocks
-  notes <- gets (reverse . stNotes) >>= notesToOrg
+  notes <- notesToOrg
   hasMath <- gets stHasMath
   let main = body $+$ notes
   let context = defField "body" main
@@ -88,10 +90,19 @@ pandocToOrg (Pandoc meta blocks) = do
        Nothing  -> main
        Just tpl -> renderTemplate tpl context
 
--- | Return Org representation of notes.
-notesToOrg :: PandocMonad m => [[Block]] -> Org m (Doc Text)
-notesToOrg notes =
-  vsep <$> zipWithM noteToOrg [1..] notes
+-- | Return Org representation of the collected notes. Rendering a
+-- note may add further notes to the state (notes nested inside
+-- notes); keep going until all of them have been rendered.
+notesToOrg :: PandocMonad m => Org m (Doc Text)
+notesToOrg = vsep <$> go 0
+  where
+    go done = do
+      notes <- gets (drop done . reverse . stNotes)
+      if null notes
+        then return []
+        else do
+          docs <- zipWithM noteToOrg [done + 1 ..] notes
+          (docs ++) <$> go (done + length notes)
 
 -- | Return Org representation of a note.
 noteToOrg :: PandocMonad m => Int -> [Block] -> Org m (Doc Text)
@@ -114,14 +125,19 @@ replaceSpecialStrings =
 
 -- | Escape special characters for Org.
 escapeString :: Text -> Doc Text
-escapeString t
-  | T.all isAlphaNum t = literal t
-  | otherwise = mconcat $ map escChar (T.unpack t)
+escapeString t =
+  case T.break isSpecial t of
+    (_, "") -> literal t
+    (pre, post) ->
+      case T.uncons post of
+        -- escape special chars with ZERO WIDTH SPACE as org manual
+        -- suggests
+        Just (c, rest) -> (if T.null pre then mempty else literal pre)
+                          <> afterBreak "\x200B" <> char c
+                          <> escapeString rest
+        Nothing -> literal pre  -- not reachable
   where
-    -- escape special chars with ZERO WIDTH SPACE as org manual suggests
-   escChar c = if c == '*' || c == '#' || c == '|'
-     then afterBreak "\x200B" <> char c
-     else char c
+    isSpecial c = c == '*' || c == '#' || c == '|'
 
 isRawFormat :: Format -> Bool
 isRawFormat f =
@@ -161,8 +177,8 @@ blockToOrg (LineBlock lns) = do
   return $ blankline $$ "#+begin_verse" $$
            nest 2 contents $$ "#+end_verse" <> blankline
 blockToOrg (RawBlock "html" str) =
-  return $ blankline $$ "#+begin_html" $$
-           nest 2 (literal str) $$ "#+end_html" $$ blankline
+  return $ blankline $$ "#+begin_export html" $$
+           nest 2 (literal str) $$ "#+end_export" $$ blankline
 blockToOrg b@(RawBlock f str)
   | isRawFormat f = return $ literal str
   | otherwise     = do
@@ -213,13 +229,18 @@ blockToOrg (CodeBlock (ident,classes,kvs) str) = do
   let (beg, end) = case lang of
         Nothing -> ("#+begin_example" <> numberlines, "#+end_example")
         Just x  -> ("#+begin_src " <> x <> numberlines <> args, "#+end_src")
-  -- escape special lines
+  -- Escape special lines by prepending a comma. Like Emacs'
+  -- org-escape-code-in-region, escape all lines consisting of
+  -- indentation, then any number of commas, then "*" or "#+"; this
+  -- keeps lines that already start with commas intact when the block
+  -- is unescaped again.
+  let needsEscape t = let t' = T.dropWhile (== ',') t
+                      in T.isPrefixOf "#+" t' || T.isPrefixOf "*" t'
   let escape_line line =
         let (spaces, code) = T.span (\c -> c == ' ' || c == '\t') line
-        in spaces <>
-           (if T.isPrefixOf "#+" code || T.isPrefixOf "*" code
-            then T.cons ',' code
-            else code)
+        in if needsEscape code
+           then spaces <> T.cons ',' code
+           else line
   let escaped = T.unlines . map escape_line . T.lines $ str
   return $ name $$ literal beg $$ literal escaped $$ literal end $$ blankline
 blockToOrg (BlockQuote blocks) = do
@@ -246,8 +267,7 @@ blockToOrg (Table _ blkCapt specs thead tbody tfoot) =  do
               middle = hcat $ intersperse sep' blocks
   let makeRow = hpipeBlocks . zipWith lblock widthsInChars
   let head' = makeRow headers'
-  rows' <- mapM (\row -> do cols <- mapM blockListToOrg row
-                            return $ makeRow cols) rows
+  let rows' = map makeRow rawRows
   let border ch = char '|' <> char ch <>
                   (hcat . intersperse (char ch <> char '+' <> char ch) $
                           map (\l -> text $ replicate l ch) widthsInChars) <>
@@ -476,13 +496,14 @@ inlineListToOrg lst = hcat <$> mapM inlineToOrg (fixMarkers lst)
         shouldFix Note{} = True    -- Prevent footnotes
         shouldFix (Str "-") = True -- Prevent bullet list items
         shouldFix (Str x)          -- Prevent ordered list items
-          | Just (cs, c) <- T.unsnoc x = T.all isDigit cs &&
+          | Just (cs, c) <- T.unsnoc x = not (T.null cs) &&
+                                         T.all isDigit cs &&
                                          (c == '.' || c == ')')
         shouldFix _ = False
 
 -- | Convert Pandoc inline element to Org.
 inlineToOrg :: PandocMonad m => Inline -> Org m (Doc Text)
-inlineToOrg (Span (uid, [], []) []) =
+inlineToOrg (Span (uid, [], []) []) | not (T.null uid) =
   return $ "<<" <> literal uid <> ">>"
 inlineToOrg (Span _ lst) =
   inlineListToOrg lst
@@ -548,7 +569,13 @@ inlineToOrg (Cite cs lst) = do
                    _ -> mempty
        return $ "[cite" <> sty <> ":" <> citeItems <> "]"
      else inlineListToOrg lst
-inlineToOrg (Code _ str) = return $ "=" <> literal str <> "="
+inlineToOrg (Code _ str) = return $
+  -- Org offers no escape mechanism inside verbatim text; if the
+  -- content contains the delimiter, fall back to the other verbatim
+  -- delimiter.
+  if "=" `T.isInfixOf` str && not ("~" `T.isInfixOf` str)
+     then "~" <> literal str <> "~"
+     else "=" <> literal str <> "="
 inlineToOrg (Str str) = do
   opts <- gets stOptions
   let str' = if isEnabled Ext_smart opts || isEnabled Ext_special_strings opts
@@ -578,17 +605,49 @@ inlineToOrg SoftBreak = do
 inlineToOrg (Link _ txt (src, _)) =
   case txt of
         [Str x] | escapeURI x == src ->  -- autolink
-             return $ "[[" <> literal (orgPath x) <> "]]"
-        _ -> do contents <- nowrap <$> inlineListToOrg txt
-                return $ "[[" <> literal (orgPath src) <> "][" <> contents <> "]]"
+             return $ "[[" <> literal (escapeLinkTarget (orgPath x)) <> "]]"
+        _ -> do descr <- render Nothing . nowrap <$> inlineListToOrg txt
+                return $ "[[" <> literal (escapeLinkTarget (orgPath src)) <>
+                         "][" <> literal (escapeLinkDescription descr) <> "]]"
 inlineToOrg (Image _ _ (source, _)) =
-  return $ "[[" <> literal (orgPath source) <> "]]"
+  return $ "[[" <> literal (escapeLinkTarget (orgPath source)) <> "]]"
 inlineToOrg (Note contents) = do
   -- add to notes in state
-  notes <- gets stNotes
-  modify $ \st -> st { stNotes = contents:notes }
-  let ref = tshow $ length notes + 1
+  modify $ \st -> st { stNotes = contents : stNotes st
+                     , stNoteNum = stNoteNum st + 1 }
+  ref <- gets (tshow . stNoteNum)
   return $ "[fn:" <> literal ref <> "]"
+
+-- | Escape a link target like Emacs' @org-link-escape@:
+-- backslash-escape square brackets, and double any run of backslashes
+-- occurring directly before a bracket or at the end of the target.
+escapeLinkTarget :: Text -> Text
+escapeLinkTarget t =
+  let (pre, rest) = T.break (\c -> c == '\\' || c == '[' || c == ']') t
+  in pre <> case T.uncons rest of
+       Nothing -> ""
+       Just ('\\', _) ->
+         let (bs, rest') = T.span (== '\\') rest
+         in case T.uncons rest' of
+              Nothing -> bs <> bs
+              Just (c, rest'')
+                | c == '[' || c == ']'
+                  -> bs <> bs <> "\\" <> T.cons c (escapeLinkTarget rest'')
+                | otherwise -> bs <> T.cons c (escapeLinkTarget rest'')
+       Just (c, rest') -> "\\" <> T.cons c (escapeLinkTarget rest')
+
+-- | Make a link description safe: it must not contain @]]@ or end
+-- with @]@. Like Emacs' @org-link-make-string@, insert a zero-width
+-- space to break up the offending brackets.
+escapeLinkDescription :: Text -> Text
+escapeLinkDescription = fixEnd . fixDouble
+  where
+    fixDouble t | "]]" `T.isInfixOf` t
+                            = fixDouble $ T.replace "]]" "]\x200B]" t
+                | otherwise = t
+    fixEnd t = case T.unsnoc t of
+                 Just (t', ']') -> t' <> "\x200B]"
+                 _              -> t
 
 orgPath :: Text -> Text
 orgPath src = case T.uncons src of

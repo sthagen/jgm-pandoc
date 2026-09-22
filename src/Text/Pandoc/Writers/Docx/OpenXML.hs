@@ -110,18 +110,60 @@ rPrTagOrder =
     , "oMath"
     ] [0..])
 
-sortSquashed :: [Element] -> [Element]
-sortSquashed l =
+-- from wml.xsd EG_PPrBase
+pPrTagOrder :: M.Map Text Int
+pPrTagOrder =
+  M.fromList
+  (zip [ "pStyle"
+    , "keepNext"
+    , "keepLines"
+    , "pageBreakBefore"
+    , "framePr"
+    , "widowControl"
+    , "numPr"
+    , "suppressLineNumbers"
+    , "pBdr"
+    , "shd"
+    , "tabs"
+    , "suppressAutoHyphens"
+    , "kinsoku"
+    , "wordWrap"
+    , "overflowPunct"
+    , "topLinePunct"
+    , "autoSpaceDE"
+    , "autoSpaceDN"
+    , "bidi"
+    , "adjustRightInd"
+    , "snapToGrid"
+    , "spacing"
+    , "ind"
+    , "contextualSpacing"
+    , "mirrorIndents"
+    , "suppressOverlap"
+    , "jc"
+    , "textDirection"
+    , "textAlignment"
+    , "textboxTightWrap"
+    , "outlineLvl"
+    , "divId"
+    , "cnfStyle"
+    , "rPr"
+    , "sectPr"
+    , "pPrChange"
+    ] [0..])
+
+sortSquashed :: M.Map Text Int -> [Element] -> [Element]
+sortSquashed tagOrder l =
   sortBy (comparing tagIndex) l
   where
     tagIndex :: Element -> Int
     tagIndex el =
-      fromMaybe 0 (M.lookup tag rPrTagOrder)
+      fromMaybe 0 (M.lookup tag tagOrder)
       where tag = (qName . elName) el
 
-squashProps :: EnvProps -> [Element]
-squashProps (EnvProps Nothing es) = sortSquashed es
-squashProps (EnvProps (Just e) es) = sortSquashed (e : es)
+squashProps :: M.Map Text Int -> EnvProps -> [Element]
+squashProps tagOrder (EnvProps Nothing es) = sortSquashed tagOrder es
+squashProps tagOrder (EnvProps (Just e) es) = sortSquashed tagOrder (e : es)
 
 -- | Certain characters are invalid in XML even if escaped.
 -- See #1992
@@ -236,6 +278,12 @@ writeOpenXML :: PandocMonad m
              -> WS m (Text, [Element], [Element])
 writeOpenXML opts (Pandoc meta blocks) = do
   setupTranslations meta
+  -- Cache the rStyle element for each highlighting token type, so that
+  -- it need not be recomputed for every Code inline.  It depends only
+  -- on the style maps, which don't change during writing.
+  tokTypesMap <- M.fromList <$>
+    mapM (\tt -> (tt,) <$> rStyleM (fromString $ show tt)) [KeywordTok ..]
+  modify $ \st -> st{ stTokTypesMap = tokTypesMap }
   let includeTOC = writerTableOfContents opts || lookupMetaBool "toc" meta
   let includeLOF = writerListOfFigures opts || lookupMetaBool "lof" meta
   let includeLOT = writerListOfTables opts || lookupMetaBool "lot" meta
@@ -362,12 +410,33 @@ getUniqueId = do
 dynamicStyleKey :: Text
 dynamicStyleKey = "custom-style"
 
+-- | Paragraph properties for a CSL-generated bibliography, derived from
+-- the hints @Text.Pandoc.Citeproc@ puts on the bibliography's Div:
+-- a @hanging-indent@ class and @line-spacing@/@entry-spacing@ attributes.
+cslBibParaProps :: [Text] -> [(Text, Text)] -> [Element]
+cslBibParaProps classes kvs =
+  [ mknode "w:ind" [("w:left", "720"), ("w:hanging", "720")] ()
+  | "hanging-indent" `elem` classes ] ++
+  [ mknode "w:spacing" spacingAttrs () | not (null spacingAttrs) ]
+  where
+    spacingAttrs = lineAttr ++ entryAttr
+    lineAttr = case lookup "line-spacing" kvs >>= safeRead of
+                 Just ls | ls > (1 :: Double) ->
+                   [ ("w:line", tshow (round (ls * 240) :: Int))
+                   , ("w:lineRule", "auto") ]
+                 _ -> []
+    entryAttr = case lookup "entry-spacing" kvs >>= safeRead of
+                  Just es | es > (0 :: Double) ->
+                    -- entry-spacing is given in em; 1 em ~ 240 twips
+                    [ ("w:after", tshow (round (es * 240) :: Int)) ]
+                  _ -> []
+
 -- | Convert a Pandoc block element to OpenXML.
 blockToOpenXML :: (PandocMonad m) => WriterOptions -> Block -> WS m [Content]
 blockToOpenXML opts blk = withDirection $ blockToOpenXML' opts blk
 
 blockToOpenXML' :: (PandocMonad m) => WriterOptions -> Block -> WS m [Content]
-blockToOpenXML' opts (Div (ident,_classes,kvs) bs) = do
+blockToOpenXML' opts (Div (ident,classes,kvs) bs) = do
   stylemod <- case lookup dynamicStyleKey kvs of
                    Just (fromString . T.unpack -> sty) -> do
                       modify $ \s ->
@@ -388,9 +457,18 @@ blockToOpenXML' opts (Div (ident,_classes,kvs) bs) = do
   let langmod = case lookup "lang" kvs of
                   Nothing -> id
                   Just lang -> local (\env -> env{envLang = Just lang})
+  -- citeproc adds formatting hints for bibliographies generated
+  -- from a CSL style; see Text.Pandoc.Citeproc (#11871).
+  let isCslBib = ident == "refs" || "csl-bib-body" `elem` classes
+  let cslmod = if not isCslBib
+                  then id
+                  else case cslBibParaProps classes kvs of
+                         []    -> id
+                         props -> foldr (.) id (map withParaProp props)
   header <- dirmod $ stylemod $ blocksToOpenXML opts hs
-  contents <- dirmod $ bibmod $ stylemod $ langmod $ blocksToOpenXML opts bs'
+  contents <- dirmod $ bibmod $ cslmod $ stylemod $ langmod $ blocksToOpenXML opts bs'
   wrapBookmark ident $ header <> contents
+
 blockToOpenXML' opts (Header lev (ident,_,kvs) lst) = do
   setFirstPara
   let isSection = case writerTopLevelDivision opts of
@@ -682,7 +760,7 @@ getTextProps = do
                    Nothing -> mempty
                    Just l  -> EnvProps Nothing
                                [mknode "w:lang" [("w:val", l)] ()]
-  let squashed = squashProps (props <> langnode)
+  let squashed = squashProps rPrTagOrder (props <> langnode)
   return [mknode "w:rPr" [] squashed | (not . null) squashed]
 
 withTextProp :: PandocMonad m => Element -> WS m a -> WS m a
@@ -708,7 +786,7 @@ getParaProps displayMathPara = do
   let listPr = [mknode "w:numPr" []
                 [ mknode "w:ilvl" [("w:val",tshow listLevel)] ()
                 , mknode "w:numId" [("w:val",tshow numid')] () ] | listLevel >= 0 && not displayMathPara]
-  return $ case squashProps (EnvProps Nothing listPr <> props) of
+  return $ case squashProps pPrTagOrder (EnvProps Nothing listPr <> props) of
                 [] -> []
                 ps -> [mknode "w:pPr" [] ps]
 
@@ -758,8 +836,8 @@ inlineToOpenXML opts il = withDirection $ inlineToOpenXML' opts il
 inlineToOpenXML' :: PandocMonad m => WriterOptions -> Inline -> WS m [Content]
 inlineToOpenXML' _ (Str str) =
   map Elem <$> formattedString str
-inlineToOpenXML' opts Space = inlineToOpenXML opts (Str " ")
-inlineToOpenXML' opts SoftBreak = inlineToOpenXML opts (Str " ")
+inlineToOpenXML' opts Space = inlineToOpenXML' opts (Str " ")
+inlineToOpenXML' opts SoftBreak = inlineToOpenXML' opts (Str " ")
 inlineToOpenXML' opts (Span ("",["mark"],[]) ils) =
   withTextProp (mknode "w:highlight" [("w:val","yellow")] ()) $
     inlinesToOpenXML opts ils
@@ -891,15 +969,14 @@ inlineToOpenXML' opts (Math mathType str) = do
        Left il -> inlineToOpenXML' opts il
 inlineToOpenXML' opts (Cite _ lst) = inlinesToOpenXML opts lst
 inlineToOpenXML' opts (Code attrs str) = do
-  let alltoktypes = [KeywordTok ..]
-  tokTypesMap <- mapM (\tt -> (,) tt <$> rStyleM (fromString $ show tt)) alltoktypes
+  tokTypesMap <- gets stTokTypesMap
   let unhighlighted = (map Elem . intercalate [br]) `fmap`
                        mapM formattedString (T.lines str)
       formatOpenXML _fmtOpts = intercalate [br] . map (map toHlTok)
       toHlTok (toktype,tok) =
         mknode "w:r" []
           [ mknode "w:rPr" [] $
-            maybeToList (lookup toktype tokTypesMap)
+            maybeToList (M.lookup toktype tokTypesMap)
             , mknode "w:t" [("xml:space","preserve")] tok ]
   let highlighted =
         case highlight (writerSyntaxMap opts) formatOpenXML attrs str of
@@ -1117,11 +1194,17 @@ withDirection x = do
   -- We want to clean all bidirection (bidi) and right-to-left (rtl)
   -- properties from the props first. This is because we don't want
   -- them to stack up.
-  let paraProps' = filter (\e -> (qName . elName) e /= "bidi") (otherElements paraProps)
+  let hasBidi = any (\e -> (qName . elName) e == "bidi") (otherElements paraProps)
+      hasRtl = any (\e -> (qName . elName) e == "rtl") (otherElements textProps)
+      paraProps' = filter (\e -> (qName . elName) e /= "bidi") (otherElements paraProps)
       textProps' = filter (\e -> (qName . elName) e /= "rtl") (otherElements textProps)
       paraStyle = styleElement paraProps
       textStyle = styleElement textProps
-  if isRTL
+  if not isRTL && not hasBidi && not hasRtl
+    -- fast path: LTR with no bidi/rtl props to remove, so the
+    -- environment is unchanged; skip the 'local' rebuild.
+    then x
+    else if isRTL
     -- if we are going right-to-left, we (re?)add the properties.
     then flip local x $
          \env -> env { envParaProperties = EnvProps paraStyle $ mknode "w:bidi" [] () : paraProps'
@@ -1158,8 +1241,15 @@ toBookmarkName s
 maxListLevel :: Int
 maxListLevel = 8
 
+-- Merge adjacent Strs, and any Space between two Strs, into a single
+-- Str.  Chunks are accumulated and concatenated all at once, to avoid
+-- quadratic copying when a long Str/Space sequence (e.g. an entire
+-- paragraph) collapses into one Str.
 convertSpace :: [Inline] -> [Inline]
-convertSpace (Str x : Space : Str y : xs) = convertSpace (Str (x <> " " <> y) : xs)
-convertSpace (Str x : Str y : xs)         = convertSpace (Str (x <> y) : xs)
-convertSpace (x:xs)                       = x : convertSpace xs
-convertSpace []                           = []
+convertSpace (Str x : xs) = go [x] xs
+  where
+    go acc (Str y : ys)         = go (y : acc) ys
+    go acc (Space : Str y : ys) = go (y : " " : acc) ys
+    go acc ys = Str (T.concat (reverse acc)) : convertSpace ys
+convertSpace (x:xs) = x : convertSpace xs
+convertSpace [] = []
